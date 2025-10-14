@@ -1,175 +1,198 @@
-Perfect 👍 — this clears everything up.
+Excellent — I see exactly what you’re doing 👌
 
-From your new image, the schema is:
+You’re fetching permissions from your repository (permissionsRepository.findAll()), which returns a List of Permission entities, and now you want to convert that list into a List of PermissionDto objects using the Builder pattern you defined earlier.
 
-ROLES(ROLE_ID, ROLE_NAME, DESCRIPTION, ROLE_STATUS)
-
-PERMISSIONS(MENU_ID, MENU_TITLE, MENU_ICON, MENU_ORDER, …)
-
-ROLE_PERMISSION(ROLE_ID, PERMISSION_ID) → joins ROLES ↔ PERMISSIONS
-
-
-That means the correct relationship is:
-
-ROLES ──< ROLE_PERMISSION >── PERMISSIONS
-
-(not directly ROLES.ROLE_ID = PERMISSIONS.ROLE_ID).
-
-So your native query must join via the ROLE_PERMISSION table.
+Let’s go step by step 👇
 
 
 ---
 
-✅ Corrected Query
+✅ 1️⃣ Your existing setup
 
-Here’s the right SQL query to use:
+You already have:
 
-SELECT 
-    r.ROLE_ID,
-    r.ROLE_NAME,
-    r.DESCRIPTION,
-    r.ROLE_STATUS,
-    p.MENU_ID,
-    p.MENU_TITLE,
-    p.MENU_ICON,
-    p.MENU_ORDER
-FROM ROLES r
-LEFT JOIN ROLE_PERMISSION rp ON r.ROLE_ID = rp.ROLE_ID
-LEFT JOIN PERMISSIONS p ON rp.PERMISSION_ID = p.MENU_ID
-ORDER BY r.ROLE_ID, p.MENU_ORDER
+Entity → Permission.java
 
-This will:
+@Entity
+@Table(name = "PERMISSIONS")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class Permission {
+    @Id
+    @Column(name = "MENU_ID")
+    private Integer menuId;
 
-Return all roles,
+    @Column(name = "MENU_TITLE")
+    private String menuTitle;
 
-Include permissions linked through ROLE_PERMISSION,
+    @Column(name = "MENU_ICON")
+    private String menuIcon;
 
-Still show roles with no permissions (because of LEFT JOINs).
+    @Column(name = "MENU_ORDER")
+    private Integer menuOrder;
+    
+    @Column(name = "MENU_URL")
+    private String menuUrl;
 
-
-
----
-
-🧩 Update Your Repository
-
-Replace your old query with this one:
-
-@Repository
-public interface RoleRepository extends CrudRepository<RoleEntity, Integer> {
-
-    @Query(value = """
-        SELECT 
-            r.ROLE_ID,
-            r.ROLE_NAME,
-            r.DESCRIPTION,
-            r.ROLE_STATUS,
-            p.MENU_ID,
-            p.MENU_TITLE,
-            p.MENU_ICON,
-            p.MENU_ORDER
-        FROM ROLES r
-        LEFT JOIN ROLE_PERMISSION rp ON r.ROLE_ID = rp.ROLE_ID
-        LEFT JOIN PERMISSIONS p ON rp.PERMISSION_ID = p.MENU_ID
-        ORDER BY r.ROLE_ID, p.MENU_ORDER
-        """, nativeQuery = true)
-    List<Object[]> findAllRolesWithPermissionsRaw();
+    @Column(name = "MENU_COMPONENT_PATH")
+    private String menuComponentPath;
 }
 
-(Using Java 15+ text blocks makes this cleaner.)
+DTO → PermissionDto.java
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class PermissionDto {
+    private Integer id;        // MENU_ID
+    private String title;      // MENU_TITLE
+    private String icon;       // MENU_ICON
+    private Integer order;     // MENU_ORDER
+    private String url;        // MENU_URL (optional)
+    private String component;  // MENU_COMPONENT_PATH (optional)
+}
 
 
 ---
 
-🧩 Rest of the files remain same as I gave you earlier
+✅ 2️⃣ Mapping Logic Using Builder
 
-✅ Keep the same:
+In your service method (getAllPermissions()), after fetching the list,
+map each entity to a DTO like this:
 
-RoleDto.java
+@Override
+public ResponseEntity getAllPermissions() {
+    ResponseVO<List<PermissionDto>> responseVo = new ResponseVO<>();
+    
+    // Fetch entities
+    List<Permission> permissions = permissionsRepository.findAll();
+    
+    if (permissions.isEmpty()) {
+        responseVo.setMessage(HttpStatus.NOT_FOUND.getReasonPhrase());
+        responseVo.setStatusCode(HttpStatus.NOT_FOUND.value());
+    } else {
+        // Convert to DTO list using Builder
+        List<PermissionDto> dtoList = permissions.stream()
+            .map(p -> PermissionDto.builder()
+                    .id(p.getMenuId())
+                    .title(p.getMenuTitle())
+                    .icon(p.getMenuIcon())
+                    .order(p.getMenuOrder())
+                    .url(p.getMenuUrl())
+                    .component(p.getMenuComponentPath())
+                    .build())
+            .toList();
 
-PermissionDto.java
+        responseVo.setMessage(HttpStatus.FOUND.getReasonPhrase());
+        responseVo.setResult(dtoList);
+        responseVo.setStatusCode(HttpStatus.FOUND.value());
+    }
 
-RoleService.java (manual mapping logic)
-
-RoleController.java
-
-
-That service will correctly group by roleId and map the permission details.
-
-
----
-
-💡 Optional: add a few extra permission columns
-
-If you want to include extra fields like MENU_URL or MENU_COMPONENT_PATH from your PERMISSIONS table, just extend the query:
-
-SELECT 
-    r.ROLE_ID,
-    r.ROLE_NAME,
-    r.DESCRIPTION,
-    r.ROLE_STATUS,
-    p.MENU_ID,
-    p.MENU_TITLE,
-    p.MENU_ICON,
-    p.MENU_ORDER,
-    p.MENU_URL,
-    p.MENU_COMPONENT_PATH
-FROM ROLES r
-LEFT JOIN ROLE_PERMISSION rp ON r.ROLE_ID = rp.ROLE_ID
-LEFT JOIN PERMISSIONS p ON rp.PERMISSION_ID = p.MENU_ID
-ORDER BY r.ROLE_ID, p.MENU_ORDER
-
-Then update PermissionDto to include those fields.
+    return new ResponseEntity<>(responseVo, HttpStatus.valueOf(responseVo.getStatusCode()));
+}
 
 
 ---
 
-🧾 Example Output
+✅ 3️⃣ Explanation
 
-After you plug in this query and run /api/roles-with-permissions,
-you’ll get JSON exactly like your screenshot:
+Step	Description
+
+.stream()	Converts your list of entities to a stream for transformation
+.map(p -> PermissionDto.builder()...)	Builds a new PermissionDto for each Permission
+.toList()	Collects the mapped DTOs back into a List
+responseVo.setResult(dtoList)	Puts the DTO list into your response body
+
+
+
+---
+
+✅ 4️⃣ Sample JSON Output
+
+When you hit this endpoint, you’ll get something like:
 
 {
-  "statusCode": "OK",
-  "message": "OK",
-  "result": {
-    "roles": [
-      {
-        "roleId": 51,
-        "roleName": "UCO",
-        "description": "users will be responsible for managing user access",
-        "roleStatus": "ACTIVE",
-        "permissions": [
-          { "id": 1, "title": "test1", "icon": "Dashboard", "order": 1 },
-          { "id": 2, "title": "test2", "icon": "SettingsApplication", "order": 2 },
-          { "id": 3, "title": "test3", "icon": "Person", "order": 3 }
-        ]
-      },
-      {
-        "roleId": 52,
-        "roleName": "XYZ",
-        "description": "some desc",
-        "roleStatus": "INACTIVE",
-        "permissions": []
-      }
-    ]
-  }
+  "statusCode": 302,
+  "message": "Found",
+  "result": [
+    {
+      "id": 1,
+      "title": "Dashboard",
+      "icon": "HomeIcon",
+      "order": 1,
+      "url": "/dashboard",
+      "component": "DashboardComponent"
+    },
+    {
+      "id": 2,
+      "title": "Settings",
+      "icon": "SettingsIcon",
+      "order": 2,
+      "url": "/settings",
+      "component": "SettingsComponent"
+    }
+  ]
 }
 
 
 ---
 
-✅ Summary of changes to fix your current error and schema alignment:
+✅ 5️⃣ If You Want to Move Mapping Out of Service (Cleaner Code)
 
-File	What to Change	Why
+Create a separate mapper class:
 
-RoleRepository.java	Use the 3-table join (ROLES → ROLE_PERMISSION → PERMISSIONS)	Fixes wrong join, resolves ConverterNotFoundException
-RoleService.java	Keep mapping logic same	It now maps valid rows correctly
-RoleDto & PermissionDto	No change (optional: add fields if needed)	Works with new join output
-Controller	Same	Produces JSON as expected
+PermissionMapper.java
+
+package com.tcs.usersservice.mapper;
+
+import com.tcs.usersservice.dto.PermissionDto;
+import com.tcs.usersservice.model.Permission;
+import java.util.List;
+import java.util.stream.Collectors;
+
+public class PermissionMapper {
+    public static PermissionDto toDto(Permission p) {
+        return PermissionDto.builder()
+                .id(p.getMenuId())
+                .title(p.getMenuTitle())
+                .icon(p.getMenuIcon())
+                .order(p.getMenuOrder())
+                .url(p.getMenuUrl())
+                .component(p.getMenuComponentPath())
+                .build();
+    }
+
+    public static List<PermissionDto> toDtoList(List<Permission> permissions) {
+        return permissions.stream()
+                .map(PermissionMapper::toDto)
+                .collect(Collectors.toList());
+    }
+}
+
+Then in your service:
+
+List<PermissionDto> dtoList = PermissionMapper.toDtoList(permissions);
+responseVo.setResult(dtoList);
+
+✅ Clean and reusable for any other service.
+
+
+---
+
+⚙️ Quick Recap
+
+✅ Use .map() + .builder() to transform List<Permission> → List<PermissionDto>.
+
+✅ If code repeats, move mapping to a separate PermissionMapper.
+
+✅ Your function will now return DTOs instead of entities, keeping your response clean and frontend-ready.
 
 
 
 ---
 
-Would you like me to include optional fields like MENU_URL and MENU_COMPONENT_PATH in the PermissionDto and query too? I can extend your full DTO + mapper code accordingly.
+Would you like me to show how to do the same mapping for RoleWithPermissions → RoleDto, including mapping inner permissions list with the builder pattern (for consistent DTO structure)?
 
