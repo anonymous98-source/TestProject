@@ -4,17 +4,18 @@ import { DataGrid } from "@mui/x-data-grid";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import CheckIcon from "@mui/icons-material/Check";
 import CloseIcon from "@mui/icons-material/Close";
-import { formatTimestampToDate } from "../../../utils/dateUtils"; // keep/adjust path
+import { formatTimestampToDate } from "../../../utils/dateUtils";
 
 function AvatarCell({ name }) {
-  const safe = (name ?? "").toString().trim() || "U";
-  const initials = safe
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((p) => p[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
+  const initials =
+    (name ?? "")
+      .trim()
+      .split(/\s+/)
+      .map((p) => p[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase() || "U";
+
   return (
     <Box
       sx={{
@@ -35,55 +36,70 @@ function AvatarCell({ name }) {
   );
 }
 
+/**
+ * Converts backend response to grid-friendly rows.
+ * Each `pendingRequest` has a JSON payload we parse for user details.
+ */
+function normalizePendingRequests(pendingRequests = []) {
+  return pendingRequests.map((req) => {
+    let payload = {};
+    try {
+      payload = JSON.parse(req.requestPayload || "{}");
+    } catch {
+      // ignore parse error
+    }
+
+    return {
+      id: req.requestId,
+      REQUEST_ID: req.requestId,
+      REQUEST_TYPE: req.requestType,
+      REQUEST_STATUS: req.requestStatus,
+      REQUESTED_AT: req.requestDate,
+      REQUESTOR_USER_ID: req.requestorUserId,
+      TARGET_USER_ID: req.targetUserId,
+      __name: `${payload.firstName ?? ""} ${payload.lastName ?? ""}`.trim(),
+      USERID: payload.userId ?? req.targetUserId,
+      EMAIL: payload.email ?? "-",
+      PHONE_NUMBER: payload.phoneNumber ?? "-",
+      ROLE_NAME: payload.roleName ?? "-",
+      ROLE_ID: payload.roleId ?? "-",
+      BRANCH: payload.branch ?? "-", // optional field in your system
+      _raw: req,
+    };
+  });
+}
+
 export default function ApprovalTable({
-  rows = [],
+  responseData = [], // expects array from backend like result.pendingRequests
   loading = false,
   onSelectionChange,
   onViewDetails,
   onApprove,
   onReject,
 }) {
+  const rows = normalizePendingRequests(responseData);
+
   const columns = [
     {
       field: "REQUEST_ID",
       headerName: "Request ID",
-      flex: 0.9,
+      flex: 0.8,
       sortable: true,
-      valueGetter: (p) => p.row?.REQUEST_ID ?? "",
     },
     {
       field: "__name",
-      headerName: "Name",
-      flex: 1.2,
+      headerName: "User",
+      flex: 1.4,
       sortable: true,
-      valueGetter: (p) => p.row?.__name ?? "",
       renderCell: (params) => (
-        <Stack
-          direction="row"
-          alignItems="center"
-          spacing={1}
-          sx={{ height: "100%" }}
-        >
-          <AvatarCell name={params.row?.__name} />
-          <Stack
-            direction="column"
-            justifyContent="center"
-            spacing={0}
-            sx={{ lineHeight: 1 }}
-          >
-            <Typography
-              fontWeight={600}
-              variant="body2"
-              sx={{ lineHeight: 1.2 }}
-            >
-              {params.row?.__name ?? ""}
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <AvatarCell name={params.row.__name} />
+          <Stack spacing={0} sx={{ lineHeight: 1 }}>
+            <Typography fontWeight={600} variant="body2">
+              {params.row.__name}
             </Typography>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ lineHeight: 1.2 }}
-            >
-              {params.row?.USERID ?? ""}
+            <Typography variant="caption" color="text.secondary">
+              {params.row.USERID}
             </Typography>
           </Stack>
         </Stack>
@@ -94,21 +110,19 @@ export default function ApprovalTable({
       headerName: "Type",
       flex: 0.7,
       sortable: true,
-      valueGetter: (p) => p.row?.requestorUserId ?? "",
     },
     {
       field: "EMAIL",
       headerName: "Email",
-      flex: 1.2,
+      flex: 1.4,
       sortable: true,
-      valueGetter: (p) => p.row?.EMAIL ?? "",
     },
     {
       field: "ROLE_NAME",
       headerName: "Role",
-      flex: 0.8,
+      flex: 0.9,
       sortable: true,
-      valueGetter: (p) => p.row?.ROLE_NAME ?? "",
+      valueGetter: (p) => `${p.row.ROLE_NAME ?? ""}`,
     },
     {
       field: "BRANCH",
@@ -117,40 +131,30 @@ export default function ApprovalTable({
       sortable: true,
       align: "right",
       headerAlign: "right",
-      valueGetter: (p) => p.row?.BRANCH ?? "",
     },
     {
       field: "REQUESTED_AT",
       headerName: "Requested At",
       flex: 1,
       sortable: true,
-      valueGetter: (p) => p.row?.requestDate ?? "",
       valueFormatter: (p) => formatTimestampToDate(p.value),
     },
     {
       field: "action",
       headerName: "Action",
       sortable: false,
-      flex: 0.9,
+      flex: 1,
       align: "center",
       headerAlign: "center",
       renderCell: (params) => (
-        <Stack
-          direction="row"
-          spacing={0.5}
-          alignItems="center"
-          justifyContent="center"
-          sx={{ height: "100%" }}
-        >
-          <Tooltip title="View details">
-            <span>
-              <IconButton
-                size="small"
-                onClick={() => onViewDetails?.(params.row)}
-              >
-                <VisibilityIcon fontSize="inherit" />
-              </IconButton>
-            </span>
+        <Stack direction="row" spacing={0.5} alignItems="center">
+          <Tooltip title="View Details">
+            <IconButton
+              size="small"
+              onClick={() => onViewDetails?.(params.row)}
+            >
+              <VisibilityIcon fontSize="inherit" />
+            </IconButton>
           </Tooltip>
           <Tooltip title="Approve">
             <IconButton
@@ -179,14 +183,7 @@ export default function ApprovalTable({
     <DataGrid
       rows={rows}
       columns={columns}
-      // Guarantees a stable id even if your normalizer misses `id`
-      getRowId={(row) =>
-        row.id ??
-        row.REQUEST_ID ??
-        `${row.USERID ?? "unknown"}-${row.REQUEST_TYPE ?? "TYPE"}-${
-          row.REQUESTED_AT ?? "NA"
-        }`
-      }
+      getRowId={(row) => row.id}
       checkboxSelection
       disableRowSelectionOnClick
       onRowSelectionModelChange={(model) => onSelectionChange?.(model)}
@@ -199,31 +196,4 @@ export default function ApprovalTable({
       }}
     />
   );
-}
-
-
-{
-    "statusCode": "OK",
-    "message": "OK",
-    "result": {
-        "pendingRequests": [
-            {
-                "requestId": 21,
-                "requestType": "MODIFY",
-                "requestorUserId": "1017860",
-                "targetUserId": "1015698",
-                "requestPayload": "{\"userId\":\"1015698\",\"firstName\":\"Rehaman\",\"lastName\":\"Shaik\",\"email\":\"rrr@rajmoli.com\",\"phoneNumber\":\"0000000000\",\"roleName\":\"UCO\",\"roleId\":51}",
-                "requestStatus": "PENDING",
-                "requestDate": "2025-10-15T07:38:15.633+00:00",
-                "approvalDate": null,
-                "approverUserId": null,
-                "reasonForRejection": null,
-                "executionDate": null,
-                "executionDetails": null
-            }
-        ],
-        "message": "1 pending requests found for user",
-        "status": true
-    },
-    "timestamp": null
 }
