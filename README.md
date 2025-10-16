@@ -1,93 +1,105 @@
-Here’s a clean, optimized, and properly refactored version of your getAllRolesWithPermissions method — which returns only basic roles if permissions == false, or returns roles with their permissions if permissions == true.
-
-✅ Changes made:
-
-Eliminated redundant code execution when permissions is false.
-
-Clear separation of logic for performance.
-
-Preserved immutability and clean coding principles.
-
-Used consistent naming and builder usage.
-
-
-
----
-
-✅ Refactored Code
-
-public List<RoleDto> getAllRolesWithPermissions(boolean permissions) {
-
-    // Case 1: If permissions flag is false, just return basic role details
-    if (!permissions) {
-        return roleRepository.findAll()
-                .stream()
-                .map(role -> RoleDto.builder()
-                        .roleId(role.getRoleId())
-                        .roleName(role.getRoleName())
-                        .roleStatus(role.getStatus())
-                        .description(role.getDescription())
-                        .build())
-                .toList();
-    }
-
-    // Case 2: If permissions flag is true, return roles with permission details
-    List<Object[]> rows = rolePermissionRepository.findAllRolesWithPermissionsRaw();
-    Map<Integer, RoleDto> roleMap = new LinkedHashMap<>();
-
-    for (Object[] row : rows) {
-        Integer roleId = safeNumberToInteger(row[0]);
-        String roleName = safeToString(row[1]);
-        String description = safeToString(row[2]);
-        String roleStatus = safeToString(row[3]);
-
-        RoleDto role = roleMap.computeIfAbsent(roleId, id ->
-                RoleDto.builder()
-                        .roleId(id)
-                        .roleName(roleName)
-                        .description(description)
-                        .roleStatus(roleStatus)
-                        .permissions(new ArrayList<>())
-                        .build()
-        );
-
-        // Add permission only if present
-        if (row[4] != null) {
-            Integer menuId = safeNumberToInteger(row[4]);
-            String menuTitle = safeToString(row[5]);
-            String menuIcon = safeToString(row[6]);
-            Integer menuOrder = safeNumberToInteger(row[7]);
-
-            PermissionDto permission = PermissionDto.builder()
-                    .id(menuId)
-                    .title(menuTitle)
-                    .icon(menuIcon)
-                    .order(menuOrder)
-                    .build();
-
-            role.getPermissions().add(permission);
-        }
-    }
-
-    return new ArrayList<>(roleMap.values());
+{
+    "statusCode": "OK",
+    "message": "OK",
+    "result": {
+        "message": "1 users found ",
+        "users": [
+            {
+                "LAST_NAME": "Shaik",
+                "BRANCH": 12345,
+                "ROLE_ID": 51,
+                "ROLE_NAME": "UCO",
+                "ACCOUNT_STATUS": "ACTIVE",
+                "PHONE_NUMBER": "0000000000",
+                "USERID": "1015698",
+                "FIRST_NAME": "Rehaman",
+                "EMAIL": "ttr@sbi.co.in"
+            }
+        ],
+        "status": true
+    },
+    "timestamp": null
 }
 
 
----
+// components/RequestDetailsDialog.jsx
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  Stack,
+  Typography,
+  Divider,
+} from "@mui/material";
+import { useEffect } from "react";
+import useApi from "../../../hooks/useApi";
 
-🧠 Explanation:
+function Row({ label, value }) {
+  return (
+    <Stack direction="row" spacing={1}>
+      <Typography sx={{ minWidth: 140 }} color="text.secondary">
+        {label}
+      </Typography>
+      <Typography sx={{ wordBreak: "break-word" }}>{value ?? "-"}</Typography>
+    </Stack>
+  );
+}
 
-If permissions == false → returns list from roleRepository.findAll() without hitting rolePermissionRepository (faster).
+export default function RequestDetailsDialog({ open, row, onClose }) {
+  const { callApi, loading, error: apiError } = useApi();
+  useEffect(() => {
+    console.log(row); //BRANCH,USERID,ROLE_ID
+    getUserPreviousDetails(row?.USERID, row?.BRANCH, row?.ROLE_ID);
+  }, [row]);
 
-If permissions == true → joins permissions data and builds nested structure.
+  const getUserPreviousDetails = async (userId, reqBranch, reqRole) => {
+    let payload = {
+      id: userId,
+      branch: reqBranch,
+      roleId: reqRole,
+    };
 
-Used LinkedHashMap to maintain order of roles as in the result set.
+    const data = await callApi("/UM/user/user-details", payload, "GET");
+    
+  };
 
-Preserved builder pattern for clarity and immutability.
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Request Details</DialogTitle>
+      <DialogContent>
+        <Stack spacing={1.25} sx={{ mt: 0.5 }}>
+          <Row label="Request ID" value={row?.REQUEST_ID} />
+          <Row label="Type" value={row?.REQUEST_TYPE} />
+          <Row label="Status" value={row?.STATUS} />
+          <Divider sx={{ my: 1 }} />
+          <Row
+            label="User"
+            value={`${row?.__name ?? ""} (${row?.USERID ?? ""})`}
+          />
+          <Row label="Email" value={row?.EMAIL} />
+          <Row label="Phone" value={row?.PHONE_NUMBER} />
+          <Row
+            label="Role"
+            value={`${row?.ROLE_NAME ?? ""} (${row?.ROLE_ID ?? ""})`}
+          />
+          <Row label="Branch" value={row?.BRANCH} />
+          <Divider sx={{ my: 1 }} />
+          <Row label="Requested At" value={row?.REQUESTED_AT} />
+          <Row
+            label="Raw"
+            value={row?._raw ? JSON.stringify(row._raw, null, 2) : "-"}
+          />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} variant="contained">
+          Close
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
 
-
-
----
-
-Would you like me to also make it return a sorted list of permissions (e.g., by menuOrder) within each role for better UI consistency?
-
+https://localhost:1000/UM/user/user-details?id=1015698&branch=&roleId=51
