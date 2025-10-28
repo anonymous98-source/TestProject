@@ -1,68 +1,66 @@
-// BackgroundContext.jsx
-import { useState, useEffect, useMemo, createContext } from "react";
+@SuppressWarnings("unchecked")
+	public ResponseEntity createNewRoleRequest(Map<String, Object> request) {
+		ResponseVO responseVo = new ResponseVO();
+		Map<String, Object> result = new HashMap<>();
+		try {
 
-export const BackgroundContext = createContext({
-  currentBackground: "",
-  changeBackground: () => {},
-});
+			String[] requestParameters = { "requestType", "requestPayload", "targetRoleId", "requestorUserId" };
 
-export const BackgroundProvider = ({ children }) => {
-  const gradients = useMemo(
-    () => [
-      "linear-gradient(135deg, #0d253f 0%, #0170a8 100%)",
-      "linear-gradient(135deg, #000 0%, #252525ff 100%)",
-      "linear-gradient(135deg, #2c3e50 0%, #4ca1af 100%)",
-      "linear-gradient(135deg, #16222a 0%, #3a6073 100%)",
-      "linear-gradient(135deg, #0f33d3ff 0%, #764ba2 100%)",
-      "linear-gradient(to top, #30cfd0 0%, #330867 100%)",
-      "linear-gradient(to left, #44048aff 0%, #001f55ff 100%)",
-      "linear-gradient(135deg, #c33764 0%, #3f4bb4ff 100%)",
-      "linear-gradient(135deg, #4b134f 0%, #c94b4b 100%)",
-      "linear-gradient(to right, #ca7687ff 0%, #fb8c6aff 100%)",
-      "linear-gradient(150deg, #13547a 0%, #80d0c7 100%)",
-      // If you want the 4-stop demo:
-      // "linear-gradient(135deg, #f3ec78, #af4261, #00c6ff, #0072ff)",
-    ],
-    []
-  );
+			if (RequestUtility.verifyRequest(request, requestParameters)) {
+				result.put(STATUS, false);
+				result.put(MESSAGE, "Invalid Request");
 
-  const [currentGradientIndex, setCurrentGradientIndex] = useState(0);
-  const currentBackground = gradients[currentGradientIndex];
+				return new ResponseEntity(responseVo, responseVo.getStatusCode());
+			}
 
-  const changeBackground = () => {
-    setCurrentGradientIndex((p) => (p + 1) % gradients.length);
-  };
+			RoleRequest roleRequest = objectMapper.convertValue(request, RoleRequest.class);
+			roleRequest.setRequestStatus(Constant.PENDING);
+			roleRequest.setRequestDate(new Timestamp(System.currentTimeMillis()));
+			int roleId = roleRequest.getTargetRoleId();
+			String roleName = (String) request.get("roleName");
+			log.info("Role id {}", roleId);
+			String requestorUserId = roleRequest.getRequestorUserId();
+			String requestPayload = roleRequest.getRequestPayload();
+			String requestFlag = request.get("requestType").toString();
 
-  // Inject minimal CSS once: body background + animation keyframes only
-  useEffect(() => {
-    const STYLE_ID = "bg-context-minimal";
-    if (!document.getElementById(STYLE_ID)) {
-      const styleEl = document.createElement("style");
-      styleEl.id = STYLE_ID;
-      styleEl.innerHTML = `
-        body {
-          background: var(--bg, linear-gradient(135deg, #f3ec78, #af4261, #00c6ff, #0072ff));
-          background-size: 400% 400%;
-          animation: gradient-animation 15s ease infinite;
-        }
-        @keyframes gradient-animation {
-          0% { background-position: 0% 50%; }
-          50% { background-position: 100% 50%; }
-          100% { background-position: 0% 50%; }
-        }
-      `;
-      document.head.appendChild(styleEl);
-    }
-  }, []);
+			if ((roleRepository.findRoleByRoleId(roleId) != null) && requestFlag.equalsIgnoreCase(Constant.CREATE)) {
+				log.info("Create, already exists");
+				result.put(STATUS, false);
+				result.put(MESSAGE, "There is already a role with that id.");
+			} else if ((roleRepository.findRoleByRoleId(roleId) != null) && requestFlag.equals(Constant.CREATE)) {
+				log.info("Create, already exists");
+				result.put(STATUS, false);
+				result.put(MESSAGE, "The role already exists.");
+			} else if (roleRequestRepository.countPendingRoleRequests(roleId) > 0
+					&& !requestFlag.equals(Constant.CREATE)) {
 
-  // Keep the current gradient in sync
-  useEffect(() => {
-    document.body.style.setProperty("--bg", currentBackground);
-  }, [currentBackground]);
+				result.put(STATUS, false);
+				result.put(MESSAGE, "There is already a pending request for this role");
 
-  return (
-    <BackgroundContext.Provider value={{ currentBackground, changeBackground }}>
-      {children}
-    </BackgroundContext.Provider>
-  );
-};
+			} else if (roleRequestRepository.countPendingRoleRequestsByRoleName(roleName.toLowerCase()) > 0
+					&& requestFlag.equals(Constant.CREATE)) {
+				result.put(STATUS, false);
+				result.put(MESSAGE, "There is already a role cration request pending for this role");
+			} else {
+				if (requestFlag.equals(Constant.CREATE)) {
+					roleRequest.setTargetRoleId(roleRequestRepository.getNewRoleIdOnCreation());
+				}
+				roleRequestRepository.save(roleRequest);
+				result.put("roleRequest", roleRequest);
+				result.put(STATUS, true);
+				result.put(MESSAGE, "New request created");
+				responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.CREATED.value()));
+				responseVo.setMessage(HttpStatus.CREATED.getReasonPhrase());
+
+			}
+			responseVo.setResult(result);
+
+		} catch (IllegalArgumentException e) {
+
+			responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
+			responseVo.setMessage(HttpStatus.BAD_REQUEST.getReasonPhrase());
+
+		}
+
+		return new ResponseEntity(responseVo, responseVo.getStatusCode());
+	}
