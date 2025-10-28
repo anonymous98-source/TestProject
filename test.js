@@ -1,66 +1,94 @@
-@SuppressWarnings("unchecked")
-	public ResponseEntity createNewRoleRequest(Map<String, Object> request) {
-		ResponseVO responseVo = new ResponseVO();
-		Map<String, Object> result = new HashMap<>();
-		try {
+// Tip: mark the class @Service and the method @Transactional if appropriate.
+public ResponseEntity<ResponseVO> createNewRoleRequest(final Map<String, Object> request) {
+    final ResponseVO responseVo = new ResponseVO();
+    final Map<String, Object> result = new HashMap<>();
 
-			String[] requestParameters = { "requestType", "requestPayload", "targetRoleId", "requestorUserId" };
+    // 1) Basic request validation (return early)
+    final String[] required = { "requestType", "requestPayload", "targetRoleId", "requestorUserId" };
+    if (RequestUtility.verifyRequest(request, required)) { // assuming 'true' means invalid, as in your code
+        result.put(STATUS, false);
+        result.put(MESSAGE, "Invalid request.");
+        responseVo.setResult(result);
+        responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
+        responseVo.setMessage(HttpStatus.BAD_REQUEST.getReasonPhrase());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(responseVo);
+    }
 
-			if (RequestUtility.verifyRequest(request, requestParameters)) {
-				result.put(STATUS, false);
-				result.put(MESSAGE, "Invalid Request");
+    // 2) Parse payload safely
+    final RoleRequest roleRequest;
+    try {
+        roleRequest = objectMapper.convertValue(request, RoleRequest.class);
+    } catch (IllegalArgumentException ex) {
+        responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
+        responseVo.setMessage("Malformed request payload.");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(responseVo);
+    }
 
-				return new ResponseEntity(responseVo, responseVo.getStatusCode());
-			}
+    // 3) Canonicalize inputs
+    roleRequest.setRequestStatus(Constant.PENDING);
+    roleRequest.setRequestDate(new Timestamp(System.currentTimeMillis()));
 
-			RoleRequest roleRequest = objectMapper.convertValue(request, RoleRequest.class);
-			roleRequest.setRequestStatus(Constant.PENDING);
-			roleRequest.setRequestDate(new Timestamp(System.currentTimeMillis()));
-			int roleId = roleRequest.getTargetRoleId();
-			String roleName = (String) request.get("roleName");
-			log.info("Role id {}", roleId);
-			String requestorUserId = roleRequest.getRequestorUserId();
-			String requestPayload = roleRequest.getRequestPayload();
-			String requestFlag = request.get("requestType").toString();
+    final String requestFlag = String.valueOf(request.get("requestType"));
+    final boolean isCreate = Constant.CREATE.equalsIgnoreCase(requestFlag);
 
-			if ((roleRepository.findRoleByRoleId(roleId) != null) && requestFlag.equalsIgnoreCase(Constant.CREATE)) {
-				log.info("Create, already exists");
-				result.put(STATUS, false);
-				result.put(MESSAGE, "There is already a role with that id.");
-			} else if ((roleRepository.findRoleByRoleId(roleId) != null) && requestFlag.equals(Constant.CREATE)) {
-				log.info("Create, already exists");
-				result.put(STATUS, false);
-				result.put(MESSAGE, "The role already exists.");
-			} else if (roleRequestRepository.countPendingRoleRequests(roleId) > 0
-					&& !requestFlag.equals(Constant.CREATE)) {
+    final int targetRoleId = roleRequest.getTargetRoleId();
+    final String roleName = String.valueOf(request.get("roleName")); // might be null; your existing code allowed it
+    final String requestorUserId = roleRequest.getRequestorUserId();
+    final String requestPayload = roleRequest.getRequestPayload();
 
-				result.put(STATUS, false);
-				result.put(MESSAGE, "There is already a pending request for this role");
+    log.info("Role request: flag={}, targetRoleId={}, roleName={}, requestorUserId={}",
+            requestFlag, targetRoleId, roleName, requestorUserId);
 
-			} else if (roleRequestRepository.countPendingRoleRequestsByRoleName(roleName.toLowerCase()) > 0
-					&& requestFlag.equals(Constant.CREATE)) {
-				result.put(STATUS, false);
-				result.put(MESSAGE, "There is already a role cration request pending for this role");
-			} else {
-				if (requestFlag.equals(Constant.CREATE)) {
-					roleRequest.setTargetRoleId(roleRequestRepository.getNewRoleIdOnCreation());
-				}
-				roleRequestRepository.save(roleRequest);
-				result.put("roleRequest", roleRequest);
-				result.put(STATUS, true);
-				result.put(MESSAGE, "New request created");
-				responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.CREATED.value()));
-				responseVo.setMessage(HttpStatus.CREATED.getReasonPhrase());
+    // 4) Fetch things once (avoid duplicate repository hits)
+    final var existingRole = roleRepository.findRoleByRoleId(targetRoleId);
+    final long pendingById = isCreate ? 0L : roleRequestRepository.countPendingRoleRequests(targetRoleId);
+    final long pendingByName = isCreate && roleName != null
+            ? roleRequestRepository.countPendingRoleRequestsByRoleName(roleName.toLowerCase())
+            : 0L;
 
-			}
-			responseVo.setResult(result);
+    // 5) Business rules (return early on failure)
+    if (isCreate && existingRole != null) {
+        log.info("Create denied: role with id {} already exists", targetRoleId);
+        result.put(STATUS, false);
+        result.put(MESSAGE, "A role with this ID already exists.");
+        responseVo.setResult(result);
+        responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.CONFLICT.value()));
+        responseVo.setMessage(HttpStatus.CONFLICT.getReasonPhrase());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(responseVo);
+    }
 
-		} catch (IllegalArgumentException e) {
+    if (!isCreate && pendingById > 0) {
+        result.put(STATUS, false);
+        result.put(MESSAGE, "There is already a pending request for this role.");
+        responseVo.setResult(result);
+        responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.CONFLICT.value()));
+        responseVo.setMessage(HttpStatus.CONFLICT.getReasonPhrase());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(responseVo);
+    }
 
-			responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
-			responseVo.setMessage(HttpStatus.BAD_REQUEST.getReasonPhrase());
+    if (isCreate && pendingByName > 0) {
+        result.put(STATUS, false);
+        result.put(MESSAGE, "There is already a role creation request pending for this role.");
+        responseVo.setResult(result);
+        responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.CONFLICT.value()));
+        responseVo.setMessage(HttpStatus.CONFLICT.getReasonPhrase());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(responseVo);
+    }
 
-		}
+    // 6) Finalize and persist
+    if (isCreate) {
+        // if your DB uses sequences/identity, consider letting JPA assign; keeping your behavior here
+        roleRequest.setTargetRoleId(roleRequestRepository.getNewRoleIdOnCreation());
+    }
 
-		return new ResponseEntity(responseVo, responseVo.getStatusCode());
-	}
+    roleRequestRepository.save(roleRequest);
+
+    result.put("roleRequest", roleRequest);
+    result.put(STATUS, true);
+    result.put(MESSAGE, "New request created.");
+    responseVo.setResult(result);
+    responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.CREATED.value()));
+    responseVo.setMessage(HttpStatus.CREATED.getReasonPhrase());
+
+    return ResponseEntity.status(HttpStatus.CREATED).body(responseVo);
+}
