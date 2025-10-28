@@ -1,1 +1,5 @@
-{"roleName":"This Role","description":"This is new role creation","selectedPermissions":[{"id":9,"title":"Branch Master","icon":"AccountBalance","order":9},{"id":10,"title":"Branch Requests","icon":"AssuredWorkload","order":10},{"id":17,"title":"State Requests","icon":"DomainVerification","order":17},{"id":15,"title":"Calendar Config Requests","icon":"EventAvailable","order":15},{"id":18,"title":"Currency Master","icon":"LocalAtm","order":18},{"id":19,"title":"Currency Requests","icon":"CreditScore","order":19},{"id":20,"title":"Currency Rate Change","icon":"PriceChange","order":20}]}
+{
+    "requestType": "CREATE",
+    "requestorUserId": "1015698",
+    "requestPayload": "{\"roleName\":\"This Role\",\"description\":\"This is demo role\",\"selectedPermissions\":[{\"id\":16,\"title\":\"State Master\",\"icon\":\"Domain\",\"order\":16},{\"id\":10,\"title\":\"Branch Requests\",\"icon\":\"AssuredWorkload\",\"order\":10},{\"id\":23,\"title\":\"Role Management Requests\",\"icon\":\"Badge\",\"order\":23},{\"id\":25,\"title\":\"Process Status\",\"icon\":\"Memory\",\"order\":25},{\"id\":12,\"title\":\"User Management\",\"icon\":\"User\",\"order\":12}]}"
+}
