@@ -1,0 +1,147 @@
+Got it—your repo call currently returns List<Permissions>, but your query selects rp.permission_order, which isn’t a column on PERMISSIONS. So change the call to use a projection and pass that to your menu builder.
+
+Here’s exactly what to change.
+
+
+---
+
+1) Create a projection for the query result
+
+// package com.fincore.gateway.repository (or dto)
+public interface PermissionRow {
+    int getMenuId();
+    String getMenuTitle();
+    String getMenuIcon();
+    String getSubMenu();
+    String getMenuAction();
+    String getMenuUrl();
+    String getComponentPath();
+    String getMenuDescription();
+    String getDependant();
+    int getPermissionOrder();   // <-- from rp.permission_order
+}
+
+2) Update repository method signature + aliases
+
+public interface RolePermissionsRepository extends JpaRepository<RolePermissions, Integer> {
+
+    @Query(value = """
+        SELECT DISTINCT
+            p.menu_id               AS menuId,
+            p.menu_title            AS menuTitle,
+            p.menu_icon             AS menuIcon,
+            p.menu_submenu          AS subMenu,
+            p.menu_action           AS menuAction,
+            p.menu_url              AS menuUrl,
+            p.menu_component_path   AS componentPath,
+            p.menu_description      AS menuDescription,
+            p.menu_dependant        AS dependant,
+            rp.permission_order     AS permissionOrder
+        FROM permissions p
+        JOIN role_permissions rp ON p.menu_id = rp.permission_id
+        JOIN user_roles ur       ON ur.role_id = rp.role_id
+        WHERE ur.user_id = :userid
+        ORDER BY rp.permission_order
+        """, nativeQuery = true)
+    List<PermissionRow> findAllByUserId(@Param("userid") String userId);
+}
+
+3) Change your service call (the code in your screenshot)
+
+Replace the line that loads permissions and the subsequent call:
+
+@Transactional(readOnly = true)
+@Override
+public MenuResponse fetchRoleWiseData(String userId) {
+    log.info("userId: {}", userId);
+    try {
+        // step 1 — fetch all the permissions with order from role_permissions
+        List<PermissionRow> rows = rolePermissionsRepository.findAllByUserId(userId);
+
+        if (rows == null || rows.isEmpty()) {
+            log.info("No permissions found for userId: {}", userId);
+            return new MenuResponse(Collections.emptyList());
+        }
+
+        // step 2 — build the menu structure
+        return menuService.transformFromProjection(rows);
+
+    } catch (Exception e) {
+        log.error("An error occurred while fetching permissions for userId: {}", userId, e);
+        return new MenuResponse(Collections.emptyList());
+    }
+}
+
+4) Add an overload in MenuService to handle the projection
+
+(Keep your existing transform(List<Permissions>) for other usages.)
+
+@Service
+public class MenuService {
+
+    // existing transform(List<Permissions>) stays as-is
+
+    public MenuResponse transformFromProjection(List<PermissionRow> rows) {
+        MenuResponse response = new MenuResponse();
+
+        // group by root menu title
+        Map<String, List<PermissionRow>> grouped = rows.stream()
+                .collect(Collectors.groupingBy(PermissionRow::getMenuTitle));
+
+        List<RootMenu> rootMenus = new ArrayList<>();
+
+        for (Map.Entry<String, List<PermissionRow>> entry : grouped.entrySet()) {
+            List<PermissionRow> group = entry.getValue();
+            PermissionRow root = group.get(0);
+
+            RootMenu rootMenu = new RootMenu();
+            rootMenu.setId(root.getMenuId());
+            rootMenu.setTitle(root.getMenuTitle());
+            rootMenu.setIcon(root.getMenuIcon());
+            rootMenu.setRoute(root.getMenuUrl());
+            rootMenu.setComponentPath(root.getComponentPath());
+            rootMenu.setScreenDescription(root.getMenuDescription());
+            // if you also want root items ordered, you can set this from first row
+            rootMenu.setOrderId(root.getPermissionOrder());
+
+            // children (sorted by permissionOrder asc)
+            List<ChildMenu> children = group.stream()
+                    .filter(r -> r.getSubMenu() != null)
+                    .map(r -> {
+                        ChildMenu c = new ChildMenu();
+                        c.setId(r.getMenuId());
+                        c.setTitle(r.getSubMenu());
+                        c.setIcon(r.getMenuIcon());
+                        c.setRoute(r.getMenuUrl());
+                        c.setComponentPath(r.getComponentPath());
+                        c.setScreenDescription(r.getMenuDescription());
+                        c.setOrderId(r.getPermissionOrder()); // comes from rp
+                        return c;
+                    })
+                    .sorted(Comparator.comparingInt(ChildMenu::getOrderId))
+                    .collect(Collectors.toList());
+
+            rootMenu.setHasChildren(!children.isEmpty());
+            rootMenu.setChildren(children);
+            rootMenus.add(rootMenu);
+        }
+
+        // optional: order root menus as well
+        rootMenus.sort(Comparator.comparingInt(RootMenu::getOrderId));
+
+        response.setRoot_menus(rootMenus);
+        return response;
+    }
+}
+
+
+---
+
+Why this change?
+
+Your SQL selects rp.permission_order, which isn’t part of the PERMISSIONS entity. Projections let you read that extra column without polluting the entity or creating a DB view.
+
+The service stays simple: fetch → transform → return.
+
+
+If you’d rather not add a new transform method, I can show a generic mapper that adapts either Permissions or PermissionRow using functions.
