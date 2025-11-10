@@ -9,18 +9,57 @@ import reactor.core.publisher.Mono;
 import java.util.Map;
 
 /**
- * Protected endpoint to verify auth+redis policies easily.
+ * Simple protected test endpoint used to verify that:
+ * <ul>
+ *     <li>JWT authentication is working</li>
+ *     <li>The token contains a valid subject (sub) and token ID (jti)</li>
+ *     <li>Redis session/token rules are enforced (depending on configuration)</li>
+ * </ul>
+ *
+ * <p>This endpoint requires a valid JWT and acts as a quick way to test authentication
+ * and token injection.</p>
+ *
+ * <p><strong>Example Call:</strong></p>
+ * <pre>
+ *   GET /secure/hello
+ *   Authorization: Bearer &lt;access_token&gt;
+ * </pre>
+ *
+ * <p><strong>Example Response:</strong></p>
+ * <pre>
+ *   {
+ *     "message": "Hello alice",
+ *     "sub": "alice",
+ *     "jti": "bb2c1d03-caa1-4bc9-9d52-8141db252a91"
+ *   }
+ * </pre>
  */
 @RestController
 @RequestMapping("/secure")
 public class ProtectedEchoController {
 
+    /**
+     * Returns a simple JSON payload identifying the authenticated user and token metadata.
+     *
+     * @param auth the authenticated JWT token injected by Spring Security
+     * @return a reactive {@link Mono} of a JSON map containing username, subject, and jti
+     */
     @GetMapping("/hello")
     public Mono<Map<String, Object>> hello(JwtAuthenticationToken auth) {
-        return Mono.just(Map.of(
-                "message", "Hello " + auth.getName(),
-                "sub", auth.getToken().getSubject(),
-                "jti", auth.getToken().getId()
-        ));
+
+        // Defensive check: If somehow the token doesn't exist, return an error
+        if (auth == null || auth.getToken() == null) {
+            return Mono.just(Map.of(
+                    "error", "Missing or invalid authentication token"
+            ));
+        }
+
+        return Mono.just(
+                Map.of(
+                        "message", "Hello " + auth.getName(),
+                        "sub", auth.getToken().getSubject(),
+                        "jti", auth.getToken().getId()
+                )
+        );
     }
 }
