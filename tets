@@ -4,37 +4,46 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fincore.gateway.JwtUtil.HmacJwtUtil;
 import com.fincore.gateway.Service.LoginService;
 import com.fincore.gateway.Service.TokenSessionValidator;
-import com.fincore.gateway.dto.*;
-import com.fincore.gateway.repository.UserRepository;
+import com.fincore.gateway.dto.LoginResponseDTO;
+import com.fincore.gateway.dto.MenuResponse;
+import com.fincore.gateway.dto.UpdatePasswordDTO;
+import com.fincore.gateway.dto.UserDto;
+import com.fincore.gateway.dto.VerifyUserDTO;
 import com.fincore.gateway.utility.Constants;
 import com.fincore.gateway.utility.LoginUtility;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.Base64;
 import java.util.Map;
 
 /**
- * Test-only end point to exercise the gateway+redis locally.
- * - POST /auth/login {username} -> returns HS256 token (sub + jti) and
- * registers session in Redis
- * - POST /auth/logout -> blacklists current token jti in Redis
- * <p>
- * In PRODUCTION:
- * - Remove this controller.
- * - Your Login service should write to Redis: USR:<user>=<jti>; On logout write
- * BL:<jti>=1.
+ * Authentication controller for issuing and revoking demo HS256 JWTs and exercising a Redis-backed
+ * token/session model.
+ *
+ * <p><strong>Endpoints</strong>
+ * <ul>
+ *   <li><b>POST /auth/login</b> — Verifies credentials, issues an HS256 token (with {@code sub}, {@code jti}, {@code exp}),
+ *       and returns role-wise screen data.</li>
+ *   <li><b>POST /auth/logout</b> — Blacklists the current token {@code jti} and, if it matches the active session,
+ *       clears the user's session in Redis.</li>
+ *   <li><b>POST /auth/check-user</b> — Checks if a user exists and returns basic verification details.</li>
+ *   <li><b>POST /auth/update-password</b> — Updates a user's password.</li>
+ * </ul>
+ *
+ * <p><strong>IMPORTANT (Production)</strong>
+ * <ul>
+ *   <li>This controller is intended for local/demo use. In production, issue tokens in a dedicated Auth service.</li>
+ *   <li>For session management, write keys such as {@code USR:<user>=<jti>} and blacklist keys {@code BL:<jti>=1} on logout.</li>
+ *   <li>Consider removing blocking calls in reactive flows (see notes in {@link #logout(JwtAuthenticationToken)}).</li>
+ * </ul>
  */
 @Slf4j
 @RestController
@@ -42,77 +51,90 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AuthController {
 
+    /** Redis key prefix for storing the current JTI per user (e.g., USR:alice -> abc-123). */
     private static final String USER_PREFIX = "USR:";
+
     private final TokenSessionValidator validator;
     private final ReactiveStringRedisTemplate redisTemplate;
-    @Autowired
-    UserRepository userRepository;
+    private final LoginService loginService;
+    private final ObjectMapper mapper;
 
-    @Autowired
-    LoginService loginService;
-
-    @Autowired
-    ObjectMapper mapper;
-
+    /** Mode for JWT issuance; demo supports only {@code hmac} here. */
     @Value("${security.jwt.mode:hmac}")
     private String mode;
 
+    /** Base64-encoded HMAC secret used to sign HS256 tokens. */
     @Value("${security.jwt.hmac-base64-secret:}")
     private String hmacSecret;
 
+    /** Token time-to-live in seconds. */
     @Value("${security.jwt.ttl-seconds:900}")
     private long ttlSeconds;
 
+    /**
+     * Verifies credentials and issues an HS256 access token with {@code sub}, {@code jti}, and {@code exp}.
+     *
+     * @param request the current HTTP request (used to compute client IP)
+     * @param payload the user credentials payload
+     * @return a {@link LoginResponseDTO} with token info and role-wise menu data or an error message
+     */
     @PostMapping(value = "/login", produces = MediaType.APPLICATION_JSON_VALUE)
-    public UserLoginDTO login(ServerHttpRequest request, @RequestBody UserDto userMap) {
+    public LoginResponseDTO login(ServerHttpRequest request, @RequestBody @Valid UserDto payload) {
 
-        // Methods Validate the User Existed in DB & Return the user object
-         String clientIp = LoginUtility.getClientIp(request);
-        log.info("Cleint Ip: {}",clientIp);
-        UserDto user = loginService.verifyUserCredentials(userMap,clientIp);
-        log.info("User:{}",user);
+        final String clientIp = LoginUtility.getClientIp(request);
+        log.info("Client IP: {}", clientIp);
+
+        // Validate user credentials via service
+        UserDto user = loginService.verifyUserCredentials(payload, clientIp);
+        log.debug("User verification result: {}", user);
+
         if (!user.isValidCredentials()) {
-            return user;
-        }
-
-        if (!Constants.HMAC.equalsIgnoreCase(mode)) {
-            return LoginResponseDTO.builder().error(
-                    "This demo /auth/login issues HS256 tokens only. Switch to security.jwt.mode=hmac for local tests.")
+            return LoginResponseDTO.builder()
+                    .userId(user.getUserId())
+                    .validCredentials(false)
+                    .userStatus(user.getUserStatus())
+                    .passwordLoginStatus(user.getPasswordLoginStatus())
+                    .error("Invalid credentials")
                     .build();
         }
 
-        // Simple demo: accept any username
-        if (hmacSecret == null || hmacSecret.isBlank()) {
-            return LoginResponseDTO.builder().error("Missing hmac secret").build();
+        if (!Constants.HMAC.equalsIgnoreCase(mode)) {
+            return LoginResponseDTO.builder()
+                    .error("This demo /auth/login issues HS256 tokens only. Set property security.jwt.mode=hmac.")
+                    .build();
         }
 
-        // User UserData = new HashMap<>();
-        // Add users data here for Token
-        // Generate a HS256 JWT (sub + jti + exp)
-        String token = HmacJwtUtil.generate(hmacSecret, user.getUserId(), ttlSeconds,
-                mapper.convertValue(user.getUser(), Map.class));
+        if (hmacSecret == null || hmacSecret.isBlank()) {
+            return LoginResponseDTO.builder().error("Missing HMAC secret").build();
+        }
 
-        // Extract jti again so we can store it; JWT returns it inside the token, but we
-        // avoid parsing here:
-        // Small parse just to get jti back (safe because we just created it).
+        // Build claims from domain user object (ensure it is safe to include in a JWT!)
+        @SuppressWarnings("unchecked")
+        Map<String, Object> claims = mapper.convertValue(user.getUser(), Map.class);
+
+        // Generate HS256 JWT (sub + jti + exp)
+        String token = HmacJwtUtil.generate(hmacSecret, user.getUserId(), ttlSeconds, claims);
+
+        // Parse back the token to extract its JTI (safe since we just created it)
         var parser = io.jsonwebtoken.Jwts.parser()
                 .verifyWith(io.jsonwebtoken.security.Keys.hmacShaKeyFor(Base64.getDecoder().decode(hmacSecret)))
                 .build();
+
         var claimsJws = parser.parseSignedClaims(token);
         String jti = claimsJws.getPayload().getId();
 
-        /* function call to bring role wise screen data from db. */
+        // Fetch role-based menu data
         MenuResponse roleData = loginService.fetchRoleWiseData(user.getUserId());
 
-        log.info("response generated.");
+        log.info("Login response generated for user: {}", user.getUserId());
 
-        return LoginResponseDTO
-                .builder()
+        return LoginResponseDTO.builder()
                 .userId(user.getUserId())
-                .validCredentials(user.isValidCredentials())
+                .validCredentials(true)
                 .userStatus(user.getUserStatus())
                 .passwordLoginStatus(user.getPasswordLoginStatus())
-                .accessToken(token).tokenType("Bearer")
+                .accessToken(token)
+                .tokenType("Bearer")
                 .expiresIn(ttlSeconds)
                 .sub(user.getUserId())
                 .jti(jti)
@@ -120,8 +142,17 @@ public class AuthController {
                 .build();
     }
 
-    // User logout Method using JWT-Token
-    @PostMapping("/logout")
+    /**
+     * Blacklists the current token {@code jti}. If the blacklisted {@code jti} matches the active session for the
+     * user, clears the stored session reference.
+     *
+     * <p><strong>Note:</strong> This method uses {@code .block()} on a reactive chain for simplicity.
+     * In a fully reactive stack, prefer returning a reactive type and avoid blocking.</p>
+     *
+     * @param jwtAuth the authenticated JWT (injected by Spring Security)
+     * @return a {@link LoginResponseDTO} describing the result
+     */
+    @PostMapping(value = "/logout", produces = MediaType.APPLICATION_JSON_VALUE)
     public LoginResponseDTO logout(JwtAuthenticationToken jwtAuth) {
         if (jwtAuth == null) {
             return LoginResponseDTO.builder().error("No authenticated token provided").build();
@@ -139,54 +170,67 @@ public class AuthController {
 
         String userKey = USER_PREFIX + username;
 
-        // 1) blacklist the given jti
+        // 1) Blacklist the given JTI, then 2) read the currently stored JTI for the user.
         String currentJti = validator.blacklistToken(jti)
-                // 2) then check current stored JTI for user
                 .then(
                         redisTemplate.opsForValue()
                                 .get(userKey)
                                 .defaultIfEmpty("")
+                )
+                .block(); // Blocking for demo simplicity
 
-                ).block();
         if (jti.equals(currentJti)) {
-            // 3) Only clear session if current stored JTI equals this jti
-            log.info("Current Redis JTI matches logout jti -> clearing session for user= {}", username);
+            // 3) Only clear session if the stored JTI equals this JTI
+            log.info("Stored JTI matches logout JTI -> clearing session for user={}", username);
             boolean cleared = Boolean.TRUE.equals(validator.clearUserSession(username).block());
+
             if (cleared) {
                 return LoginResponseDTO.builder()
-                        .error("User logged out (revoked token and cleared session)")
                         .userId(username)
                         .jti(jti)
+                        .error("User logged out (revoked token and cleared session)")
                         .build();
             } else {
                 return LoginResponseDTO.builder().error("Logout failed").build();
             }
         } else {
-            // Someone else already replaced the session; keep that session intact.
-            log.info(
-                    "Redis JTI does not match logout jti (currentJti= {}) -> not clearing session for user= {}",
+            // Someone else has already replaced the session; keep that session intact.
+            log.info("Stored JTI does not match logout JTI (currentJti={}) -> not clearing session for user={}",
                     currentJti, username);
+
             return LoginResponseDTO.builder()
+                    .userId(username)
+                    .jti(jti)
                     .error("Token revoked. Active session remains (another token is active)")
-                    .userId(username).jti(jti).build();
+                    .build();
         }
     }
 
-    @PostMapping("/check-user")
-    public VerifyUserDTO checkUser(@RequestBody Map<String, String> user) {
-        String userId = user.get("userId");
-        log.info(userId);
+    /**
+     * Checks if a given user exists and returns verification details.
+     *
+     * @param body a JSON object containing the {@code userId} key
+     * @return {@link VerifyUserDTO} describing existence/status of the user
+     */
+    @PostMapping(value = "/check-user", produces = MediaType.APPLICATION_JSON_VALUE)
+    public VerifyUserDTO checkUser(@RequestBody Map<String, String> body) {
+        String userId = body.get("userId");
+        log.info("check-user called for userId={}", userId);
 
         VerifyUserDTO result = loginService.checkUser(userId);
-        log.info(result.toString());
+        log.debug("check-user result: {}", result);
 
         return result;
     }
 
-    @PostMapping("/update-password")
-    public UpdatePasswordDTO updatePassword(@RequestBody UpdatePasswordDTO userCredentials) {
-
+    /**
+     * Updates a user's password.
+     *
+     * @param userCredentials payload containing identifiers and the new password
+     * @return {@link UpdatePasswordDTO} reflecting update status
+     */
+    @PostMapping(value = "/update-password", produces = MediaType.APPLICATION_JSON_VALUE)
+    public UpdatePasswordDTO updatePassword(@RequestBody @Valid UpdatePasswordDTO userCredentials) {
         return loginService.updatePassword(userCredentials);
-
     }
 }
