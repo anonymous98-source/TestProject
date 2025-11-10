@@ -2,6 +2,7 @@ package com.fincore.gateway.Service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.Authentication;
@@ -11,79 +12,135 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
+import java.util.Objects;
 
+/**
+ * Validates JWT sessions against Redis using two key families:
+ * <ul>
+ *   <li><b>USR:&lt;username&gt;</b> → stores the latest active JTI for the user</li>
+ *   <li><b>BL:&lt;jti&gt;</b> → blacklisted JTIs (revoked/expired/rotated)</li>
+ * </ul>
+ *
+ * <p><strong>Workflow</strong></p>
+ * <ol>
+ *   <li><b>registerUserSession</b>: On login, blacklist any previous JTI and store the new one.</li>
+ *   <li><b>validateWithRedis</b>: On each request, reject if blacklisted or if JTI != stored latest.</li>
+ *   <li><b>clearUserSession</b>: On logout, remove the USR:&lt;user&gt; pointer.</li>
+ *   <li><b>blacklistToken</b>: On logout or rotation, add JTI to blacklist.</li>
+ * </ol>
+ *
+ * <p><strong>TTL</strong>: Keys are set to the same TTL as the JWT (configurable via
+ * {@code security.jwt.ttl-seconds}).</p>
+ */
 @Component
 public class TokenSessionValidator {
 
     private static final Logger log = LoggerFactory.getLogger(TokenSessionValidator.class);
-    // Redis key prefixes
+
+    /** Redis key prefixes. */
     private static final String USER_PREFIX = "USR:";
     private static final String BLACKLIST_PREFIX = "BL:";
-    // Expiry = same as JWT expiry (example: 15 minutes, should match your JwtService config)
-    private static final Duration TOKEN_TTL = Duration.ofMinutes(15);
-    private final ReactiveStringRedisTemplate redisTemplate;
 
-    public TokenSessionValidator(ReactiveStringRedisTemplate redisTemplate) {
-        this.redisTemplate = redisTemplate;
+    private final ReactiveStringRedisTemplate redis;
+
+    /** Token TTL aligned with JWT expiry. */
+    private final Duration tokenTtl;
+
+    public TokenSessionValidator(
+            ReactiveStringRedisTemplate redis,
+            @Value("${security.jwt.ttl-seconds:900}") long ttlSeconds
+    ) {
+        this.redis = redis;
+        this.tokenTtl = Duration.ofSeconds(ttlSeconds);
     }
 
+    // --------------------------------------------------------------------------------------------
+    // Session management
+    // --------------------------------------------------------------------------------------------
+
     /**
-     * Called during login to register a new session for the user.
-     * 1. Blacklists old JTI if exists
-     * 2. Stores new JTI in Redis with expiry
+     * Register a new session for a user.
+     * <ol>
+     *   <li>If an old JTI exists for the user, blacklist it.</li>
+     *   <li>Store the new JTI under {@code USR:<username>} with {@link #tokenTtl}.</li>
+     * </ol>
+     *
+     * @param username the subject/username
+     * @param newJti   the new token ID
+     * @return completion signal
      */
     public Mono<Void> registerUserSession(String username, String newJti) {
-        log.info("Getting Username & newjti ::", username, newJti);
-        String userKey = USER_PREFIX + username;
+        Objects.requireNonNull(username, "username must not be null");
+        Objects.requireNonNull(newJti, "newJti must not be null");
 
-        log.info("Inside registerUserSession method " + userKey);
+        final String userKey = userKey(username);
+        log.info("Registering new session user={} jti={}", username, newJti);
 
-        return redisTemplate.opsForValue().get(userKey)
+        return redis.opsForValue().get(userKey)
                 .flatMap(oldJti -> {
                     if (oldJti != null) {
-                        log.info(" Found old session for user={} -> blacklisting oldJti={}", username, oldJti);
-                        return blacklistToken(oldJti);
+                        log.info("Found old session for user={} -> blacklisting oldJti={}", username, oldJti);
+                        return blacklistToken(oldJti).then();
                     }
                     return Mono.empty();
                 })
-                .then(redisTemplate.opsForValue()
-                        .set(userKey, newJti, TOKEN_TTL)
-                        .doOnSuccess(v -> log.info(" Registered new session in Redis for user={} jti={}", username, newJti))
-                        .then()
+                .then(
+                        redis.opsForValue()
+                                .set(userKey, newJti, tokenTtl)
+                                .doOnSuccess(v -> log.info("Registered session in Redis user={} jti={}", username, newJti))
+                                .then()
                 );
     }
 
     /**
-     * Blacklist a token (on logout or replacement).
+     * Blacklist a JTI (used on logout or token rotation).
+     *
+     * @param jti token id
+     * @return {@code true} if set succeeded
      */
     public Mono<Boolean> blacklistToken(String jti) {
-        String key = BLACKLIST_PREFIX + jti;
-        return redisTemplate.opsForValue().set(key, "true", TOKEN_TTL)
-                .doOnSuccess(v -> log.info(" Blacklisted token jti={}", jti));
+        Objects.requireNonNull(jti, "jti must not be null");
+        final String blKey = blacklistKey(jti);
+        return redis.opsForValue().set(blKey, "true", tokenTtl)
+                .doOnSuccess(v -> log.info("Blacklisted jti={}", jti));
     }
 
     /**
-     * Clear session for a given user (e.g., on logout).
+     * Clear the current session pointer for a user.
+     *
+     * @param username the subject/username
+     * @return {@code true} if a key was deleted
      */
     public Mono<Boolean> clearUserSession(String username) {
-        return redisTemplate.delete(USER_PREFIX + username)
+        Objects.requireNonNull(username, "username must not be null");
+        return redis.delete(userKey(username))
                 .map(deleted -> {
                     if (deleted > 0) {
-                        log.info(" Cleared session for user={}", username);
+                        log.info("Cleared session for user={}", username);
                         return true;
                     }
                     return false;
                 });
     }
 
+    // --------------------------------------------------------------------------------------------
+    // Request-time validation
+    // --------------------------------------------------------------------------------------------
+
     /**
-     * Validate token against Redis.
-     * - Reject if blacklisted
-     * - Reject if not equal to the latest session JTI
+     * Validate an incoming {@link Authentication} against Redis:
+     * <ul>
+     *   <li>Reject if not a {@link JwtAuthenticationToken}</li>
+     *   <li>Reject if JTI is blacklisted</li>
+     *   <li>Reject if JTI != {@code USR:&lt;username&gt;} stored JTI</li>
+     * </ul>
+     *
+     * @param authentication the Spring Security authentication (expected {@link JwtAuthenticationToken})
+     * @return a {@link Mono} with the same {@code authentication} on success, or an error on failure
      */
     public Mono<Authentication> validateWithRedis(Authentication authentication) {
         if (!(authentication instanceof JwtAuthenticationToken jwtAuth)) {
-            log.warn("Skipping validation: not a JwtAuthenticationToken -> {}", authentication);
+            log.warn("Validation failed: not a JwtAuthenticationToken -> {}", authentication);
             return Mono.error(new BadCredentialsException("Invalid authentication type"));
         }
 
@@ -91,39 +148,55 @@ public class TokenSessionValidator {
         String username = jwt.getSubject();
         String jti = jwt.getId();
 
-        if (jti == null) {
-            log.error("Token missing JTI claim -> rejecting token for user={}", username);
+        if (username == null || username.isBlank()) {
+            log.error("Token missing subject -> rejecting");
+            return Mono.error(new BadCredentialsException("Missing subject (sub)"));
+        }
+        if (jti == null || jti.isBlank()) {
+            log.error("Token missing JTI claim -> rejecting user={}", username);
             return Mono.error(new BadCredentialsException("Missing token ID (jti)"));
         }
 
-        log.info(" Validating token for user={} with jti={}", username, jti);
+        log.info("Validating token user={} jti={}", username, jti);
 
-        return redisTemplate.hasKey(BLACKLIST_PREFIX + jti)
+        // 1) Check blacklist
+        return redis.hasKey(blacklistKey(jti))
                 .flatMap(isBlacklisted -> {
                     if (Boolean.TRUE.equals(isBlacklisted)) {
-                        log.warn(" Token is blacklisted -> jti={}, user={}", jti, username);
+                        log.warn("Token is blacklisted jti={} user={}", jti, username);
                         return Mono.error(new BadCredentialsException("Token revoked"));
                     }
 
-                    return redisTemplate.opsForValue().get(USER_PREFIX + username)
+                    // 2) Ensure JTI matches the latest session pointer
+                    return redis.opsForValue().get(userKey(username))
                             .flatMap(currentJti -> {
-                                log.info(" Redis stored JTI for user={} is {}", username, currentJti);
+                                log.debug("Redis stored JTI for user={} -> {}", username, currentJti);
 
                                 if (currentJti == null) {
-                                    log.warn(" No active session found in Redis for user={} -> rejecting", username);
+                                    log.warn("No active session in Redis for user={} -> rejecting", username);
                                     return Mono.error(new BadCredentialsException("No active session"));
                                 }
 
                                 if (!currentJti.equals(jti)) {
-                                    log.warn(" Token mismatch for user={} -> expected={}, got={}",
-                                            username, currentJti, jti);
+                                    log.warn("Token mismatch user={} expectedJti={} gotJti={}", username, currentJti, jti);
                                     return Mono.error(new BadCredentialsException("Another session is active"));
                                 }
 
-                                log.info(" Token validation success for user={} with jti={}", username, jti);
+                                log.info("Token validation success user={} jti={}", username, jti);
                                 return Mono.just(authentication);
                             });
                 });
     }
-}
 
+    // --------------------------------------------------------------------------------------------
+    // Key helpers
+    // --------------------------------------------------------------------------------------------
+
+    private static String userKey(String username) {
+        return USER_PREFIX + username;
+    }
+
+    private static String blacklistKey(String jti) {
+        return BLACKLIST_PREFIX + jti;
+    }
+}
