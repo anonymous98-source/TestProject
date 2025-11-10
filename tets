@@ -8,126 +8,149 @@ import com.fincore.gateway.model.LoginAttempt;
 import com.fincore.gateway.model.LoginParam;
 import com.fincore.gateway.model.User;
 
-import org.springframework.stereotype.Service;
-
-@Service
+/**
+ * Contract for login/authentication workflows, user/session checks, and menu resolution.
+ *
+ * <p>Implementations should:
+ * <ul>
+ *   <li>Validate credentials (password-based or SSO-based)</li>
+ *   <li>Issue JWTs and compose token-visible user data</li>
+ *   <li>Enforce wrong-password attempt limits and track attempts</li>
+ *   <li>Transform role permissions to a menu response</li>
+ * </ul>
+ */
 public interface LoginService {
 
-    UserDto verifyUserCredentials(UserDto userCredentials,String clientIp);
+    /**
+     * Verifies user credentials and, on success, produces a {@link UserDto} containing
+     * validity flags, statuses, and an access token with token-visible user data.
+     *
+     * @param userCredentials input payload with userId (and password for password mode)
+     * @param clientIp        caller's IP address for auditing
+     * @return populated {@link UserDto} describing the outcome
+     */
+    UserDto verifyUserCredentials(UserDto userCredentials, String clientIp);
 
+    /**
+     * Fetches role-wise permissions for the user and transforms them into a menu response.
+     *
+     * @param userId the user identifier
+     * @return {@link MenuResponse} built from ordered permissions (possibly empty)
+     */
     MenuResponse fetchRoleWiseData(String userId);
 
+    /**
+     * Checks a user's status and requirements prior to login.
+     *
+     * @param userId the user identifier
+     * @return {@link VerifyUserDTO} describing status and next steps (e.g., update password)
+     */
     VerifyUserDTO checkUser(String userId);
 
+    /**
+     * Updates a user's password hash and related metadata.
+     *
+     * @param userCredentials input DTO containing {@code userId} and new raw {@code password}
+     * @return {@link UpdatePasswordDTO} with status and message
+     */
     UpdatePasswordDTO updatePassword(UpdatePasswordDTO userCredentials);
 
-    void passwordBasedLogin(String password, LoginAttempt loginAttempt, UserDto userInfo, User user, LoginParam loginparam);
+    /**
+     * Executes password-based authentication logic, enforcing wrong-password limits and
+     * updating counters/flags in the provided objects.
+     *
+     * @param password     raw password from the request
+     * @param loginAttempt login attempt entity to update with success/failure
+     * @param userInfo     output DTO to set validity flags and attempts left
+     * @param user         the user being authenticated
+     * @param loginParam   login parameters (e.g., permitted attempts)
+     */
+    void passwordBasedLogin(String password,
+                            LoginAttempt loginAttempt,
+                            UserDto userInfo,
+                            User user,
+                            LoginParam loginParam);
 
-    String generateStatusMessage(String status,String type);
+    /**
+     * Produces a human-readable message describing a blocked login due to the given status/type.
+     *
+     * @param status status string (e.g., ACTIVE/INACTIVE/LOCKED)
+     * @param type   subject type (e.g., "user", "role")
+     * @return formatted message
+     */
+    String generateStatusMessage(String status, String type);
 }
 
 
 package com.fincore.gateway.Service;
 
-import com.fincore.gateway.dto.*;
+import com.fincore.gateway.dto.ChildMenu;
+import com.fincore.gateway.dto.MenuResponse;
+import com.fincore.gateway.dto.PermissionRow;
+import com.fincore.gateway.dto.RootMenu;
 import com.fincore.gateway.model.Permissions;
 import lombok.extern.slf4j.Slf4j;
-import org.jetbrains.annotations.NotNull;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/**
+ * Builds navigational menu structures from permission entities or projections.
+ *
+ * <p>Responsibilities:</p>
+ * <ul>
+ *   <li>Group permissions by root menu title</li>
+ *   <li>Create root and child menu DTOs</li>
+ *   <li>Ensure deterministic ordering (by {@code orderId} / {@code permissionOrder})</li>
+ *   <li>Be tolerant to missing/nullable sorting fields</li>
+ * </ul>
+ *
+ * <p><strong>Ordering</strong>: Root menus and child menus are sorted in ascending order using their respective
+ * order fields. Null order values are placed last to keep ordering stable.</p>
+ */
 @Slf4j
 @Service
 public class MenuService {
 
+    /**
+     * Transforms a list of {@link Permissions} entities into a {@link MenuResponse}.
+     * <p>Groups by {@code menuTitle}, creates root items, and (when present) child items from
+     * entries having a non-null {@code subMenu}.</p>
+     *
+     * @param permissionsList permissions entities
+     * @return menu response with ordered root and child menus
+     */
     public MenuResponse transform(List<Permissions> permissionsList) {
         MenuResponse response = new MenuResponse();
 
-        // Group by root menuTitle
-        Map<String, List<Permissions>> grouped = permissionsList.stream()
-                .collect(Collectors.groupingBy(Permissions::getMenuTitle));
+        if (permissionsList == null || permissionsList.isEmpty()) {
+            response.setRoot_menus(Collections.emptyList());
+            return response;
+        }
+
+        // Group by root menu title
+        Map<String, List<Permissions>> grouped =
+                permissionsList.stream().collect(Collectors.groupingBy(Permissions::getMenuTitle));
 
         List<RootMenu> rootMenus = new ArrayList<>();
 
         for (Map.Entry<String, List<Permissions>> entry : grouped.entrySet()) {
             List<Permissions> group = entry.getValue();
-            Permissions rootPerm = group.get(0);
 
-            RootMenu rootMenu = new RootMenu();
-            rootMenu.setId(rootPerm.getMenuId());
-            rootMenu.setTitle(rootPerm.getMenuTitle());
-            rootMenu.setIcon(rootPerm.getMenuIcon());
-            rootMenu.setRoute(rootPerm.getMenuUrl());
-            rootMenu.setComponentPath(rootPerm.getComponentPath());
-            rootMenu.setScreenDescription(rootPerm.getMenuDescription());
-            rootMenu.setOrderId(rootPerm.getOrderId());
+            // Pick a representative for root fields: prefer the one with the smallest non-null orderId
+            Permissions rootPerm = group.stream()
+                    .min(Comparator.comparing(MenuService::safeOrderId))
+                    .orElse(group.get(0));
 
-            if (group.size() > 1) {
-                rootMenu.setHasChildren(true);
+            RootMenu rootMenu = buildRootFromPermissions(rootPerm);
 
-                // ✅ Sort children by orderId in ascending order
-                List<ChildMenu> children = group.stream()
-                        .filter(p -> p.getSubMenu() != null)
-                        .map(MenuService::getChildMenu)
-                        .sorted(Comparator.comparingInt(ChildMenu::getOrderId)) // ascending order
-                        .collect(Collectors.toList());
-
-                rootMenu.setChildren(children);
-            } else {
-                rootMenu.setHasChildren(false);
-            }
-
-            rootMenus.add(rootMenu);
-        }
-
-        // ✅ (Optional) Also sort root menus by orderId if needed
-        rootMenus.sort(Comparator.comparingInt(RootMenu::getOrderId));
-
-        response.setRoot_menus(rootMenus);
-        return response;
-    }
-
-    
-    public MenuResponse transformFromProjection(List<PermissionRow> rows) {
-        MenuResponse response = new MenuResponse();
-
-        // group by root menu title
-        Map<String, List<PermissionRow>> grouped = rows.stream()
-                .collect(Collectors.groupingBy(PermissionRow::getMenuTitle));
-
-        List<RootMenu> rootMenus = new ArrayList<>();
-
-        for (Map.Entry<String, List<PermissionRow>> entry : grouped.entrySet()) {
-            List<PermissionRow> group = entry.getValue();
-            PermissionRow root = group.get(0);
-
-            RootMenu rootMenu = new RootMenu();
-            rootMenu.setId(root.getMenuId());
-            rootMenu.setTitle(root.getMenuTitle());
-            rootMenu.setIcon(root.getMenuIcon());
-            rootMenu.setRoute(root.getMenuUrl());
-            rootMenu.setComponentPath(root.getComponentPath());
-            rootMenu.setScreenDescription(root.getMenuDescription());
-            // if you also want root items ordered, you can set this from first row
-            rootMenu.setOrderId(root.getPermissionOrder());
-
-            // children (sorted by permissionOrder asc)
+            // Build children from items that actually have a sub-menu
             List<ChildMenu> children = group.stream()
-                    .filter(r -> r.getSubMenu() != null)
-                    .map(r -> {
-                        ChildMenu c = new ChildMenu();
-                        c.setId(r.getMenuId());
-                        c.setTitle(r.getSubMenu());
-                        c.setIcon(r.getMenuIcon());
-                        c.setRoute(r.getMenuUrl());
-                        c.setComponentPath(r.getComponentPath());
-                        c.setScreenDescription(r.getMenuDescription());
-                        c.setOrderId(r.getPermissionOrder()); // comes from rp
-                        return c;
-                    })
-                    .sorted(Comparator.comparingInt(ChildMenu::getOrderId))
+                    .filter(p -> p.getSubMenu() != null)
+                    .map(this::buildChildFromPermissions)
+                    .sorted(Comparator.comparing(MenuService::safeOrderIdChild))
                     .collect(Collectors.toList());
 
             rootMenu.setHasChildren(!children.isEmpty());
@@ -135,15 +158,80 @@ public class MenuService {
             rootMenus.add(rootMenu);
         }
 
-        // optional: order root menus as well
-        rootMenus.sort(Comparator.comparingInt(RootMenu::getOrderId));
+        // Sort roots by orderId
+        rootMenus.sort(Comparator.comparing(MenuService::safeOrderIdRoot));
 
         response.setRoot_menus(rootMenus);
         return response;
     }
-    
-    @NotNull
-    private static ChildMenu getChildMenu(Permissions p) {
+
+    /**
+     * Transforms a list of {@link PermissionRow} projections into a {@link MenuResponse}.
+     * <p>Groups by {@code menuTitle}, creates root items, and child items from rows having a non-null {@code subMenu}.</p>
+     *
+     * @param rows permission projection rows (typically from a custom query join)
+     * @return menu response with ordered root and child menus
+     */
+    public MenuResponse transformFromProjection(List<PermissionRow> rows) {
+        MenuResponse response = new MenuResponse();
+
+        if (rows == null || rows.isEmpty()) {
+            response.setRoot_menus(Collections.emptyList());
+            return response;
+        }
+
+        // Group by root menu title
+        Map<String, List<PermissionRow>> grouped =
+                rows.stream().collect(Collectors.groupingBy(PermissionRow::getMenuTitle));
+
+        List<RootMenu> rootMenus = new ArrayList<>();
+
+        for (Map.Entry<String, List<PermissionRow>> entry : grouped.entrySet()) {
+            List<PermissionRow> group = entry.getValue();
+
+            // Representative root row: choose the smallest non-null permissionOrder
+            PermissionRow root = group.stream()
+                    .min(Comparator.comparing(MenuService::safePermissionOrder))
+                    .orElse(group.get(0));
+
+            RootMenu rootMenu = buildRootFromProjection(root);
+
+            // Children (only rows that actually represent a sub-menu), ordered by permissionOrder asc
+            List<ChildMenu> children = group.stream()
+                    .filter(r -> r.getSubMenu() != null)
+                    .map(this::buildChildFromProjection)
+                    .sorted(Comparator.comparing(MenuService::safeOrderIdChild))
+                    .collect(Collectors.toList());
+
+            rootMenu.setHasChildren(!children.isEmpty());
+            rootMenu.setChildren(children);
+            rootMenus.add(rootMenu);
+        }
+
+        // Order root menus as well
+        rootMenus.sort(Comparator.comparing(MenuService::safeOrderIdRoot));
+
+        response.setRoot_menus(rootMenus);
+        return response;
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Builders
+    // --------------------------------------------------------------------------------------------
+
+    private RootMenu buildRootFromPermissions(Permissions p) {
+        RootMenu root = new RootMenu();
+        root.setId(p.getMenuId());
+        root.setTitle(p.getMenuTitle());
+        root.setIcon(p.getMenuIcon());
+        root.setRoute(p.getMenuUrl());
+        root.setComponentPath(p.getComponentPath());
+        root.setScreenDescription(p.getMenuDescription());
+        root.setOrderId(safeOrderId(p));
+        return root;
+    }
+
+    private ChildMenu buildChildFromPermissions(Permissions p) {
         ChildMenu child = new ChildMenu();
         child.setId(p.getMenuId());
         child.setTitle(p.getSubMenu());
@@ -151,7 +239,59 @@ public class MenuService {
         child.setRoute(p.getMenuUrl());
         child.setComponentPath(p.getComponentPath());
         child.setScreenDescription(p.getMenuDescription());
-        child.setOrderId(p.getOrderId());
+        child.setOrderId(safeOrderId(p));
         return child;
+    }
+
+    private RootMenu buildRootFromProjection(PermissionRow r) {
+        RootMenu root = new RootMenu();
+        root.setId(r.getMenuId());
+        root.setTitle(r.getMenuTitle());
+        root.setIcon(r.getMenuIcon());
+        root.setRoute(r.getMenuUrl());
+        root.setComponentPath(r.getComponentPath());
+        root.setScreenDescription(r.getMenuDescription());
+        root.setOrderId(safePermissionOrder(r));
+        return root;
+    }
+
+    private ChildMenu buildChildFromProjection(PermissionRow r) {
+        ChildMenu c = new ChildMenu();
+        c.setId(r.getMenuId());
+        c.setTitle(r.getSubMenu());
+        c.setIcon(r.getMenuIcon());
+        c.setRoute(r.getMenuUrl());
+        c.setComponentPath(r.getComponentPath());
+        c.setScreenDescription(r.getMenuDescription());
+        c.setOrderId(safePermissionOrder(r));
+        return c;
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Null-safe order helpers
+    // --------------------------------------------------------------------------------------------
+
+    /** Returns a non-null order for {@link Permissions} (nulls go to the end). */
+    private static int safeOrderId(Permissions p) {
+        Integer v = p.getOrderId();
+        return v != null ? v : Integer.MAX_VALUE;
+    }
+
+    /** Returns a non-null order for {@link PermissionRow} (nulls go to the end). */
+    private static int safePermissionOrder(PermissionRow r) {
+        Integer v = r.getPermissionOrder();
+        return v != null ? v : Integer.MAX_VALUE;
+    }
+
+    /** Comparator key extractor for root menus. */
+    private static int safeOrderIdRoot(RootMenu r) {
+        Integer v = r.getOrderId();
+        return v != null ? v : Integer.MAX_VALUE;
+    }
+
+    /** Comparator key extractor for child menus. */
+    private static int safeOrderIdChild(ChildMenu c) {
+        Integer v = c.getOrderId();
+        return v != null ? v : Integer.MAX_VALUE;
     }
 }
