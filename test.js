@@ -1,32 +1,74 @@
 package com.fincore.gateway.dto;
 
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * DTO used for handling password update requests and responses.
- *
- * Carries basic details like userId, password, OTP, and a flag
- * indicating whether the password was successfully updated or not.
- */
-@Data
-@AllArgsConstructor
-@NoArgsConstructor
-public class UpdatePasswordDTO {
+import java.sql.Timestamp;
 
-    /** Unique ID of the user performing password update. */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class UserDto implements UserLoginDTO {
+
     private String userId;
 
-    /** Message describing update status or additional info. */
-    private String message;
+    private int userrole;
 
-    /** The new password to be set for the user. */
+    private String firstName;
+
+    private String middleName;
+
+    private String lastName;
+
+    private String phoneNumber;
+
+    private String email;
+
+    private String passwordHash;
+
     private String password;
 
-    /** Flag that indicates if password update was successful. */
-    private boolean updateFlag;
+     private String roleStatus;
 
-    /** OTP value used for verifying the password change. */
-    private String otp;
+    private Timestamp createdAt;
+
+    private Timestamp updatedAt;
+
+    private Timestamp lastLoginAt;
+
+    private String isDeleted;
+
+    private Timestamp deletedAt;
+
+    private Timestamp tempPasswordSetAt;
+
+    private int userWrongPasswordCount;
+
+    private int branch;
+
+    private String message;
+
+    private char loginMethod;
+
+    private String userStatus;    
+
+    private String accessToken;
+
+    private String refreshToken;
+
+    private boolean updatePassword;
+
+    private boolean userCheck;
+
+    private int attemptsLeft;
+
+    private boolean validCredentials;
+
+    private String passwordLoginStatus;
+    
+    private UserTokenDataDto user;
+
 }
