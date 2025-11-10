@@ -1,25 +1,67 @@
 package com.fincore.gateway.model;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import lombok.Data;
 
-/**
- * Entity representing the mapping between roles and permissions.
- * 
- * Each entry defines which permission belongs to which role.
- * This acts as a bridge table between USER_ROLES and PERMISSIONS.
- */
-@Entity
+import java.sql.Timestamp;
+
 @Data
-@Table(name = "ROLE_PERMISSIONS")
-public class RolePermissions {
+@Entity
+@Table(name = "users")
+public class User {
 
-    /** ID of the role. */
     @Id
-    @Column(name = "ROLE_ID")
-    private int roleId;
+    @Column(name = "USER_ID")
+    private String userId;
 
-    /** ID of the permission linked to the role. */
-    @Column(name = "PERMISSION_ID")
-    private int permissionId;
+    @Column(name = "FIRST_NAME")
+    private String firstName;
+
+    @Column(name = "MIDDLE_NAME")
+    private String middleName;
+
+    @Column(name = "LAST_NAME")
+    private String lastName;
+
+    @Column(name = "PHONE_NUMBER")
+    private String phoneNumber;
+
+    @Column(name = "EMAIL")
+    private String email;
+
+    @Column(name = "PASSWORD_HASH")
+    private String passwordHash;
+
+    @Column(name = "ACCOUNT_STATUS")
+    private String accountStatus;
+
+    @Column(name = "CREATED_AT")
+    private Timestamp createdAt;
+
+    @Column(name = "UPDATED_AT")
+    private Timestamp updatedAt;
+
+    @Column(name = "LAST_LOGIN_AT")
+    private Timestamp lastLoginAt;
+
+    @Column(name = "IS_DELETED")
+    private String isDeleted;
+    
+    @Column(name = "DELETED_AT")
+    private Timestamp deletedAt;
+
+    @Column(name = "TEMP_PASSWORD_SET_AT")
+    private Timestamp tempPasswordSetAt;
+
+    @Column(name = "USER_WRONG_PASSWORD_COUNT")
+    private int userWrongPasswordCount;
+
+    @Column(name = "BRANCH")
+    private int branch;
+
+    @Column(name="PASSWORD_LOGIN")
+    private String passwordLogin;
 }
