@@ -1,77 +1,46 @@
 package com.fincore.gateway.model;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import lombok.Data;
 
-import java.util.List;
-import java.util.Set;
-
-/**
- * Entity representing a menu item in the application.
- * 
- * Each record in MENU_ITEMS defines a single menu entry — which may
- * have a parent (for nested menus), child items, or be directly linked
- * to a screen route. This structure helps build dynamic menu hierarchies
- * based on user roles and permissions.
- */
 @Entity
-@Table(name = "MENU_ITEMS")
 @Data
-public class MenuItems {
+@Table(name="PERMISSIONS")
+public class Permissions {
 
-    /** Unique ID for the menu item. */
+    /*MENU_ID, MENU_TITLE, MENU_ICON, MENU_SUBMENU, MENU_ACTION, MENU_URL, MENU_COMPONENT_ROUTE, MENU_ORDER, MENU_DEPENDANT*/
+
     @Id
-    @Column(name = "MENU_ID")
-    private Integer id;
+    @Column(name="MENU_ID")
+    private int menuId;
 
-    /** Display title of the menu item. */
-    @Column(name = "MENU_TITLE")
-    private String title;
+    @Column(name="MENU_TITLE")
+    private String menuTitle;
 
-    /** Icon name or path used for the menu item UI. */
-    @Column(name = "MENU_ICON")
-    private String icon;
+    @Column(name="MENU_ICON")
+    private String menuIcon;
 
-    /** Route or navigation path associated with the menu item. */
-    @Column(name = "MENU_ROUTE")
-    private String route;
+    @Column(name = "MENU_SUBMENU")
+    private String subMenu;
 
-    /** Flag to indicate if this menu item contains child items. */
-    @Column(name = "MENU_HAS_CHILDREN")
-    private boolean hasChildren;
+    @Column(name = "MENU_ACTION")
+    private String menuAction;
 
-    // Embedded screen level details
-    /** Screen ID linked with this menu item (if applicable). */
-    @Column(name = "MENU_SCREEN_ID")
-    private String screenId;
+    @Column(name = "MENU_URL")
+    private String menuUrl;
 
-    /** Title of the screen linked with this menu item. */
-    @Column(name = "MENU_SCREEN_TITLE")
-    private String screenTitle;
+    @Column(name = "MENU_COMPONENT_PATH")
+    private String componentPath;
 
-    /** Route of the screen linked with this menu item. */
-    @Column(name = "MENU_SCREEN_ROUTE")
-    private String screenRoute;
+    @Column(name = "MENU_DESCRIPTION")
+    private String menuDescription;
 
-    /**
-     * Parent menu item, used for hierarchical navigation.
-     * A menu can have zero or one parent.
-     */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "MENU_PARENT_ID")
-    private MenuItems parent;
+    @Column(name = "MENU_DEPENDANT")
+    private String dependent;
+    
+    private int orderId;
 
-    /**
-     * List of child menu items linked to this parent.
-     * If the menu has no children, this list will be empty.
-     */
-    @OneToMany(mappedBy = "parent", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
-    private List<MenuItems> children;
-
-    /**
-     * Roles that have access to this menu item.
-     * A menu item can be visible to multiple roles.
-     */
-    @ManyToMany(mappedBy = "accessibleMenuItems")
-    private Set<UserRoles> roles;
 }
