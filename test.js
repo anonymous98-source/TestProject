@@ -6,41 +6,55 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.Data;
 
+/**
+ * Entity representing permission details for each menu or action in the system.
+ * 
+ * Maps to the PERMISSIONS table and defines information such as menu title,
+ * icon, sub-menu, related action, and route path used within the application.
+ */
 @Entity
 @Data
-@Table(name="PERMISSIONS")
+@Table(name = "PERMISSIONS")
 public class Permissions {
 
-    /*MENU_ID, MENU_TITLE, MENU_ICON, MENU_SUBMENU, MENU_ACTION, MENU_URL, MENU_COMPONENT_ROUTE, MENU_ORDER, MENU_DEPENDANT*/
-
+    /** Unique ID for the menu or permission entry. */
     @Id
-    @Column(name="MENU_ID")
+    @Column(name = "MENU_ID")
     private int menuId;
 
-    @Column(name="MENU_TITLE")
+    /** Title displayed for this menu item or feature. */
+    @Column(name = "MENU_TITLE")
     private String menuTitle;
 
-    @Column(name="MENU_ICON")
+    /** Icon associated with the menu item (used in UI). */
+    @Column(name = "MENU_ICON")
     private String menuIcon;
 
+    /** Name of the parent or sub menu this item belongs to. */
     @Column(name = "MENU_SUBMENU")
     private String subMenu;
 
+    /** Specific action type or permission (like VIEW, EDIT, DELETE etc). */
     @Column(name = "MENU_ACTION")
     private String menuAction;
 
+    /** URL path or endpoint linked with this menu. */
     @Column(name = "MENU_URL")
     private String menuUrl;
 
+    /** Component path or frontend route used for navigation. */
     @Column(name = "MENU_COMPONENT_PATH")
     private String componentPath;
 
+    /** Short description explaining what this permission or menu does. */
     @Column(name = "MENU_DESCRIPTION")
     private String menuDescription;
 
+    /** Indicates if this menu depends on another one. */
     @Column(name = "MENU_DEPENDANT")
     private String dependent;
-    
-    private int orderId;
 
+    /** Order in which the menu appears in UI. */
+    @Column(name = "MENU_ORDER")
+    private int orderId;
 }
