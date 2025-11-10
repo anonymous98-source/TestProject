@@ -1,45 +1,53 @@
 package com.fincore.gateway.model;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.ToString;
 
-/**
- * Entity representing the system-wide login configuration paramters.
- * 
- * Maps to the LOGIN_PARAM table, which holds information such as 
- * the active login mode, OTP validity period, password validity period, 
- * allowed wrong attempts, and interval between attempts.
- */
+import jakarta.persistence.*;
+import lombok.Data;
+
+import java.util.List;
+import java.util.Set;
+
 @Entity
-@Getter
-@Setter
-@ToString
-@Table(name = "LOGIN_PARAM")
-public class LoginParam {
+@Table(name = "MENU_ITEMS")
+@Data
+public class MenuItems {
 
-    /** Defines the currently active login mode in the system. */
     @Id
-    @Column(name = "ACTIVE_LOGIN_MODE")
-    private char activeLoginMode;
+    @Column(name = "MENU_ID")
+    private Integer id;
 
-    /** OTP validity period in minutes. */
-    @Column(name = "OTP_VALIDITY")
-    private int otpValidity;
+    @Column(name = "MENU_TITLE")
+    private String title;
 
-    /** Password validity period in days. */
-    @Column(name = "PASSWORD_VALIDITY")
-    private int passwordValidity;
+    @Column(name = "MENU_ICON")
+    private String icon;
 
-    /** Number of consecutive wrong password attemps allowed before blocking. */
-    @Column(name = "WRONG_PASSWORD_ATTEMPTS")
-    private int wrongPasswordAttempts;
+    @Column(name = "MENU_ROUTE")
+    private String route;
 
-    /** Time interval (in minutes) after which a new login attempt is allowed. */
-    @Column(name = "ATTEMPT_INTERVAL")
-    private int attemptInterval;
+    @Column(name = "MENU_HAS_CHILDREN")
+    private boolean hasChildren;
+
+    // Embedded screen details
+    @Column(name = "MENU_SCREEN_ID")
+    private String screenId;
+
+    @Column(name = "MENU_SCREEN_TITLE")
+    private String screenTitle;
+
+    @Column(name = "MENU_SCREEN_ROUTE")
+    private String screenRoute;
+
+    // @Column(name = "MENU_PARENT_ID")
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "MENU_PARENT_ID")
+    private MenuItems parent;
+
+    @OneToMany(mappedBy = "parent", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    private List<MenuItems> children;
+
+    @ManyToMany(mappedBy = "accessibleMenuItems")
+    private Set<UserRoles> roles;
+
 }
+
