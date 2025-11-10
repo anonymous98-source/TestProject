@@ -1,65 +1,307 @@
-package com.fincore.gateway.Controller;
+package com.fincore.gateway.Service;
 
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-import reactor.core.publisher.Mono;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fincore.gateway.JwtUtil.HmacJwtUtil;
+import com.fincore.gateway.dto.*;
+import com.fincore.gateway.model.*;
+import com.fincore.gateway.repository.*;
+import com.fincore.gateway.utility.Constants;
 
-import java.util.Map;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-/**
- * Simple protected test endpoint used to verify that:
- * <ul>
- *     <li>JWT authentication is working</li>
- *     <li>The token contains a valid subject (sub) and token ID (jti)</li>
- *     <li>Redis session/token rules are enforced (depending on configuration)</li>
- * </ul>
- *
- * <p>This endpoint requires a valid JWT and acts as a quick way to test authentication
- * and token injection.</p>
- *
- * <p><strong>Example Call:</strong></p>
- * <pre>
- *   GET /secure/hello
- *   Authorization: Bearer &lt;access_token&gt;
- * </pre>
- *
- * <p><strong>Example Response:</strong></p>
- * <pre>
- *   {
- *     "message": "Hello alice",
- *     "sub": "alice",
- *     "jti": "bb2c1d03-caa1-4bc9-9d52-8141db252a91"
- *   }
- * </pre>
- */
-@RestController
-@RequestMapping("/secure")
-public class ProtectedEchoController {
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.util.*;
 
-    /**
-     * Returns a simple JSON payload identifying the authenticated user and token metadata.
-     *
-     * @param auth the authenticated JWT token injected by Spring Security
-     * @return a reactive {@link Mono} of a JSON map containing username, subject, and jti
-     */
-    @GetMapping("/hello")
-    public Mono<Map<String, Object>> hello(JwtAuthenticationToken auth) {
+@Slf4j
+@Service("LoginService")
+@RequiredArgsConstructor
+public class LoginServiceImpl implements LoginService {
 
-        // Defensive check: If somehow the token doesn't exist, return an error
-        if (auth == null || auth.getToken() == null) {
-            return Mono.just(Map.of(
-                    "error", "Missing or invalid authentication token"
-            ));
-        }
+	private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 
-        return Mono.just(
-                Map.of(
-                        "message", "Hello " + auth.getName(),
-                        "sub", auth.getToken().getSubject(),
-                        "jti", auth.getToken().getId()
-                )
-        );
-    }
+	@Value("${security.jwt.mode:hmac}")
+	private String mode;
+
+	@Value("${security.jwt.hmac-base64-secret:}")
+	private String hmacSecret;
+
+	@Value("${security.jwt.ttl-seconds:900}")
+	private long ttlSeconds;
+
+	@Autowired
+	private UserRepository userRepository;
+
+	@Autowired
+	private LoginAttemptRepository loginAttemptRepository;
+
+	@Autowired
+	private LoginParamRepository loginParamRepository;
+
+	@Autowired
+	private RolePermissionsRepository rolePermissionsRepository;
+
+	@Autowired
+	private MenuService menuService;
+
+	@Autowired
+	ObjectMapper mapper;
+
+	/**
+	 * function call to fetch role wise data
+	 */
+	@Transactional(readOnly = true)
+	@Override
+	public MenuResponse fetchRoleWiseData(String userId) {
+		log.info("userId: {}", userId);
+		try {
+			// step 1 — fetch all the permissions with order from role_permissions
+			List<PermissionRow> rows = rolePermissionsRepository.findAllPermissionsByUserId(userId);
+
+			if (rows == null || rows.isEmpty()) {
+				log.info("No permissions found for userId: {}", userId);
+				return new MenuResponse(Collections.emptyList());
+			}
+
+			// step 2 — build the menu structure
+			return menuService.transformFromProjection(rows);
+
+		} catch (Exception e) {
+			log.error("An error occurred while fetching permissions for userId: {}", userId, e);
+			return new MenuResponse(Collections.emptyList());
+		}
+	}
+
+	@Override
+	public UserDto verifyUserCredentials(UserDto userCredentials, String clientIp) {
+
+		String userId = userCredentials.getUserId();
+		String pass = userCredentials.getPassword();
+		User user = userRepository.findByUserId(userId);
+		UserDto userInfo = new UserDto();
+
+		if (!(Objects.isNull(user))) {
+
+			LoginParam loginparam = loginParamRepository.getLoginParam();
+			LoginAttempt loginAttempt = new LoginAttempt();
+			loginAttempt.setLoginMethod(loginparam.getActiveLoginMode() == 'P' ? Constants.PASSWORD_BASED_LOGIN
+					: Constants.SSO_BASED_LOGIN);
+			loginAttempt.setSuccess("N");
+			loginAttempt.setIpAddress(clientIp);
+			loginAttempt.setUserId(userId);
+			userInfo.setLoginMethod(loginparam.getActiveLoginMode());
+			userInfo.setUserId(user.getUserId());
+			UserRoles userRole = userRepository.getUserRole(userId);
+			/*
+			 * Check Activity status of the role and user
+			 */
+			
+			userInfo.setRoleStatus(userRole.getRoleStatus());
+			userInfo.setUserStatus(user.getAccountStatus());
+			userInfo.setPasswordLoginStatus(user.getPasswordLogin());
+
+			if (!userRole.getRoleStatus().equalsIgnoreCase(Constants.ACTIVE)) {
+				loginAttempt.setFailureReason(generateStatusMessage(userRole.getRoleStatus(), "role"));
+			} else if (!user.getAccountStatus().equalsIgnoreCase(Constants.ACTIVE)) {
+				loginAttempt.setFailureReason(generateStatusMessage(user.getAccountStatus(), "user"));
+			} else {
+				/**
+				 * For SSO & Password Based Login
+				 */
+				if (loginparam.getActiveLoginMode() == Constants.PASSWORD) {
+					// Password Based Login
+					if (user.getPasswordLogin().equalsIgnoreCase(Constants.ACTIVE)) {
+						passwordBasedLogin(pass, loginAttempt, userInfo, user, loginparam);
+					} else {
+						userInfo.setValidCredentials(false);
+						loginAttempt.setFailureReason("Password Login is disabled for this user at the moment.");
+					}
+
+				} else {
+					// SSO Based Login
+					loginAttempt.setSuccess("Y");
+					loginAttempt.setFailureReason("SUCCESS");
+					userInfo.setValidCredentials(true);
+					if (user.getPasswordLogin().equalsIgnoreCase(Constants.INACTIVE)) {
+						user.setPasswordLogin(Constants.ACTIVE);
+						userRepository.save(user);
+					}
+
+				}
+
+				if (userInfo.isValidCredentials()) {
+					log.info("Creating token");
+					UserDto UserData = new UserDto();
+
+					UserData.setUserId(user.getUserId());
+					UserData.setUserrole(userRole.getRole());
+					@SuppressWarnings("unchecked")
+					String accessToken = HmacJwtUtil.generate(hmacSecret, user.getUserId(), ttlSeconds,
+							mapper.convertValue(UserData, Map.class));
+
+					UserTokenDataDto tokenData = initializeTokenData(user, userRole);
+
+					userInfo.setAccessToken(accessToken);
+
+					userInfo.setUser(tokenData);
+				}
+			}
+			loginAttemptRepository.save(loginAttempt);
+		} else {
+			userInfo.setValidCredentials(false);
+			userInfo.setUserStatus(Constants.INVALID);
+
+		}
+		
+		log.info("****  ****   "+userInfo);
+		return userInfo;
+
+	}
+
+	@Override
+	public void passwordBasedLogin(String password, LoginAttempt loginAttempt, UserDto userInfo, User user,
+			LoginParam loginparam) {
+		// Password based login
+		log.info("In password based login");
+		int userFailedPasswordAttemptCount = user.getUserWrongPasswordCount();
+		int permittedAttemptCount = loginparam.getWrongPasswordAttempts();
+		if (userFailedPasswordAttemptCount >= permittedAttemptCount) {
+			loginAttempt.setFailureReason("Exceeded Attempt Limit");
+			userInfo.setMessage("Exceeded Attempt Limit");
+			userInfo.setValidCredentials(false);
+
+		} else {
+
+			if (encoder.matches(password, user.getPasswordHash())) {
+				// Correct Password
+				loginAttempt.setSuccess("Y");
+				loginAttempt.setFailureReason("Success");
+				userInfo.setValidCredentials(true);
+
+			} else {
+				// Invalid Password
+				if (userFailedPasswordAttemptCount == permittedAttemptCount - 1) {
+					
+					// The user has reached the permitted wrong password limit - The user has to be
+					// Locked to attempt password based login
+
+					user.setPasswordLogin(Constants.INACTIVE);
+					user.setUserWrongPasswordCount(0);
+
+				} else {
+					user.setUserWrongPasswordCount(userFailedPasswordAttemptCount + 1);
+				}
+				userRepository.save(user);
+				loginAttempt.setSuccess("N");
+				loginAttempt.setFailureReason("Wrong Password");
+				userInfo.setValidCredentials(false);
+				userInfo.setAttemptsLeft(permittedAttemptCount - userFailedPasswordAttemptCount - 1);
+
+			}
+		}
+		// log.info("User in password based login :{}", userInfo);
+		// log.info("Login attempt details :{}", loginAttempt);
+	}
+
+	@Override
+	public String generateStatusMessage(String status, String type) {
+		return String.format("Trying to Login with a %s %s ", status, type);
+	}
+
+	public VerifyUserDTO checkUser(String userId) {
+
+		VerifyUserDTO userInfo = new VerifyUserDTO();
+
+		User user = userRepository.findByUserId(userId);
+
+		LoginParam loginParam = loginParamRepository.getLoginParam();
+		userInfo.setUserId(userId);
+		if (user != null) {
+			// Existing User is trying to log in
+
+			if (user.getAccountStatus().equalsIgnoreCase("active")) {
+
+				LocalDateTime lastUpdateTime = user.getTempPasswordSetAt().toLocalDateTime();
+				boolean isPasswordValid = LocalDateTime.now()
+						.isBefore(lastUpdateTime.plusHours(loginParam.getPasswordValidity()));
+				UserRoles userRole = userRepository.getUserRole(userId);
+
+				userInfo.setRoleStatus(userRole.getRoleStatus());
+				userInfo.setUpdatePassword(user.getPasswordHash() == null || !isPasswordValid);
+				userInfo.setUserStatus(Constants.ACTIVE);
+				userInfo.setMessage(Constants.ACTIVE_USER);
+				userInfo.setLoginMethod(loginParam.getActiveLoginMode());
+				userInfo.setPasswordLoginStatus(user.getPasswordLogin());
+
+			} else {
+				// Inactive , Locked or Pending_Verification users
+				String accountStatus = user.getAccountStatus();
+				userInfo.setUserCheck(true);
+				userInfo.setUserStatus(accountStatus);
+				userInfo.setMessage(accountStatus.equalsIgnoreCase("locked") ? "Locked User"
+						: (accountStatus.equalsIgnoreCase("inactive") ? "Inactive User" : "Verification Pending"));
+
+			}
+		} else {
+			// Invalid user is trying to log in
+			userInfo.setUserCheck(false);
+			userInfo.setUserStatus("INVALID");
+			userInfo.setMessage("Invalid User");
+			userInfo.setLoginMethod(loginParam.getActiveLoginMode());
+		}
+
+		return userInfo;
+
+	}
+
+	/* TODO : re factor this function to Integrate otp */
+	public UpdatePasswordDTO updatePassword(UpdatePasswordDTO userCredentials) {
+		String userId = userCredentials.getUserId();
+		String password = userCredentials.getPassword();
+		userCredentials.setUpdateFlag(false);
+		userCredentials.setPassword("");
+		userCredentials.setOtp("");
+		try {
+
+			User user = userRepository.findByUserId(userId);
+
+			// Execute only if user is not null
+			if (!(Objects.isNull(user))) {
+				String passwordHash = encoder.encode(password);
+				user.setPasswordHash(passwordHash);
+				user.setTempPasswordSetAt(Timestamp.valueOf(LocalDateTime.now()));
+				userRepository.save(user);
+				userCredentials.setMessage("User Successfully updated");
+				userCredentials.setUpdateFlag(true);
+			} else {
+				userCredentials.setMessage("Invalid user id");
+			}
+
+		} catch (DataIntegrityViolationException e) {
+			userCredentials.setMessage("Failed to change password, please try again");
+		}
+
+		return userCredentials;
+
+	}
+
+	private UserTokenDataDto initializeTokenData(User user, UserRoles userRole) {
+		UserTokenDataDto tokenData = new UserTokenDataDto();
+		tokenData.setFirstName(user.getFirstName());
+		tokenData.setLastName(user.getLastName());
+		tokenData.setPhoneNumber(user.getPhoneNumber());
+		tokenData.setUserId(user.getUserId());
+		tokenData.setBranch(user.getBranch());
+		tokenData.setEmail(user.getEmail());
+		tokenData.setRole(userRole.getRole());
+		tokenData.setRoleName(userRole.getRoleName());
+		return tokenData;
+	}
 }
