@@ -1,47 +1,68 @@
-package com.fincore.gateway.model;
+package com.fincore.gateway.Config;
 
-import jakarta.persistence.*;
-import lombok.Data;
+import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder;
+import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 
-import java.util.Set;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+import java.security.interfaces.RSAPublicKey;
+import java.util.Base64;
 
 /**
- * Entity representing the roles assigned within the system.
- * 
- * Each role defines a set of permissions and accessible menu items.
- * Roles are linked to users and control access levels across the app.
+ * Creates a ReactiveJwtDecoder based on properties:
+ * security.jwt.mode = hmac | rsa
+ * <p>
+ * HMAC:
+ * - security.jwt.hmac-base64-secret = base64 of your HS256 secret bytes (>= 256-bit)
+ * <p>
+ * RSA:
+ * - security.jwt.rsa-public = PEM public key (-----BEGIN PUBLIC KEY----- ... -----END PUBLIC KEY-----)
+ * <p>
+ * Switch environments by only changing properties. No code change.
  */
-@Data
-@Entity
-@Table(name = "ROLES")
-public class UserRoles {
+@Configuration
+public class JwtDecoderConfig {
 
-    /** Unique ID assigned to the role. */
-    @Id
-    @Column(name = "ROLE_ID")
-    private Integer roleId;
+    @Value("${security.jwt.mode:hmac}")
+    private String mode;
 
-    /** Name of the role (e.g. ADMIN, MANAGER, USER). */
-    @Column(name = "ROLE_NAME")
-    private String roleName;
+    @Value("${security.jwt.hmac-base64-secret:}")
+    private String hmacBase64Secret;
 
-    /** ID of the user to whom this role belongs. */
-    @Column(name = "USER_ID")
-    private String userId;
+    @Value("${security.jwt.rsa-public:}")
+    private String rsaPublicPem;
 
-    /** Status of the role (e.g. ACTIVE, INACTIVE). */
-    @Column(name = "ROLE_STATUS")
-    private String roleStatus;
+    @PostConstruct
+    void sanity() {
+        if ("hmac".equalsIgnoreCase(mode)) {
+            if (hmacBase64Secret == null || hmacBase64Secret.isBlank()) {
+                throw new IllegalStateException("HMAC mode selected but security.jwt.hmac-base64-secret is empty");
+            }
+        } else if ("rsa".equalsIgnoreCase(mode)) {
+            if (rsaPublicPem == null || rsaPublicPem.isBlank()) {
+                throw new IllegalStateException("RSA mode selected but security.jwt.rsa-public is empty");
+            }
+        } else {
+            throw new IllegalStateException("Unsupported security.jwt.mode: " + mode + " (use 'hmac' or 'rsa')");
+        }
+    }
 
-    /**
-     * Menu items this role has access to.
-     * Defines many-to-many mapping between roles and menu items.
-     */
-    @ManyToMany(fetch = FetchType.LAZY)
-    @JoinTable(
-            name = "ROLE_MENU_ACCESS",
-            joinColumns = @JoinColumn(name = "ROLE_ID"),
-            inverseJoinColumns = @JoinColumn(name = "MENU_ITEM_ID")
-    )
-    private Set<MenuItems> accessibleMenuItems;
+    @Bean
+    public ReactiveJwtDecoder jwtDecoder() {
+        if ("hmac".equalsIgnoreCase(mode)) {
+            // Decode base64 to raw bytes and create a SecretKey for HS256 verification
+            byte[] secretBytes = Base64.getDecoder().decode(hmacBase64Secret);
+            SecretKey key = new SecretKeySpec(secretBytes, "HmacSHA256");
+            return NimbusReactiveJwtDecoder.withSecretKey(key).build();
+        } else {
+            // Parse RSA public key for RS256 verification
+            RSAPublicKey publicKey = KeyUtils.parseRsaPublicKey(rsaPublicPem);
+            return NimbusReactiveJwtDecoder.withPublicKey(publicKey).build();
+        }
+    }
 }
+
