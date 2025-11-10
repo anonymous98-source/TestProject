@@ -13,16 +13,16 @@ import java.security.interfaces.RSAPublicKey;
 import java.util.Base64;
 
 /**
- * Creates a ReactiveJwtDecoder based on properties:
- * security.jwt.mode = hmac | rsa
- * <p>
- * HMAC:
- * - security.jwt.hmac-base64-secret = base64 of your HS256 secret bytes (>= 256-bit)
- * <p>
- * RSA:
- * - security.jwt.rsa-public = PEM public key (-----BEGIN PUBLIC KEY----- ... -----END PUBLIC KEY-----)
- * <p>
- * Switch environments by only changing properties. No code change.
+ * Configures a ReactiveJwtDecoder bean based on the active JWT mode.
+ *
+ * <p>Two modes supported:</p>
+ * <ul>
+ *   <li><b>HMAC</b> — Uses a Base64-encoded HS256 secret key</li>
+ *   <li><b>RSA</b> — Uses an RSA public key in PEM format</li>
+ * </ul>
+ *
+ * <p>Switching between HMAC and RSA is done purely through properties,
+ * no code changes needed.</p>
  */
 @Configuration
 public class JwtDecoderConfig {
@@ -36,33 +36,41 @@ public class JwtDecoderConfig {
     @Value("${security.jwt.rsa-public:}")
     private String rsaPublicPem;
 
+    /**
+     * Basic sanity check to ensure the correct configuration
+     * properties are provided for the selected JWT mode.
+     */
     @PostConstruct
     void sanity() {
         if ("hmac".equalsIgnoreCase(mode)) {
             if (hmacBase64Secret == null || hmacBase64Secret.isBlank()) {
-                throw new IllegalStateException("HMAC mode selected but security.jwt.hmac-base64-secret is empty");
+                throw new IllegalStateException("HMAC mode selected but property 'security.jwt.hmac-base64-secret' is empty");
             }
         } else if ("rsa".equalsIgnoreCase(mode)) {
             if (rsaPublicPem == null || rsaPublicPem.isBlank()) {
-                throw new IllegalStateException("RSA mode selected but security.jwt.rsa-public is empty");
+                throw new IllegalStateException("RSA mode selected but property 'security.jwt.rsa-public' is empty");
             }
         } else {
-            throw new IllegalStateException("Unsupported security.jwt.mode: " + mode + " (use 'hmac' or 'rsa')");
+            throw new IllegalStateException("Unsupported value for security.jwt.mode: " + mode + " (use 'hmac' or 'rsa')");
         }
     }
 
+    /**
+     * Creates a ReactiveJwtDecoder bean based on the configured mode.
+     *
+     * @return a NimbusReactiveJwtDecoder for HS256 (HMAC) or RS256 (RSA)
+     */
     @Bean
     public ReactiveJwtDecoder jwtDecoder() {
         if ("hmac".equalsIgnoreCase(mode)) {
-            // Decode base64 to raw bytes and create a SecretKey for HS256 verification
+            // Decode Base64 string to bytes and create a SecretKey for HMAC verification
             byte[] secretBytes = Base64.getDecoder().decode(hmacBase64Secret);
             SecretKey key = new SecretKeySpec(secretBytes, "HmacSHA256");
             return NimbusReactiveJwtDecoder.withSecretKey(key).build();
         } else {
-            // Parse RSA public key for RS256 verification
+            // Parse RSA public key from PEM format for RS256 verification
             RSAPublicKey publicKey = KeyUtils.parseRsaPublicKey(rsaPublicPem);
             return NimbusReactiveJwtDecoder.withPublicKey(publicKey).build();
         }
     }
 }
-
