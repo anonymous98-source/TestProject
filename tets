@@ -1,399 +1,129 @@
 package com.fincore.gateway.Service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fincore.gateway.JwtUtil.HmacJwtUtil;
-import com.fincore.gateway.dto.MenuResponse;
-import com.fincore.gateway.dto.UpdatePasswordDTO;
-import com.fincore.gateway.dto.UserDto;
-import com.fincore.gateway.dto.UserTokenDataDto;
-import com.fincore.gateway.dto.VerifyUserDTO;
-import com.fincore.gateway.model.LoginAttempt;
-import com.fincore.gateway.model.LoginParam;
-import com.fincore.gateway.model.PermissionRow;
-import com.fincore.gateway.model.User;
-import com.fincore.gateway.model.UserRoles;
-import com.fincore.gateway.repository.LoginAttemptRepository;
-import com.fincore.gateway.repository.LoginParamRepository;
-import com.fincore.gateway.repository.RolePermissionsRepository;
-import com.fincore.gateway.repository.UserRepository;
-import com.fincore.gateway.utility.Constants;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.stereotype.Component;
+import reactor.core.publisher.Mono;
 
-import java.sql.Timestamp;
-import java.time.LocalDateTime;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.time.Duration;
 
-/**
- * Service implementation handling user login/verification, menu resolution, and password updates.
- *
- * <p><strong>Responsibilities</strong>
- * <ul>
- *   <li>Validate credentials (password-based and SSO-based)</li>
- *   <li>Issue HS256 JWTs and embed limited user/role claims</li>
- *   <li>Transform role permissions into menu responses</li>
- *   <li>Track login attempts and enforce wrong password limits</li>
- * </ul>
- *
- * <p><strong>Notes</strong>
- * <ul>
- *   <li>JWT generation uses an HMAC Base64 secret; ensure it is configured for the environment.</li>
- *   <li>{@code BCryptPasswordEncoder} is created locally for convenience; consider injecting a singleton bean instead.</li>
- *   <li>Write operations are wrapped in {@link Transactional} where appropriate.</li>
- * </ul>
- */
-@Slf4j
-@Service("LoginService")
-@RequiredArgsConstructor
-public class LoginServiceImpl implements LoginService {
+@Component
+public class TokenSessionValidator {
 
-    /** Prefer injecting a singleton bean; retained local instance for compatibility. */
-    private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+    private static final Logger log = LoggerFactory.getLogger(TokenSessionValidator.class);
+    // Redis key prefixes
+    private static final String USER_PREFIX = "USR:";
+    private static final String BLACKLIST_PREFIX = "BL:";
+    // Expiry = same as JWT expiry (example: 15 minutes, should match your JwtService config)
+    private static final Duration TOKEN_TTL = Duration.ofMinutes(15);
+    private final ReactiveStringRedisTemplate redisTemplate;
 
-    // ======= Config =======
-
-    /** Base64-encoded HMAC secret used to sign HS256 JWTs. */
-    @Value("${security.jwt.hmac-base64-secret:}")
-    private String hmacSecret;
-
-    /** Token time-to-live in seconds. */
-    @Value("${security.jwt.ttl-seconds:900}")
-    private long ttlSeconds;
-
-    // ======= Dependencies =======
-
-    private final UserRepository userRepository;
-    private final LoginAttemptRepository loginAttemptRepository;
-    private final LoginParamRepository loginParamRepository;
-    private final RolePermissionsRepository rolePermissionsRepository;
-    private final MenuService menuService;
-    private final ObjectMapper mapper;
-
-    // ======= Public API =======
-
-    /**
-     * Fetches role-wise permissions for the given user and transforms them into a menu response.
-     *
-     * @param userId ID of the user
-     * @return {@link MenuResponse} built from ordered permissions; empty if none or on error
-     */
-    @Transactional(readOnly = true)
-    @Override
-    public MenuResponse fetchRoleWiseData(String userId) {
-        log.info("Fetching role-wise data for userId: {}", userId);
-        try {
-            List<PermissionRow> rows = rolePermissionsRepository.findAllPermissionsByUserId(userId);
-
-            if (rows == null || rows.isEmpty()) {
-                log.info("No permissions found for userId: {}", userId);
-                return new MenuResponse(Collections.emptyList());
-            }
-            return menuService.transformFromProjection(rows);
-        } catch (Exception e) {
-            log.error("Error fetching permissions for userId: {}", userId, e);
-            return new MenuResponse(Collections.emptyList());
-        }
+    public TokenSessionValidator(ReactiveStringRedisTemplate redisTemplate) {
+        this.redisTemplate = redisTemplate;
     }
 
     /**
-     * Verifies user credentials and, on success, builds {@link UserDto} populated with an access token and token data.
-     * <p>Also records the login attempt and enforces password attempt limits.</p>
-     *
-     * @param userCredentials payload containing {@code userId} and (for password mode) {@code password}
-     * @param clientIp        caller's IP address for audit
-     * @return {@link UserDto} with validity flags, statuses, and (if valid) a signed access token
+     * Called during login to register a new session for the user.
+     * 1. Blacklists old JTI if exists
+     * 2. Stores new JTI in Redis with expiry
      */
-    @Transactional
-    @Override
-    public UserDto verifyUserCredentials(UserDto userCredentials, String clientIp) {
+    public Mono<Void> registerUserSession(String username, String newJti) {
+        log.info("Getting Username & newjti ::", username, newJti);
+        String userKey = USER_PREFIX + username;
 
-        final String userId = userCredentials.getUserId();
-        final String rawPassword = userCredentials.getPassword();
+        log.info("Inside registerUserSession method " + userKey);
 
-        UserDto result = new UserDto();
-        User user = userRepository.findByUserId(userId);
-
-        if (user == null) {
-            result.setValidCredentials(false);
-            result.setUserStatus(Constants.INVALID);
-            log.info("Login attempt for invalid userId: {}", userId);
-            return result;
-        }
-
-        LoginParam loginParam = loginParamRepository.getLoginParam();
-        LoginAttempt attempt = new LoginAttempt();
-        attempt.setLoginMethod(loginParam.getActiveLoginMode() == 'P'
-                ? Constants.PASSWORD_BASED_LOGIN
-                : Constants.SSO_BASED_LOGIN);
-        attempt.setSuccess("N");
-        attempt.setIpAddress(clientIp);
-        attempt.setUserId(userId);
-
-        result.setLoginMethod(loginParam.getActiveLoginMode());
-        result.setUserId(user.getUserId());
-
-        UserRoles userRole = userRepository.getUserRole(userId);
-
-        // Status checks: role & user
-        result.setRoleStatus(userRole.getRoleStatus());
-        result.setUserStatus(user.getAccountStatus());
-        result.setPasswordLoginStatus(user.getPasswordLogin());
-
-        if (!Constants.ACTIVE.equalsIgnoreCase(userRole.getRoleStatus())) {
-            attempt.setFailureReason(generateStatusMessage(userRole.getRoleStatus(), "role"));
-            loginAttemptRepository.save(attempt);
-            result.setValidCredentials(false);
-            return result;
-        }
-
-        if (!Constants.ACTIVE.equalsIgnoreCase(user.getAccountStatus())) {
-            attempt.setFailureReason(generateStatusMessage(user.getAccountStatus(), "user"));
-            loginAttemptRepository.save(attempt);
-            result.setValidCredentials(false);
-            return result;
-        }
-
-        // Proceed by login mode
-        if (loginParam.getActiveLoginMode() == Constants.PASSWORD) {
-            // Password-based login allowed?
-            if (Constants.ACTIVE.equalsIgnoreCase(user.getPasswordLogin())) {
-                passwordBasedLogin(rawPassword, attempt, result, user, loginParam);
-            } else {
-                result.setValidCredentials(false);
-                attempt.setFailureReason("Password login is disabled for this user.");
-            }
-        } else {
-            // SSO-based login
-            attempt.setSuccess("Y");
-            attempt.setFailureReason("SUCCESS");
-            result.setValidCredentials(true);
-
-            // If password-login was disabled, re-enable it on successful SSO per your original logic
-            if (Constants.INACTIVE.equalsIgnoreCase(user.getPasswordLogin())) {
-                user.setPasswordLogin(Constants.ACTIVE);
-                userRepository.save(user);
-            }
-        }
-
-        // On success, mint token and populate token data
-        if (result.isValidCredentials()) {
-            log.info("Credentials validated. Issuing token for userId={}", userId);
-
-            UserDto safeClaims = new UserDto();
-            safeClaims.setUserId(user.getUserId());
-            safeClaims.setUserrole(userRole.getRole());
-
-            @SuppressWarnings("unchecked")
-            String accessToken = HmacJwtUtil.generate(
-                    hmacSecret,
-                    user.getUserId(),
-                    ttlSeconds,
-                    mapper.convertValue(safeClaims, Map.class)
-            );
-
-            UserTokenDataDto tokenData = initializeTokenData(user, userRole);
-            result.setAccessToken(accessToken);
-            result.setUser(tokenData);
-        }
-
-        loginAttemptRepository.save(attempt);
-        log.debug("verifyUserCredentials result={}", result);
-        return result;
+        return redisTemplate.opsForValue().get(userKey)
+                .flatMap(oldJti -> {
+                    if (oldJti != null) {
+                        log.info(" Found old session for user={} -> blacklisting oldJti={}", username, oldJti);
+                        return blacklistToken(oldJti);
+                    }
+                    return Mono.empty();
+                })
+                .then(redisTemplate.opsForValue()
+                        .set(userKey, newJti, TOKEN_TTL)
+                        .doOnSuccess(v -> log.info(" Registered new session in Redis for user={} jti={}", username, newJti))
+                        .then()
+                );
     }
 
     /**
-     * Password-based authentication flow that enforces wrong password limits and updates counters/flags.
-     *
-     * @param password     raw password from the request
-     * @param loginAttempt login attempt entity to be updated with success/failure
-     * @param userInfo     output DTO updated with validity and attempts left
-     * @param user         the user entity being authenticated
-     * @param loginParam   login parameter configuration (e.g., permitted attempts)
+     * Blacklist a token (on logout or replacement).
      */
-    @Transactional
-    @Override
-    public void passwordBasedLogin(String password,
-                                   LoginAttempt loginAttempt,
-                                   UserDto userInfo,
-                                   User user,
-                                   LoginParam loginParam) {
-
-        log.info("Password-based login for userId={}", user.getUserId());
-
-        int failedCount = user.getUserWrongPasswordCount();
-        int permitted = loginParam.getWrongPasswordAttempts();
-
-        if (failedCount >= permitted) {
-            loginAttempt.setFailureReason("Exceeded attempt limit");
-            userInfo.setMessage("Exceeded attempt limit");
-            userInfo.setValidCredentials(false);
-            return;
-        }
-
-        if (encoder.matches(password, user.getPasswordHash())) {
-            // Success
-            loginAttempt.setSuccess("Y");
-            loginAttempt.setFailureReason("Success");
-            userInfo.setValidCredentials(true);
-            // Reset wrong password counter on success (optional, add if desired)
-            if (failedCount != 0) {
-                user.setUserWrongPasswordCount(0);
-                userRepository.save(user);
-            }
-            return;
-        }
-
-        // Failure path
-        if (failedCount == permitted - 1) {
-            // Lock password login on next failure threshold
-            user.setPasswordLogin(Constants.INACTIVE);
-            user.setUserWrongPasswordCount(0);
-        } else {
-            user.setUserWrongPasswordCount(failedCount + 1);
-        }
-
-        userRepository.save(user);
-        loginAttempt.setSuccess("N");
-        loginAttempt.setFailureReason("Wrong password");
-        userInfo.setValidCredentials(false);
-        userInfo.setAttemptsLeft(Math.max(0, permitted - failedCount - 1));
+    public Mono<Boolean> blacklistToken(String jti) {
+        String key = BLACKLIST_PREFIX + jti;
+        return redisTemplate.opsForValue().set(key, "true", TOKEN_TTL)
+                .doOnSuccess(v -> log.info(" Blacklisted token jti={}", jti));
     }
 
     /**
-     * Produces a human-readable message describing a blocked login due to {@code status} of a given {@code type}.
-     *
-     * @param status status string (e.g., ACTIVE/INACTIVE/LOCKED)
-     * @param type   subject type (e.g., "user", "role")
-     * @return formatted message
+     * Clear session for a given user (e.g., on logout).
      */
-    @Override
-    public String generateStatusMessage(String status, String type) {
-        return String.format("Trying to login with a %s %s", status, type);
+    public Mono<Boolean> clearUserSession(String username) {
+        return redisTemplate.delete(USER_PREFIX + username)
+                .map(deleted -> {
+                    if (deleted > 0) {
+                        log.info(" Cleared session for user={}", username);
+                        return true;
+                    }
+                    return false;
+                });
     }
 
     /**
-     * Checks the status and requirements for a user attempting to log in (without performing login).
-     *
-     * @param userId the user identifier
-     * @return {@link VerifyUserDTO} describing status, password update requirements, and messages
+     * Validate token against Redis.
+     * - Reject if blacklisted
+     * - Reject if not equal to the latest session JTI
      */
-    @Transactional(readOnly = true)
-    public VerifyUserDTO checkUser(String userId) {
-        VerifyUserDTO out = new VerifyUserDTO();
-        out.setUserId(userId);
-
-        User user = userRepository.findByUserId(userId);
-        LoginParam loginParam = loginParamRepository.getLoginParam();
-        out.setLoginMethod(loginParam.getActiveLoginMode());
-
-        if (user == null) {
-            // Invalid user
-            out.setUserCheck(false);
-            out.setUserStatus(Constants.INVALID);
-            out.setMessage("Invalid User");
-            return out;
+    public Mono<Authentication> validateWithRedis(Authentication authentication) {
+        if (!(authentication instanceof JwtAuthenticationToken jwtAuth)) {
+            log.warn("Skipping validation: not a JwtAuthenticationToken -> {}", authentication);
+            return Mono.error(new BadCredentialsException("Invalid authentication type"));
         }
 
-        // Existing user
-        if (Constants.ACTIVE.equalsIgnoreCase(user.getAccountStatus())) {
-            // Password validity window based on tempPasswordSetAt (guard nulls)
-            Timestamp setAt = user.getTempPasswordSetAt();
-            boolean isPasswordValid = false;
-            if (setAt != null) {
-                LocalDateTime lastUpdate = setAt.toLocalDateTime();
-                isPasswordValid = LocalDateTime.now()
-                        .isBefore(lastUpdate.plusHours(loginParam.getPasswordValidity()));
-            }
+        Jwt jwt = jwtAuth.getToken();
+        String username = jwt.getSubject();
+        String jti = jwt.getId();
 
-            UserRoles userRole = userRepository.getUserRole(userId);
-            out.setRoleStatus(userRole.getRoleStatus());
-            out.setUpdatePassword(user.getPasswordHash() == null || !isPasswordValid);
-            out.setUserStatus(Constants.ACTIVE);
-            out.setMessage(Constants.ACTIVE_USER);
-            out.setPasswordLoginStatus(user.getPasswordLogin());
-        } else {
-            // Inactive, Locked, Pending_Verification
-            String accountStatus = user.getAccountStatus();
-            out.setUserCheck(true);
-            out.setUserStatus(accountStatus);
-            out.setMessage(
-                    accountStatus.equalsIgnoreCase("locked") ? "Locked User"
-                            : accountStatus.equalsIgnoreCase("inactive") ? "Inactive User" : "Verification Pending"
-            );
+        if (jti == null) {
+            log.error("Token missing JTI claim -> rejecting token for user={}", username);
+            return Mono.error(new BadCredentialsException("Missing token ID (jti)"));
         }
 
-        return out;
-    }
+        log.info(" Validating token for user={} with jti={}", username, jti);
 
-    /**
-     * Updates the user's password hash and resets the temporary password timestamp.
-     * <p><strong>TODO:</strong> Integrate OTP validation before update.</p>
-     *
-     * @param userCredentials input DTO with {@code userId} and new raw {@code password}
-     * @return {@link UpdatePasswordDTO} indicating success and message; sensitive fields are cleared
-     */
-    @Transactional
-    public UpdatePasswordDTO updatePassword(UpdatePasswordDTO userCredentials) {
-        String userId = userCredentials.getUserId();
-        String password = userCredentials.getPassword();
+        return redisTemplate.hasKey(BLACKLIST_PREFIX + jti)
+                .flatMap(isBlacklisted -> {
+                    if (Boolean.TRUE.equals(isBlacklisted)) {
+                        log.warn(" Token is blacklisted -> jti={}, user={}", jti, username);
+                        return Mono.error(new BadCredentialsException("Token revoked"));
+                    }
 
-        // Always sanitize outbound fields
-        userCredentials.setUpdateFlag(false);
-        userCredentials.setPassword("");
-        userCredentials.setOtp("");
+                    return redisTemplate.opsForValue().get(USER_PREFIX + username)
+                            .flatMap(currentJti -> {
+                                log.info(" Redis stored JTI for user={} is {}", username, currentJti);
 
-        try {
-            User user = userRepository.findByUserId(userId);
-            if (user == null) {
-                userCredentials.setMessage("Invalid user id");
-                return userCredentials;
-            }
+                                if (currentJti == null) {
+                                    log.warn(" No active session found in Redis for user={} -> rejecting", username);
+                                    return Mono.error(new BadCredentialsException("No active session"));
+                                }
 
-            String passwordHash = encoder.encode(password);
-            user.setPasswordHash(passwordHash);
-            user.setTempPasswordSetAt(Timestamp.valueOf(LocalDateTime.now()));
-            userRepository.save(user);
+                                if (!currentJti.equals(jti)) {
+                                    log.warn(" Token mismatch for user={} -> expected={}, got={}",
+                                            username, currentJti, jti);
+                                    return Mono.error(new BadCredentialsException("Another session is active"));
+                                }
 
-            userCredentials.setMessage("User password successfully updated");
-            userCredentials.setUpdateFlag(true);
-        } catch (DataIntegrityViolationException e) {
-            log.warn("Data integrity violation while updating password for userId={}", userId, e);
-            userCredentials.setMessage("Failed to change password, please try again");
-        } catch (Exception e) {
-            log.error("Unexpected error while updating password for userId={}", userId, e);
-            userCredentials.setMessage("Unexpected error while changing password");
-        }
-
-        return userCredentials;
-    }
-
-    // ======= Helpers =======
-
-    /**
-     * Initializes the token-visible user data embedded/returned alongside the JWT.
-     *
-     * @param user     the user entity
-     * @param userRole the role mapping for the user
-     * @return user token DTO with non-sensitive fields
-     */
-    private UserTokenDataDto initializeTokenData(User user, UserRoles userRole) {
-        UserTokenDataDto tokenData = new UserTokenDataDto();
-        tokenData.setFirstName(user.getFirstName());
-        tokenData.setLastName(user.getLastName());
-        tokenData.setPhoneNumber(user.getPhoneNumber());
-        tokenData.setUserId(user.getUserId());
-        tokenData.setBranch(user.getBranch());
-        tokenData.setEmail(user.getEmail());
-        tokenData.setRole(userRole.getRole());
-        tokenData.setRoleName(userRole.getRoleName());
-        return tokenData;
+                                log.info(" Token validation success for user={} with jti={}", username, jti);
+                                return Mono.just(authentication);
+                            });
+                });
     }
 }
+
