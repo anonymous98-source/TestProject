@@ -1,45 +1,192 @@
-Functional Specification Document (FSD)
-Module: User Login
-Application: XYZ Web Application
-Version: 1.0
-Date: 10-Nov-2025
-Prepared by: [Your Name]
-1. Purpose
-The purpose of the Login Page is to authenticate users securely before granting access to the system. It validates user credentials against the registered user database.
-2. Scope
-This functionality allows users with valid credentials to log in to the application. Unauthorized users are prevented from accessing protected modules.
-3. Functional Requirements
-3.1 Login Page Elements
-Field / Component	Type	Description	Validation / Rules
-Username / Email	Text Input	Used to enter registered username or email	Mandatory; cannot be empty; should match registered record
-Password	Password Input	Used to enter user password	Mandatory; cannot be empty; minimum 8 characters
-Remember Me	Checkbox	Option to keep user logged in for next session	Optional
-Login Button	Button	Submits entered credentials for authentication	Enabled only when both fields are filled
-Forgot Password	Link	Redirects to password recovery screen	Active and clickable
-Register Now	Link	Redirects to registration screen	Active and clickable
-4. Functional Flow
-Normal Flow:
-1.	1. User navigates to the Login page.
-2.	2. User enters valid Username/Email and Password.
-3.	3. User clicks Login button.
-4.	4. System sends credentials to backend API for validation.
-5.	5. Backend verifies credentials in the database.
-6.	6. If valid: System redirects user to Dashboard/Home Page and displays success message.
-7.	7. If invalid: Displays error message and allows retry.
-5. Error Handling
-Error Condition	Message Displayed
-Username field empty	Please enter your username.
-Password field empty	Please enter your password.
-Invalid credentials	Invalid username or password.
-Server not reachable	Unable to connect. Please try again later.
-6. Security Requirements
-•	Password must not be stored or transmitted in plain text.
-•	HTTPS protocol must be used for data transmission.
-•	Implement rate limiting for failed login attempts.
-•	Session tokens must expire after inactivity.
-7. Acceptance Criteria
-•	User should be able to login successfully with valid credentials.
-•	Login button should remain disabled until all mandatory fields are filled.
-•	Invalid credentials should trigger an error message.
-•	Passwords should never be displayed in plain text.
-•	After login, user should be redirected to Dashboard.
+package com.fincore.gateway.Controller;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fincore.gateway.JwtUtil.HmacJwtUtil;
+import com.fincore.gateway.Service.LoginService;
+import com.fincore.gateway.Service.TokenSessionValidator;
+import com.fincore.gateway.dto.*;
+import com.fincore.gateway.repository.UserRepository;
+import com.fincore.gateway.utility.Constants;
+import com.fincore.gateway.utility.LoginUtility;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
+import org.springframework.http.MediaType;
+import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Base64;
+import java.util.Map;
+
+/**
+ * Test-only end point to exercise the gateway+redis locally.
+ * - POST /auth/login {username} -> returns HS256 token (sub + jti) and
+ * registers session in Redis
+ * - POST /auth/logout -> blacklists current token jti in Redis
+ * <p>
+ * In PRODUCTION:
+ * - Remove this controller.
+ * - Your Login service should write to Redis: USR:<user>=<jti>; On logout write
+ * BL:<jti>=1.
+ */
+@Slf4j
+@RestController
+@RequestMapping("/auth")
+@RequiredArgsConstructor
+public class AuthController {
+
+    private static final String USER_PREFIX = "USR:";
+    private final TokenSessionValidator validator;
+    private final ReactiveStringRedisTemplate redisTemplate;
+    @Autowired
+    UserRepository userRepository;
+
+    @Autowired
+    LoginService loginService;
+
+    @Autowired
+    ObjectMapper mapper;
+
+    @Value("${security.jwt.mode:hmac}")
+    private String mode;
+
+    @Value("${security.jwt.hmac-base64-secret:}")
+    private String hmacSecret;
+
+    @Value("${security.jwt.ttl-seconds:900}")
+    private long ttlSeconds;
+
+    @PostMapping(value = "/login", produces = MediaType.APPLICATION_JSON_VALUE)
+    public UserLoginDTO login(ServerHttpRequest request, @RequestBody UserDto userMap) {
+
+        // Methods Validate the User Existed in DB & Return the user object
+         String clientIp = LoginUtility.getClientIp(request);
+        log.info("Cleint Ip: {}",clientIp);
+        UserDto user = loginService.verifyUserCredentials(userMap,clientIp);
+        log.info("User:{}",user);
+        if (!user.isValidCredentials()) {
+            return user;
+        }
+
+        if (!Constants.HMAC.equalsIgnoreCase(mode)) {
+            return LoginResponseDTO.builder().error(
+                    "This demo /auth/login issues HS256 tokens only. Switch to security.jwt.mode=hmac for local tests.")
+                    .build();
+        }
+
+        // Simple demo: accept any username
+        if (hmacSecret == null || hmacSecret.isBlank()) {
+            return LoginResponseDTO.builder().error("Missing hmac secret").build();
+        }
+
+        // User UserData = new HashMap<>();
+        // Add users data here for Token
+        // Generate a HS256 JWT (sub + jti + exp)
+        String token = HmacJwtUtil.generate(hmacSecret, user.getUserId(), ttlSeconds,
+                mapper.convertValue(user.getUser(), Map.class));
+
+        // Extract jti again so we can store it; JWT returns it inside the token, but we
+        // avoid parsing here:
+        // Small parse just to get jti back (safe because we just created it).
+        var parser = io.jsonwebtoken.Jwts.parser()
+                .verifyWith(io.jsonwebtoken.security.Keys.hmacShaKeyFor(Base64.getDecoder().decode(hmacSecret)))
+                .build();
+        var claimsJws = parser.parseSignedClaims(token);
+        String jti = claimsJws.getPayload().getId();
+
+        /* function call to bring role wise screen data from db. */
+        MenuResponse roleData = loginService.fetchRoleWiseData(user.getUserId());
+
+        log.info("response generated.");
+
+        return LoginResponseDTO
+                .builder()
+                .userId(user.getUserId())
+                .validCredentials(user.isValidCredentials())
+                .userStatus(user.getUserStatus())
+                .passwordLoginStatus(user.getPasswordLoginStatus())
+                .accessToken(token).tokenType("Bearer")
+                .expiresIn(ttlSeconds)
+                .sub(user.getUserId())
+                .jti(jti)
+                .roleData(roleData)
+                .build();
+    }
+
+    // User logout Method using JWT-Token
+    @PostMapping("/logout")
+    public LoginResponseDTO logout(JwtAuthenticationToken jwtAuth) {
+        if (jwtAuth == null) {
+            return LoginResponseDTO.builder().error("No authenticated token provided").build();
+        }
+
+        var jwt = jwtAuth.getToken();
+        String username = jwt.getSubject();
+        String jti = jwt.getId();
+
+        if (username == null || jti == null) {
+            return LoginResponseDTO.builder().error("Token missing subject or jti").build();
+        }
+
+        log.info("Logout requested for user={} jti={}", username, jti);
+
+        String userKey = USER_PREFIX + username;
+
+        // 1) blacklist the given jti
+        String currentJti = validator.blacklistToken(jti)
+                // 2) then check current stored JTI for user
+                .then(
+                        redisTemplate.opsForValue()
+                                .get(userKey)
+                                .defaultIfEmpty("")
+
+                ).block();
+        if (jti.equals(currentJti)) {
+            // 3) Only clear session if current stored JTI equals this jti
+            log.info("Current Redis JTI matches logout jti -> clearing session for user= {}", username);
+            boolean cleared = Boolean.TRUE.equals(validator.clearUserSession(username).block());
+            if (cleared) {
+                return LoginResponseDTO.builder()
+                        .error("User logged out (revoked token and cleared session)")
+                        .userId(username)
+                        .jti(jti)
+                        .build();
+            } else {
+                return LoginResponseDTO.builder().error("Logout failed").build();
+            }
+        } else {
+            // Someone else already replaced the session; keep that session intact.
+            log.info(
+                    "Redis JTI does not match logout jti (currentJti= {}) -> not clearing session for user= {}",
+                    currentJti, username);
+            return LoginResponseDTO.builder()
+                    .error("Token revoked. Active session remains (another token is active)")
+                    .userId(username).jti(jti).build();
+        }
+    }
+
+    @PostMapping("/check-user")
+    public VerifyUserDTO checkUser(@RequestBody Map<String, String> user) {
+        String userId = user.get("userId");
+        log.info(userId);
+
+        VerifyUserDTO result = loginService.checkUser(userId);
+        log.info(result.toString());
+
+        return result;
+    }
+
+    @PostMapping("/update-password")
+    public UpdatePasswordDTO updatePassword(@RequestBody UpdatePasswordDTO userCredentials) {
+
+        return loginService.updatePassword(userCredentials);
+
+    }
+}
