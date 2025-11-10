@@ -4,41 +4,25 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * DTO that carries minimal user data embedded inside a token.
- *
- * This object is typically serialized within access or refresh tokens
- * to represent the authenticated user's identity and basic profile info.
- */
 @Data
-@NoArgsConstructor
 @AllArgsConstructor
-public class UserTokenDataDto {
+@NoArgsConstructor
+public class VerifyUserDTO {
 
-    /** Unique identifier of the user. */
     private String userId;
 
-    /** Numeric role ID assigned to the user. */
-    private Integer role;
+    private String message;
 
-    /** Name of the role (e.g. ADMIN, MANAGER, USER). */
-    private String roleName;
+    private char loginMethod;
 
-    /** First name of the user. */
-    private String firstName;
+    private String userStatus;
 
-    /** Middle name, if provided. */
-    private String middleName;
+    private String roleStatus;
 
-    /** Last name of the user. */
-    private String lastName;
+    private boolean updatePassword;
 
-    /** Contact number registered with the user. */
-    private String phoneNumber;
+    private boolean userCheck;
 
-    /** Email address associated with the user account. */
-    private String email;
+    private String passwordLoginStatus;
 
-    /** Branch or office code where the user is mapped. */
-    private int branch;
 }
