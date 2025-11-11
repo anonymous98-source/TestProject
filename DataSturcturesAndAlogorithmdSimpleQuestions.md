@@ -1,7 +1,3 @@
-Sure ✅
-Here are quick DSA questions that can be solved in under 5 minutes, and are very common in interviews:
-
-
 ---
 
 ✅ Easy–Medium DSA Questions (5-minute solvable)
@@ -356,11 +352,3 @@ public class QuickDSA {
         System.out.println(Arrays.toString(twoSum(new int[]{2,7,11,15}, 9))); // [0,1]
     }
 }
-
-Want me to:
-
-bundle these into a downloadable file (Java or PDF),
-
-add more 5-minute DSA (e.g., min stack, valid anagram index, gcd/lcm, sliding window sum),
-
-or include JUnit tests for quick practice?
