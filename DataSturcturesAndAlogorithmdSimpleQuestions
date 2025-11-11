@@ -1,0 +1,188 @@
+Sure ✅
+Here are quick DSA questions that can be solved in under 5 minutes, and are very common in interviews:
+
+
+---
+
+✅ Easy–Medium DSA Questions (5-minute solvable)
+
+✅ 1. Reverse a String
+
+Input: "hello"
+Output: "olleh"
+
+✅ One-liner in many languages
+
+
+---
+
+✅ 2. Check if a String is Palindrome
+
+Input: "madam"
+Output: true
+
+Just compare characters from left & right.
+
+
+---
+
+✅ 3. Find Missing Number in 1..N
+
+Input: [1, 2, 4, 5]
+Output: 3
+
+Formula:
+
+missing = n*(n+1)/2 - sum(arr)
+
+
+---
+
+✅ 4. Find First Non-Repeating Character
+
+Input: "aabbcddee"
+Output: 'c'
+
+Use frequency map.
+
+
+---
+
+✅ 5. Remove Duplicate Characters from String
+
+Input: "banana"
+Output: "ban"
+
+Use Set to track seen chars.
+
+
+---
+
+✅ 6. Check if Two Strings Are Anagrams
+
+Input: "listen", "silent"
+Sort both → compare OR use frequency map.
+
+
+---
+
+✅ 7. Find Second Largest Element
+
+Input: [5,1,9,2,7]
+Output: 7
+
+Track max & secondMax.
+
+
+---
+
+✅ 8. Merge Two Sorted Arrays
+
+Example:
+
+[1,3,5] + [2,4,6] → [1,2,3,4,5,6]
+
+Two-pointer technique.
+
+
+---
+
+✅ 9. Count Frequency of Each Character
+
+Input: "apple"
+Output: {a=1, p=2, l=1, e=1}
+
+Use HashMap.
+
+
+---
+
+✅ 10. Check Balanced Parentheses
+
+Input: "{[()]}"
+Output: true
+
+Use stack.
+
+
+---
+
+✅ 11. Find Middle Element of Linked List
+
+Use fast and slow pointers.
+
+
+---
+
+✅ 12. Detect Loop in LinkedList
+
+Fast and slow pointers:
+
+If they meet → loop exists
+
+
+
+---
+
+✅ 13. Find Intersection of Two Arrays
+
+Use HashSet.
+
+
+---
+
+✅ 14. Move Zeros to End
+
+Input: [1,0,6,0,3] → [1,6,3,0,0]
+
+Two-pointer solution.
+
+
+---
+
+✅ 15. Fibonacci using DP
+
+Avoid recursion stack overflow.
+
+
+---
+
+✅ 16. Check if Array Sorted
+
+Traverse once.
+
+
+---
+
+✅ 17. Count Vowels in String
+
+Check each character aeiou.
+
+
+---
+
+✅ 18. Sum of Digits
+
+Example: 123 → 6
+
+
+---
+
+✅ 19. Print Prime Numbers Up To N
+
+Simple sieve or loop.
+
+
+---
+
+✅ 20. Two Sum Problem
+
+Given array and target, check if 2 numbers sum to target.
+Use HashMap → O(n)
+
+
+---
+
+Would you like: ✅ Solutions in Java?
+✅ 5-minute coding practice sheet?
+✅ 20 more medium-level DSA questions with answers?
