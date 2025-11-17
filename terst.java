@@ -1,141 +1,115 @@
-// import org.springframework.transaction.annotation.Transactional;
+public ResponseEntity<ResponseVO<Map<String, Object>>> acceptOrRejectUserRequest(UserRequestDto userRequestDto, String ipAddress) {
+        ResponseVO<Map<String, Object>> responseVo = new ResponseVO();
+        Map<String, Object> result = new HashMap<>();
+        String actionFlag = userRequestDto.getActionFlag();
+        String approverUserId = userRequestDto.getApproverUserId();
 
-@Transactional(rollbackFor = Exception.class)
-public ResponseEntity<ResponseVO<Map<String, Object>>> createNewRequest(Map<String, Object> request) {
+        long requestId = userRequestDto.getRequestId();
+        UserRequest userRequest = userRequestRepository.findUserRequestsByRequestId(requestId);
+        userRequest.setApproverUserId(approverUserId);
+        userRequest.setApprovalDate(new Timestamp(System.currentTimeMillis()));
+        String requestFlag = userRequest.getRequestType();
 
-    ResponseVO<Map<String, Object>> responseVo = new ResponseVO<>();
-    Map<String, Object> result = new HashMap<>();
 
-    UserRequest savedRequest = null;
-    boolean success = false;
-    String businessMessage = null;
+        if (actionFlag.equalsIgnoreCase(Constant.ACCEPT)) {
+            /*Initalizing log - save log only when a change is performed on  master table( i.e, when a request is accepted) */
+            AuditLog newLog = new AuditLog();
+            newLog.setRequestId(requestId);
+            newLog.setUserId(approverUserId);
+            newLog.setOldValue(userRequestDto.getOldValue());
+            newLog.setChangeType(Constant.USER);
+            newLog.setActionType(Constant.USER + requestFlag + "ED");
+            newLog.setNewValue(userRequest.getRequestPayload());
+            newLog.setIpAddress(ipAddress);
+            User user = userRepository.findUserByUserId(userRequest.getTargetUserId());
 
-    try {
-        String targetUserId    = request.get("targetUserId").toString();
-        String requestorUserId = request.get("requestorUserId").toString();
-        String requestType     = request.get("requestType").toString();
-        String requestPayload  = request.get("requestPayload").toString();
+            if (user == null && !(requestFlag.equalsIgnoreCase(Constant.CREATE))) {   /*The user id we are trying to modify/lock/unlock/delete is not present*/
+                result.put("status", false);
+                result.put("message", "User not found");
+            } else if (user != null && (requestFlag.equalsIgnoreCase(Constant.CREATE))) {   /*The user id we are trying to create is already present*/
+                result.put("status", false);
+                result.put("message", "User already present");
+            } else if (requestFlag.equalsIgnoreCase(Constant.MODIFY) || requestFlag.equals(Constant.CREATE)) {
 
-        // Assuming you have a DTO used for notification (like in your second snippet)
-        UserRequestDto dto = objectMapper.convertValue(request, UserRequestDto.class);
+                if (requestFlag.equals(Constant.CREATE)) {
+                    user = new User();
+                    user.setAccountStatus(Constant.ACTIVE);
+                    user.setCreatedAt(new Timestamp(System.currentTimeMillis()));
+                    user.setIsDeleted('N');
+                    user.setUserWrongPasswordCount(0);
+                }
 
-        UserRequest userRequest = objectMapper.convertValue(request, UserRequest.class);
-        userRequest.setRequestDate(new Timestamp(System.currentTimeMillis()));
+                Map userMap = null;
+                try {
+                    userMap = objectMapper.readValue(userRequest.getRequestPayload(), new TypeReference<Map<String, Object>>() {
+                    });
 
-        User user = userRepository.findUserByUserId(targetUserId);
+                    user.setUserId(userRequest.getTargetUserId());
+                    user.setFirstName(Objects.toString(userMap.get("firstName"), null));
+                    user.setMiddleName(Objects.toString(userMap.get("middleName"), null));
+                    user.setLastName(Objects.toString(userMap.get("lastName"), null));
+                    user.setEmail(userMap.get("email").toString());
+                    user.setPhoneNumber(userMap.get("phoneNumber").toString());
+                    user.setBranch(Integer.parseInt(userMap.get("branch").toString()));
+                    user.setUpdatedAt(new Timestamp(System.currentTimeMillis()));
+                    userRepository.save(user);
+                    UserRole userRole = userRoleRepository.getUserRolesByUserId(userRequest.getTargetUserId());
+                    if (userRole == null) {
+                        userRole = new UserRole();
+                    }
+                    userRole.setUserId(userMap.get("userId").toString());
+                    userRole.setRoleId(Integer.parseInt(userMap.get("roleId").toString()));
+                    userRoleRepository.save(userRole);
+                    result.put("status", true);
 
-        // ---- BUSINESS VALIDATIONS ----
-        if (userRequestRepository.countUserPendingRequests(targetUserId) > 0) {
+                    result.put("message", requestFlag.equalsIgnoreCase(Constant.CREATE) ? "USER CREATED" : " USER UPDATED");
+                } catch (JsonProcessingException e) {
+                    result.put("status", false);
+                    result.put("message", e.getMessage());
+                }
 
-            businessMessage = "There is already a pending request for this user";
-            result.put(STATUS, false);
-            result.put(MESSAGE, businessMessage);
+            } else if (requestFlag.equalsIgnoreCase(Constant.LOCK) || requestFlag.equalsIgnoreCase(Constant.UNLOCK)) {
+                user.setAccountStatus(requestFlag.equalsIgnoreCase(Constant.UNLOCK) ? Constant.ACTIVE : Constant.LOCKED);
 
-            responseVo.setStatusCode(HttpStatus.CONFLICT);
-            responseVo.setMessage(HttpStatus.CONFLICT.getReasonPhrase());
+                userRepository.save(user);
+                result.put("status", true);
+                result.put("message", requestFlag.equalsIgnoreCase(Constant.UNLOCK) ? "USER UNLOCKED" : " USER LOCKED");
+            } else if (requestFlag.equalsIgnoreCase("D")) {
 
-        } else if (requestType.equalsIgnoreCase(Constant.CREATE) && user != null) {
+                try {
+                    userRepository.delete(user);
+                    result.put("status", true);
+                    result.put("message", "User deleted successfully");
+                } catch (Exception e) {
+                    result.put("status", false);
+                    result.put("message", "Failed to delete user");
+                }
 
-            businessMessage = "User already exists";
-            result.put(STATUS, false);
-            result.put(MESSAGE, businessMessage);
+            } else {
+                result.put("status", false);
+                result.put("message", "Invalid request flag");
+            }
 
-            responseVo.setStatusCode(HttpStatus.CONFLICT);
-            responseVo.setMessage(HttpStatus.CONFLICT.getReasonPhrase());
 
-        } else if (!requestType.equalsIgnoreCase(Constant.CREATE) && user == null) {
-
-            businessMessage = "User does not exist";
-            result.put(STATUS, false);
-            result.put(MESSAGE, businessMessage);
-
-            responseVo.setStatusCode(HttpStatus.CONFLICT);
-            responseVo.setMessage(HttpStatus.CONFLICT.getReasonPhrase());
-
+        } else if (actionFlag.equalsIgnoreCase(Constant.REJECT)) {
+            userRequest.setRequestStatus(Constant.REJECTED);
+            userRequest.setReasonForRejection(userRequestDto.getRemarks());
+            result.put("status", true);
+            result.put("message", "User request rejected");
+            userRequestRepository.save(userRequest);
         } else {
-            // ---- HAPPY PATH: SAVE REQUEST ----
-            userRequest.setRequestStatus(Constant.PENDING);
-            log.info("User Request: {}", userRequest);
-
-            savedRequest = userRequestRepository.save(userRequest);
-
-            result.put("userRequest", savedRequest);
-            result.put(STATUS, true);
-            businessMessage = "New request created";
-
-            responseVo.setStatusCode(HttpStatus.CREATED);
-            responseVo.setMessage(HttpStatus.CREATED.getReasonPhrase());
-
-            success = true;
+            result.put("status", false);
+            result.put("message", "Invalid action flag");
         }
 
-        // ---- NOTIFICATION (for both success and failure) ----
-        // targetId: you were using this in your notification code
-        String targetId = targetUserId;
-        createRequestNotification(dto, targetId, savedRequest, success, businessMessage);
+        if (!(result.get("status") == null || result.get("status") == Boolean.FALSE)) {
+            userRequest.setRequestStatus(Constant.ACCEPTED);
+            userRequestRepository.save(userRequest);
+        }
+
 
         responseVo.setResult(result);
-
-    } catch (IllegalArgumentException e) {
-
-        log.error("Invalid request payload", e);
-
-        responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
-        responseVo.setMessage(HttpStatus.BAD_REQUEST.getReasonPhrase());
-        responseVo.setResult(Collections.emptyMap());
+        responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.OK.value()));
+        responseVo.setMessage(HttpStatus.OK.getReasonPhrase());
+        return new ResponseEntity<>(responseVo, responseVo.getStatusCode());
     }
-
-    return new ResponseEntity<>(responseVo, responseVo.getStatusCode());
-}
-
-
-
-
-
-
-
----------------
-
-
-// Helper method – called from createNewRequest()
-// If this throws, the @Transactional on createNewRequest will roll back everything.
-private void createRequestNotification(UserRequestDto dto,
-                                       String targetId,
-                                       UserRequest savedRequest,
-                                       boolean success,
-                                       String businessMessage) {
-
-    try {
-        // 1. Fetch Config from CACHE/DB
-        String requestTypeKey = dto.getRequestType().name(); // e.g., "SEGMENT_CODE"
-        log.info("Request Type String to fetch role ids from PERMISSIONS: {}", requestTypeKey);
-
-        NotificationConfigDto config = permissionConfigService.getConfig(requestTypeKey);
-
-        // 2. Build Message
-        String action = dto.getChangeType().name(); // ADD, UPDATE, DELETE
-        String statusText = success ? "pending" : "failed";
-
-        String message = "New " + action + " request (" + targetId + ") "
-                + statusText + " for " + dto.getRequestType()
-                + (businessMessage != null ? (": " + businessMessage) : "");
-
-        // 3. Send Notification (group)
-        String referenceId = (savedRequest != null) ? savedRequest.getId().toString() : null;
-
-        notificationWriterService.createNotification(
-                null,                       // userId is null (targeting a group)
-                config.getTargetRoles(),    // "51,55"
-                message,
-                config.getTargetUrl(),      // e.g. "/segment-requests"
-                referenceId,
-                EVENT_SOURCE
-        );
-
-    } catch (Exception e) {
-        Long requestId = (savedRequest != null) ? savedRequest.getId() : null;
-        log.error("CRITICAL: Failed to create notification for request: {}. Rolling back transaction.",
-                  requestId, e);
-        throw new RuntimeException("Failed to create notification event, rolling back request creation.", e);
-    }
-}
