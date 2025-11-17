@@ -76,7 +76,25 @@ public ResponseEntity<ResponseVO<Map<String, Object>>> createNewRequest(Map<Stri
 
         responseVo.setResult(result);
 
+    } catch (IllegalArgumentException e) {
 
+        log.error("Invalid request payload", e);
+
+        responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
+        responseVo.setMessage(HttpStatus.BAD_REQUEST.getReasonPhrase());
+        responseVo.setResult(Collections.emptyMap());
+    }
+
+    return new ResponseEntity<>(responseVo, responseVo.getStatusCode());
+}
+
+
+
+
+
+
+
+---------------
 
 
 // Helper method – called from createNewRequest()
@@ -121,18 +139,3 @@ private void createRequestNotification(UserRequestDto dto,
         throw new RuntimeException("Failed to create notification event, rolling back request creation.", e);
     }
 }
-    } catch (IllegalArgumentException e) {
-
-        log.error("Invalid request payload", e);
-
-        responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
-        responseVo.setMessage(HttpStatus.BAD_REQUEST.getReasonPhrase());
-        responseVo.setResult(Collections.emptyMap());
-    }
-
-    return new ResponseEntity<>(responseVo, responseVo.getStatusCode());
-}
-
-
-
-
