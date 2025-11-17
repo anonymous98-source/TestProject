@@ -60,6 +60,41 @@ public ResponseEntity<ResponseVO<Map<String,Object>>> createNewRequest(Map<Strin
             responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
             responseVo.setMessage(HttpStatus.BAD_REQUEST.getReasonPhrase());
 
+
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+try {
+            // --- NOTIFICATION LOGIC ---
+
+            // 1. Fetch Config from CACHE (Fast)
+            String requestTypeKey = dto.getRequestType().name(); // e.g., "SEGMENT_CODE"
+            log.info("Request Type String to fetch role ids from PERMISSIONS: {}", requestTypeKey);
+
+            NotificationConfigDto config = permissionConfigService.getConfig(requestTypeKey);
+
+            // 2. Customize Message
+            String action = dto.getChangeType().name(); // ADD, UPDATE, DELETE
+            String message = "New " + action + " request (" + targetId + ") pending for " + dto.getRequestType();
+
+            // 3. Send to Group (1-to-Many via Outbox)
+            notificationWriterService.createNotification(
+                    null,                       // userId is null (we are targeting a group)
+                    config.getTargetRoles(),    // "51,55" (Fetched from Cache/DB)
+                    message,
+                    config.getTargetUrl(),      // "/segment-requests" (Fetched from Cache/DB)
+                    savedRequest.getId().toString(),
+                    EVENT_SOURCE
+            );
+
+        } catch (Exception e) {
+            // Log the error and re-throw as a RuntimeException to force a rollback.
+            log.error("CRITICAL: Failed to create 'pending' notification for request: {}. Rolling back transaction.", savedRequest.getId(), e);
+            throw new RuntimeException("Failed to create notification event, rolling back request creation.", e);
+        }
+
         }
 
         return new ResponseEntity(responseVo,responseVo.getStatusCode());
