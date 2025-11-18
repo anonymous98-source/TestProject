@@ -2,16 +2,11 @@ package com.tcs.userservice.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonMappingException;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tcs.userservice.ResponseVO;
-import com.tcs.userservice.dto.PermissionDto;
-import com.tcs.userservice.dto.PermissionList;
-import com.tcs.userservice.dto.PermissionOrderDto;
-import com.tcs.userservice.dto.RoleDto;
-import com.tcs.userservice.dto.RoleRequestPayload;
-import com.tcs.userservice.dto.UserRequestProjection;
+import com.tcs.userservice.dto.*;
 import com.tcs.userservice.model.*;
 import com.tcs.userservice.repository.PermissionsRepository;
 import com.tcs.userservice.repository.RolePermissionsRepository;
@@ -71,7 +66,16 @@ public class RoleRequestServiceImpl implements RoleRequestService {
     @Autowired
     private CacheManager cacheManager;
 
+    @Autowired
+    private PermissionConfigService permissionConfigService;
+
+    @Autowired
+    private NotificationWriterService notificationWriterService;
+
+    private static final String EVENT_SOURCE = "ROLE_REQUEST";
+
     @SuppressWarnings("unchecked")
+    @Transactional(rollbackFor = Exception.class)
     public ResponseEntity<ResponseVO> createNewRoleRequest(final Map<String, Object> request, String userId) {
         final ResponseVO responseVo = new ResponseVO();
         final Map<String, Object> result = new HashMap<>();
@@ -113,12 +117,14 @@ public class RoleRequestServiceImpl implements RoleRequestService {
         JsonNode payloadNode = null;
         try {
             payloadNode = mapper.readTree(String.valueOf(request.get("requestPayload")));
-        } catch (JsonMappingException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
         } catch (JsonProcessingException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
+            log.error("Error parsing requestPayload", e);
+            result.put(STATUS, false);
+            result.put(MESSAGE, "Invalid requestPayload JSON");
+            responseVo.setResult(result);
+            responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
+            responseVo.setMessage(HttpStatus.BAD_REQUEST.getReasonPhrase());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(responseVo);
         }
 
         // Extract simple fields
@@ -127,12 +133,11 @@ public class RoleRequestServiceImpl implements RoleRequestService {
 
         log.info(roleName);
 
-        // final String roleName = String.valueOf(json.get("roleName"));
-        final String requestorUserId = userId;// roleRequest.getRequestorUserId();
+        final String requestorUserId = userId;
         final String requestPayload = roleRequest.getRequestPayload();
 
-        log.info("Role request: flag={}, targetRoleId={}, roleName={}, requestorUserId={}", requestFlag, targetRoleId,
-                roleName, requestorUserId);
+        log.info("Role request: flag={}, targetRoleId={}, roleName={}, requestorUserId={}",
+                requestFlag, targetRoleId, roleName, requestorUserId);
 
         // 4) Fetch things once (avoid duplicate repository hits)
         final var existingRole = roleRepository.findRoleByRoleId(targetRoleId);
@@ -172,7 +177,6 @@ public class RoleRequestServiceImpl implements RoleRequestService {
 
         // 6) Finalize and persist
         if (isCreate) {
-
             roleRequest.setTargetRoleId(roleRequestRepository.getNewRoleIdOnCreation());
         }
 
@@ -184,6 +188,19 @@ public class RoleRequestServiceImpl implements RoleRequestService {
         responseVo.setResult(result);
         responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.CREATED.value()));
         responseVo.setMessage(HttpStatus.CREATED.getReasonPhrase());
+
+        // 7) Notification: new ROLE request is now PENDING
+        try {
+            createRoleRequestNotification(
+                    roleRequest,
+                    "PENDING",                    // workflow stage
+                    true,                         // we are in success path
+                    "New role request created."   // info message
+            );
+        } catch (RuntimeException e) {
+            // cause rollback (request + notification must be atomic)
+            throw e;
+        }
 
         return ResponseEntity.status(HttpStatus.CREATED).body(responseVo);
     }
@@ -221,22 +238,39 @@ public class RoleRequestServiceImpl implements RoleRequestService {
 
     @Transactional(rollbackFor = Exception.class)
     public ResponseEntity acceptOrRejectRoleRequest(Map<String, Object> request, String userId) {
-        ResponseVO<Map<String, Object>> responseVo = new ResponseVO();
+        ResponseVO<Map<String, Object>> responseVo = new ResponseVO<>();
         Map<String, Object> result = new HashMap<>();
+
         String actionFlag = (String) request.get("actionFlag");
-        int requestId = Integer.valueOf((String) request.get("requestId"));
+        int requestId = Integer.parseInt((String) request.get("requestId"));
         RoleRequest roleRequest = roleRequestRepository.findRoleRequestByRequestId(requestId);
 
         roleRequest.setApproverUserId(userId);
         roleRequest.setApprovalDate(new Timestamp(System.currentTimeMillis()));
         String requestFlag = roleRequest.getRequestType();
-        String requestPayload = (String) request.get("requestPayload");
 
+        // Perform DB operations
         responseVo.setResult(performUpdateOperation(result, actionFlag, roleRequest, requestFlag));
         responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.OK.value()));
         responseVo.setMessage(HttpStatus.OK.getReasonPhrase());
-        return new ResponseEntity<>(responseVo, responseVo.getStatusCode());
 
+        // Notification (APPROVE / REJECT) – based on result
+        boolean success = Boolean.TRUE.equals(result.get(STATUS));
+        String infoMessage = (String) result.getOrDefault(MESSAGE, "No message");
+
+        try {
+            createRoleRequestNotification(
+                    roleRequest,
+                    actionFlag,   // ACCEPT / REJECT
+                    success,
+                    infoMessage
+            );
+        } catch (RuntimeException e) {
+            // rollback everything (role update + request status) if notification fails
+            throw e;
+        }
+
+        return new ResponseEntity<>(responseVo, responseVo.getStatusCode());
     }
 
     private Map<String, Object> performUpdateOperation(Map<String, Object> result, String actionFlag, RoleRequest roleRequest,
@@ -446,38 +480,48 @@ public class RoleRequestServiceImpl implements RoleRequestService {
         return new ResponseEntity(responseVo, responseVo.getStatusCode());
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public ResponseEntity cancelRoleRequest(Map<String, Object> request, String userId) {
         ResponseVO responseVO = new ResponseVO();
         Map<String, Object> result = new HashMap<>();
 
         try {
-            int requestId = Integer.valueOf(request.get("requestId").toString());
-            // String userId = (String) request.get("userId");
+            int requestId = Integer.parseInt(request.get("requestId").toString());
             RoleRequest roleRequest = roleRequestRepository.getRoleRequestByRequestId(requestId);
 
-            log.info("Requester ID" + roleRequest.getRequestorUserId());
-            log.info("User ID :" + userId);
-            System.out.println(
-                    "ABCD " + userId == null || userId.isEmpty() || !userId.equals(roleRequest.getRequestorUserId()));
+            log.info("Requester ID {}", roleRequest.getRequestorUserId());
+            log.info("User ID : {}", userId);
 
             if (userId == null || userId.isEmpty() || !userId.equals(roleRequest.getRequestorUserId())) {
                 result.put(STATUS, false);
                 result.put(MESSAGE, "You are unauthorized to cancel this request");
                 responseVO.setStatusCode(HttpStatusCode.valueOf(HttpStatus.UNAUTHORIZED.value()));
                 responseVO.setMessage(HttpStatus.UNAUTHORIZED.getReasonPhrase());
-
             } else {
                 roleRequest.setRequestStatus(Constant.CANCEL);
-//				 roleRequestRepository.cancel(requestId);
                 roleRequestRepository.save(roleRequest);
+
                 result.put(STATUS, true);
                 result.put(MESSAGE, "Request cancelled");
                 responseVO.setStatusCode(HttpStatusCode.valueOf(HttpStatus.OK.value()));
                 responseVO.setMessage(HttpStatus.OK.getReasonPhrase());
+
+                // Notification only on successful cancel
+                try {
+                    createRoleRequestNotification(
+                            roleRequest,
+                            Constant.CANCEL,          // workflow action
+                            true,
+                            "Request cancelled by requester"
+                    );
+                } catch (RuntimeException e) {
+                    // rollback cancel if notification fails
+                    throw e;
+                }
             }
 
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Error while cancelling role request", e);
             result.put(STATUS, false);
             result.put(MESSAGE, e.getMessage());
             responseVO.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
@@ -573,4 +617,64 @@ public class RoleRequestServiceImpl implements RoleRequestService {
         }
 
     }
+
+    private void createRoleRequestNotification(RoleRequest roleRequest,
+                                               String actionFlag,   // PENDING / ACCEPT / REJECT / CANCEL
+                                               boolean success,
+                                               String infoMessage) {
+        try {
+            // Build requestTypeKey for notification configuration
+            // Adjust mapping if your config keys are different
+            String requestTypeKey = buildRoleRequestTypeKey(roleRequest);
+
+            log.info("Fetching notification config for key: {}", requestTypeKey);
+            NotificationConfigDto config = permissionConfigService.getConfig(requestTypeKey);
+
+            // Derive status label to show in message
+            String statusText;
+            if ("PENDING".equalsIgnoreCase(actionFlag)) {
+                statusText = success ? "PENDING" : "FAILED";
+            } else if (Constant.ACCEPT.equalsIgnoreCase(actionFlag)) {
+                statusText = success ? "APPROVED" : "FAILED";
+            } else if (Constant.REJECT.equalsIgnoreCase(actionFlag)) {
+                statusText = "REJECTED";
+            } else if (Constant.CANCEL.equalsIgnoreCase(actionFlag)) {
+                statusText = "CANCELLED";
+            } else {
+                statusText = "UNKNOWN";
+            }
+
+            String message = String.format(
+                    "[%s] Role request (requestId=%d, roleId=%d, type=%s) - %s",
+                    statusText,
+                    roleRequest.getRequestId(),
+                    roleRequest.getTargetRoleId(),
+                    roleRequest.getRequestType(),
+                    infoMessage
+            );
+
+            String referenceId = String.valueOf(roleRequest.getRequestId());
+
+            notificationWriterService.createNotification(
+                    null,                    // userId == null => group notification
+                    config.getTargetRoles(),       // e.g. "51,55"
+                    message,
+                    config.getTargetUrl(),         // e.g. "/role-requests"
+                    referenceId,
+                    EVENT_SOURCE
+            );
+
+        } catch (Exception e) {
+            log.error("CRITICAL: Failed to create notification for role request {}. Rolling back transaction.",
+                    roleRequest.getRequestId(), e);
+            throw new RuntimeException("Failed to create role request notification, rolling back.", e);
+        }
+    }
+
+    private String buildRoleRequestTypeKey(RoleRequest roleRequest) {
+        // Example: "ROLE_CREATE", "ROLE_MODIFY", ...
+        // Adjust if your config keys are different
+        return "ROLE_" + roleRequest.getRequestType().toUpperCase();
+    }
+    
 }
