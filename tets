@@ -1,13 +1,576 @@
-public Map<String, BigDecimal> getCglToBalanceMapJdbcStream(String branchCode) {
-    String sql = "SELECT CGL, BALANCE FROM gl_balance WHERE branch_code = ?";
-    Map<String, BigDecimal> map = new HashMap<>();
+package com.tcs.userservice.service;
 
-    jdbcTemplate.query(sql, new Object[]{branchCode}, rs -> {
-        // runs row-by-row, no intermediate List
-        String cgl = rs.getString("CGL");
-        BigDecimal bal = rs.getBigDecimal("BALANCE");
-        if (cgl != null) map.put(cgl.trim(), bal == null ? BigDecimal.ZERO : bal);
-    });
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tcs.userservice.ResponseVO;
+import com.tcs.userservice.dto.PermissionDto;
+import com.tcs.userservice.dto.PermissionList;
+import com.tcs.userservice.dto.PermissionOrderDto;
+import com.tcs.userservice.dto.RoleDto;
+import com.tcs.userservice.dto.RoleRequestPayload;
+import com.tcs.userservice.dto.UserRequestProjection;
+import com.tcs.userservice.model.*;
+import com.tcs.userservice.repository.PermissionsRepository;
+import com.tcs.userservice.repository.RolePermissionsRepository;
+import com.tcs.userservice.repository.RoleRepository;
+import com.tcs.userservice.repository.RoleRequestRepository;
+import com.tcs.userservice.utility.Constant;
+import com.tcs.userservice.utility.RequestUtility;
+import lombok.extern.slf4j.Slf4j;
 
-    return map;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Service
+public class RoleRequestServiceImpl implements RoleRequestService {
+
+    private final String STATUS = Constant.STATUS;
+
+    private final String MESSAGE = Constant.MESSAGE;
+
+    @Autowired
+    private RoleRequestRepository roleRequestRepository;
+
+    @Autowired
+    private RoleRepository roleRepository;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private RoleService roleService;
+
+    @Autowired
+    private PermissionsRepository permissionsRepository;
+
+    @Autowired
+    private RolePermissionsRepository rolePermissionsRepository;
+
+    @Autowired
+    private CacheManager cacheManager;
+
+    @SuppressWarnings("unchecked")
+    public ResponseEntity<ResponseVO> createNewRoleRequest(final Map<String, Object> request, String userId) {
+        final ResponseVO responseVo = new ResponseVO();
+        final Map<String, Object> result = new HashMap<>();
+
+        // 1) Basic request validation (return early)
+        final String[] required = {"requestType", "requestPayload", "targetRoleId", "requestorUserId"};
+        if (RequestUtility.verifyRequest(request, required)) { // 'true' means invalid
+            result.put(STATUS, false);
+            result.put(MESSAGE, "Invalid request.");
+            responseVo.setResult(result);
+            responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
+            responseVo.setMessage(HttpStatus.BAD_REQUEST.getReasonPhrase());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(responseVo);
+        }
+
+        // 2) Parse payload safely
+        final RoleRequest roleRequest;
+        try {
+            roleRequest = objectMapper.convertValue(request, RoleRequest.class);
+        } catch (IllegalArgumentException ex) {
+            responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
+            responseVo.setMessage("Malformed request payload.");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(responseVo);
+        }
+
+        // 3) Canonicalize inputs
+        roleRequest.setRequestStatus(Constant.PENDING);
+        roleRequest.setRequestDate(new Timestamp(System.currentTimeMillis()));
+        roleRequest.setRequestorUserId(userId);
+
+        final String requestFlag = String.valueOf(request.get("requestType"));
+        final boolean isCreate = Constant.CREATE.equalsIgnoreCase(requestFlag);
+
+        final int targetRoleId = roleRequest.getTargetRoleId();
+
+        ObjectMapper mapper = new ObjectMapper();
+
+        // Parse the JSON string
+        JsonNode payloadNode = null;
+        try {
+            payloadNode = mapper.readTree(String.valueOf(request.get("requestPayload")));
+        } catch (JsonMappingException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        } catch (JsonProcessingException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+
+        // Extract simple fields
+        String roleName = payloadNode.get("roleName").asText();
+        String description = payloadNode.get("description").asText();
+
+        log.info(roleName);
+
+        // final String roleName = String.valueOf(json.get("roleName"));
+        final String requestorUserId = userId;// roleRequest.getRequestorUserId();
+        final String requestPayload = roleRequest.getRequestPayload();
+
+        log.info("Role request: flag={}, targetRoleId={}, roleName={}, requestorUserId={}", requestFlag, targetRoleId,
+                roleName, requestorUserId);
+
+        // 4) Fetch things once (avoid duplicate repository hits)
+        final var existingRole = roleRepository.findRoleByRoleId(targetRoleId);
+        final long pendingById = isCreate ? 0L : roleRequestRepository.countPendingRoleRequests(targetRoleId);
+        final long pendingByName = isCreate && roleName != null
+                ? roleRequestRepository.countPendingRoleRequestsByRoleName(roleName.toLowerCase())
+                : 0L;
+
+        // 5) Business rules (return early on failure)
+        if (isCreate && existingRole != null) {
+            log.info("Create denied: role with id {} already exists", targetRoleId);
+            result.put(STATUS, false);
+            result.put(MESSAGE, "A role with this ID already exists.");
+            responseVo.setResult(result);
+            responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.CONFLICT.value()));
+            responseVo.setMessage(HttpStatus.CONFLICT.getReasonPhrase());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(responseVo);
+        }
+
+        if (!isCreate && pendingById > 0) {
+            result.put(STATUS, false);
+            result.put(MESSAGE, "There is already a pending request for this role.");
+            responseVo.setResult(result);
+            responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.CONFLICT.value()));
+            responseVo.setMessage(HttpStatus.CONFLICT.getReasonPhrase());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(responseVo);
+        }
+
+        if (isCreate && pendingByName > 0) {
+            result.put(STATUS, false);
+            result.put(MESSAGE, "There is already a role creation request pending for this role.");
+            responseVo.setResult(result);
+            responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.CONFLICT.value()));
+            responseVo.setMessage(HttpStatus.CONFLICT.getReasonPhrase());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(responseVo);
+        }
+
+        // 6) Finalize and persist
+        if (isCreate) {
+
+            roleRequest.setTargetRoleId(roleRequestRepository.getNewRoleIdOnCreation());
+        }
+
+        roleRequestRepository.save(roleRequest);
+
+        result.put("roleRequest", roleRequest);
+        result.put(STATUS, true);
+        result.put(MESSAGE, "New request created.");
+        responseVo.setResult(result);
+        responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.CREATED.value()));
+        responseVo.setMessage(HttpStatus.CREATED.getReasonPhrase());
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(responseVo);
+    }
+
+    public ResponseEntity getPendingRoleRequests(String userId) {
+        ResponseVO<Map<String, Object>> responseVo = new ResponseVO<>();
+        Map<String, Object> result = new HashMap<>();
+
+        try {
+            // String userId = (String) params.get("userId");
+            List<UserRequestProjection> pendingRequests = roleRequestRepository.findPendingRoleRequests(userId);
+            // log.info(pendingRequests.toString());
+
+            if (pendingRequests.isEmpty()) {
+                result.put(MESSAGE, "No pending requests");
+            } else {
+                result.put(MESSAGE, String.format("%d pending requests found ", pendingRequests.size()));
+                result.put("pendingRequests", pendingRequests);
+                result.put("pendingRequestsCount", pendingRequests.size());
+
+            }
+            result.put(STATUS, true);
+            responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.OK.value()));
+            responseVo.setMessage(HttpStatus.OK.getReasonPhrase());
+
+        } catch (Exception e) {
+            result.put(STATUS, false);
+            result.put(MESSAGE, "Invalid User Id and parameters" + e.getMessage());
+            responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
+            responseVo.setMessage(HttpStatus.BAD_REQUEST.getReasonPhrase());
+        }
+        responseVo.setResult(result);
+        return new ResponseEntity(responseVo, responseVo.getStatusCode());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseEntity acceptOrRejectRoleRequest(Map<String, Object> request, String userId) {
+        ResponseVO<Map<String, Object>> responseVo = new ResponseVO();
+        Map<String, Object> result = new HashMap<>();
+        String actionFlag = (String) request.get("actionFlag");
+        int requestId = Integer.valueOf((String) request.get("requestId"));
+        RoleRequest roleRequest = roleRequestRepository.findRoleRequestByRequestId(requestId);
+
+        roleRequest.setApproverUserId(userId);
+        roleRequest.setApprovalDate(new Timestamp(System.currentTimeMillis()));
+        String requestFlag = roleRequest.getRequestType();
+        String requestPayload = (String) request.get("requestPayload");
+
+        responseVo.setResult(performUpdateOperation(result, actionFlag, roleRequest, requestFlag));
+        responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.OK.value()));
+        responseVo.setMessage(HttpStatus.OK.getReasonPhrase());
+        return new ResponseEntity<>(responseVo, responseVo.getStatusCode());
+
+    }
+
+    private Map<String, Object> performUpdateOperation(Map<String, Object> result, String actionFlag, RoleRequest roleRequest,
+                                                       String requestFlag) {
+        if (actionFlag.equalsIgnoreCase(Constant.ACCEPT)) {
+            Role role = roleRepository.findRoleByRoleId(roleRequest.getTargetRoleId());
+            roleRequest.setRequestStatus(Constant.ACCEPTED);
+
+            // Check presence for MODIFY, LOCK, UNLOCK, DELETE
+            boolean isCreate = requestFlag.equalsIgnoreCase(Constant.CREATE);
+            boolean isModify = requestFlag.equalsIgnoreCase(Constant.MODIFY);
+            boolean isLock = requestFlag.equalsIgnoreCase(Constant.LOCK);
+            boolean isUnlock = requestFlag.equalsIgnoreCase(Constant.UNLOCK);
+            boolean isDelete = requestFlag.equalsIgnoreCase(Constant.DELETE);
+
+            if (role == null && !isCreate) {
+                result.put(STATUS, false);
+                result.put(MESSAGE, "Role not found");
+                return result;
+            }
+            if (role != null && isCreate) {
+                result.put(STATUS, false);
+                result.put(MESSAGE, "This Role already present");
+                return result;
+            }
+
+            if (isCreate || isModify) {
+                if (isCreate)
+                    role = new Role();
+                try {
+                    Map<String, Object> roleMap = objectMapper.readValue(roleRequest.getRequestPayload(),
+                            new TypeReference<Map<String, Object>>() {
+                            });
+                    log.info(roleMap.toString());
+                    role.setRoleName(String.valueOf(roleMap.get("roleName")));
+                    role.setDescription(String.valueOf(roleMap.get("description")));
+                    role.setStatus(Constant.ACTIVE);
+                    Role newRole = roleRepository.save(role);
+                    log.info(newRole.toString() + "" + newRole.getRoleId());
+                    // new call for
+                    RoleRequestPayload roleRequestPayload = objectMapper.readValue(roleRequest.getRequestPayload(),
+                            RoleRequestPayload.class);
+
+                    if (savePermissions(roleRequestPayload, newRole.getRoleId())) {
+                        // here
+                        List<PermissionList> selectedPermissions = roleRequestPayload.getPermissions();
+                        Set<Integer> incomingIds = selectedPermissions.stream().map(PermissionList::getId)
+                                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+                        List<String> requestTypeKey = permissionsRepository.findMappedRequestTypeByMenuId(incomingIds);
+
+                        Cache cache = cacheManager.getCache("notification_configs");
+                        if (cache != null) {
+                            for (String key : requestTypeKey) {
+                                cache.evict(key);
+                                log.info("Cache evicted: cleared configuration for key {}", key);
+                            }
+                        }
+
+                        result.put(STATUS, true);
+                        result.put(MESSAGE, isCreate ? "New Role Created" : "Existing role Updated");
+                    } else {
+                        result.put(STATUS, false);
+                        result.put(MESSAGE, "Error Whilesaving permissions for " + role.getRoleId() + ".");
+                    }
+                    roleRequestRepository.save(roleRequest);
+                } catch (JsonProcessingException e) {
+                    throw new RuntimeException(e);
+                }
+                return result;
+            }
+
+            if (isLock || isUnlock) {
+                role.setStatus(isUnlock ? "ACTIVE" : "LOCKED");
+                roleRepository.save(role);
+
+                result.put(STATUS, true);
+                result.put(MESSAGE, isUnlock ? "USER UNLOCKED" : "USER LOCKED");
+                roleRequestRepository.save(roleRequest);
+                return result;
+            }
+
+            if (isDelete) {
+                try {
+                    roleRepository.delete(role);
+                    result.put(STATUS, true);
+                    result.put(MESSAGE, "User Deleted");
+                    roleRequestRepository.save(roleRequest);
+                } catch (Exception e) {
+                    result.put(STATUS, false);
+                    result.put(MESSAGE, e.getMessage());
+                }
+                return result;
+            }
+
+            result.put(STATUS, false);
+            result.put(MESSAGE, "Invalid Action Flag");
+            return result;
+
+        } else {
+            roleRequest.setRequestStatus("REJECTED");
+            roleRequestRepository.save(roleRequest);
+            result.put(STATUS, true);
+            result.put(MESSAGE, "User request rejected");
+            return result;
+        }
+    }
+
+    /**
+     * Saves permissions for a specific role, handling potential duplicates
+     * gracefully.
+     * <p>
+     * NOTE: Ensure RolePermissions entity has an appropriate composite primary key
+     * defined for (roleId, permissionId) to prevent true database-level duplicates.
+     */
+
+    private boolean savePermissions(RoleRequestPayload payload, int roleId) {
+        try {
+            List<PermissionList> selectedPermissions = payload.getPermissions() == null ? Collections.emptyList()
+                    : payload.getPermissions();
+
+            // build set of incoming permissionIds (unique)
+            Set<Integer> incomingIds = selectedPermissions.stream().map(PermissionList::getId)
+                    .collect(Collectors.toCollection(LinkedHashSet::new)); // keeps order if needed
+
+            // fetch all existing for role (so we can delete absent ones too)
+            List<RolePermissions> existingList = rolePermissionsRepository.findByIdRoleId(roleId);
+
+            // Map existing by permissionId for quick lookup
+            Map<Integer, RolePermissions> existingMap = existingList.stream()
+                    .collect(Collectors.toMap(rp -> rp.getId().getPermissionId(), Function.identity()));
+
+            List<RolePermissions> toInsert = new ArrayList<>();
+            List<RolePermissions> toUpdate = new ArrayList<>();
+
+            // process incoming payload (insert or update)
+            for (PermissionList p : selectedPermissions) {
+                int pid = p.getId();
+                RolePermissions existing = existingMap.get(pid);
+
+                if (existing == null) {
+                    // insert new
+                    RolePermissionId newId = new RolePermissionId(roleId, pid);
+                    RolePermissions rp = new RolePermissions();
+                    rp.setId(newId);
+                    rp.setPermissionOrder(p.getOrder());
+                    toInsert.add(rp);
+                } else {
+                    // update if order changed
+                    Integer existingOrder = existing.getPermissionOrder();
+                    Integer incomingOrder = p.getOrder(); // boxed
+                    if (!Objects.equals(existingOrder, incomingOrder)) {
+                        existing.setPermissionOrder(incomingOrder);
+                        toUpdate.add(existing);
+                    }
+                    // mark as processed (so remaining in existingMap are deletable)
+                    existingMap.remove(pid);
+                }
+            }
+
+            // Persist
+            if (!toInsert.isEmpty())
+                rolePermissionsRepository.saveAll(toInsert);
+            if (!toUpdate.isEmpty())
+                rolePermissionsRepository.saveAll(toUpdate);
+
+            // Delete any existing entries that were NOT present in incoming payload
+            if (!existingMap.isEmpty()) {
+                List<RolePermissions> toDelete = new ArrayList<>(existingMap.values());
+                rolePermissionsRepository.deleteAll(toDelete);
+            }
+
+            rolePermissionsRepository.flush();
+
+            log.info("Inserted {}, updated {}, deleted {} for roleId {}", toInsert.size(), toUpdate.size(),
+                    existingMap.size(), roleId);
+
+            return true;
+        } catch (Exception e) {
+            log.error("Exception while saving permissions for roleId {}: {}", roleId, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    public ResponseEntity getAllRoles(Map<String, Object> request) {
+
+        ResponseVO responseVo = new ResponseVO();
+
+        // changes done for role wise permission: @V1010939
+        Map<String, Object> result = new HashMap<>();
+        List<RoleDto> roles = roleService
+                .getAllRolesWithPermissions(Boolean.valueOf((String) request.get("permissions")));
+
+        if (roles.isEmpty()) {
+            result.put(STATUS, false);
+            result.put(MESSAGE, "No roles found.");
+
+        } else {
+            result.put(STATUS, true);
+            result.put(MESSAGE, String.format("%d pending roles found ", roles.size()));
+            result.put("roles", roles);
+        }
+
+        responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.OK.value()));
+        responseVo.setMessage(HttpStatus.OK.getReasonPhrase());
+        responseVo.setResult(result);
+        return new ResponseEntity(responseVo, responseVo.getStatusCode());
+    }
+
+    public ResponseEntity cancelRoleRequest(Map<String, Object> request, String userId) {
+        ResponseVO responseVO = new ResponseVO();
+        Map<String, Object> result = new HashMap<>();
+
+        try {
+            int requestId = Integer.valueOf(request.get("requestId").toString());
+            // String userId = (String) request.get("userId");
+            RoleRequest roleRequest = roleRequestRepository.getRoleRequestByRequestId(requestId);
+
+            log.info("Requester ID" + roleRequest.getRequestorUserId());
+            log.info("User ID :" + userId);
+            System.out.println(
+                    "ABCD " + userId == null || userId.isEmpty() || !userId.equals(roleRequest.getRequestorUserId()));
+
+            if (userId == null || userId.isEmpty() || !userId.equals(roleRequest.getRequestorUserId())) {
+                result.put(STATUS, false);
+                result.put(MESSAGE, "You are unauthorized to cancel this request");
+                responseVO.setStatusCode(HttpStatusCode.valueOf(HttpStatus.UNAUTHORIZED.value()));
+                responseVO.setMessage(HttpStatus.UNAUTHORIZED.getReasonPhrase());
+
+            } else {
+                roleRequest.setRequestStatus(Constant.CANCEL);
+//				 roleRequestRepository.cancel(requestId);
+                roleRequestRepository.save(roleRequest);
+                result.put(STATUS, true);
+                result.put(MESSAGE, "Request cancelled");
+                responseVO.setStatusCode(HttpStatusCode.valueOf(HttpStatus.OK.value()));
+                responseVO.setMessage(HttpStatus.OK.getReasonPhrase());
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            result.put(STATUS, false);
+            result.put(MESSAGE, e.getMessage());
+            responseVO.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
+            responseVO.setMessage(HttpStatus.BAD_REQUEST.getReasonPhrase());
+        }
+        responseVO.setResult(result);
+        return new ResponseEntity(responseVO, responseVO.getStatusCode());
+    }
+
+    @Override
+    public ResponseEntity getMyRoleRequests(String userId) {
+        ResponseVO<Map<String, Object>> responseVo = new ResponseVO<>();
+        Map<String, Object> result = new HashMap<>();
+        if (userId != null && !userId.isEmpty()) {
+            try {
+                List<UserRequestProjection> myRequests = roleRequestRepository.findMyPendingRoleRequests(userId);
+
+                if (myRequests.isEmpty()) {
+
+                    result.put(STATUS, false);
+                    result.put(MESSAGE, "You have raised 0 requests");
+                } else {
+                    result.put(STATUS, true);
+                    result.put(MESSAGE, String.format("You have raised %d  requests.", myRequests.size()));
+                    result.put("myRequests", myRequests);
+                    result.put("requestCount", myRequests.size());
+                }
+                responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.OK.value()));
+                responseVo.setMessage(HttpStatus.OK.getReasonPhrase());
+                responseVo.setResult(result);
+            } catch (IllegalArgumentException e) {
+                responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.BAD_REQUEST.value()));
+                responseVo.setMessage(HttpStatus.BAD_REQUEST.getReasonPhrase());
+            }
+        } else {
+            result.put(STATUS, false);
+            result.put(MESSAGE, "Invalid user id");
+            responseVo.setResult(result);
+            responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.OK.value()));
+            responseVo.setMessage(HttpStatus.OK.getReasonPhrase());
+        }
+
+        return new ResponseEntity<>(responseVo, responseVo.getStatusCode());
+    }
+
+    @Override
+    public ResponseEntity getAllPermissions() {
+        ResponseVO<List<PermissionDto>> responseVo = new ResponseVO<>();
+
+        List<Permission> permissions = permissionsRepository.findAll();
+
+        if (permissions.isEmpty()) {
+            responseVo.setMessage(HttpStatus.NOT_FOUND.getReasonPhrase());
+            responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.NOT_FOUND.value()));
+        } else {
+            List<PermissionDto> permissionDto = permissions.stream().map(p -> PermissionDto.builder().id(p.getMenuId())
+                            .title(p.getMenuTitle()).icon(p.getMenuIcon()).description(p.getMenuDescription()).build())
+                    .toList();
+            responseVo.setMessage(HttpStatus.OK.getReasonPhrase());
+            responseVo.setResult(permissionDto);
+            responseVo.setStatusCode(HttpStatusCode.valueOf(HttpStatus.OK.value()));
+        }
+
+        return new ResponseEntity<>(responseVo, responseVo.getStatusCode());
+    }
+
+    @Override
+    public ResponseEntity savePermissionOrder(PermissionOrderDto payload) {
+
+        try {
+
+            List<RolePermissions> newPermissions = payload.getPermissions().stream().map(p -> {
+                RolePermissions rp = new RolePermissions();
+                RolePermissionId newId = new RolePermissionId(payload.getSelectedRole(), p.getId());
+                rp.setId(newId);
+                rp.setPermissionOrder(p.getOrder());
+                return rp;
+            }).collect(Collectors.toList());
+
+            if (newPermissions.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "No permissions provided"));
+            }
+
+            rolePermissionsRepository.saveAll(newPermissions);
+
+            return ResponseEntity
+                    .ok(Map.of("message", "Permissions saved successfully", "savedCount", newPermissions.size()));
+
+        } catch (Exception e) {
+            log.error("Error saving permissions for roleId {}: {}", payload.getSelectedRole(), e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to save permissions", "error", e.getMessage()));
+        }
+
+    }
 }
