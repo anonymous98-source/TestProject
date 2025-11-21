@@ -1,161 +1,50 @@
 classDiagram
-    class User {
-      +userId : String
-      +name : String
-      +createUserRequest(type, targetUser)
-      +viewOwnRequests()
-      +cancelOwnRequest(requestId)
-      +approveOtherRequest(requestId)
-      +rejectOtherRequest(requestId)
-    }
+direction LR
 
-    class Request {
-      +requestId : String
-      +type : RequestType  // CREATE / MODIFY / DELETE
-      +status : RequestStatus  // CREATED / PENDING / APPROVED / REJECTED / CANCELLED
-      +createdAt : DateTime
-      +requestedBy : User
-      +targetUser : User
-    }
+class User {
+  +Long id
+  +String name
+  +String role
+  +createRequest(type, targetUserId)
+  +viewRequest(requestId)
+  +cancelRequest(requestId)
+  +approveRequest(requestId)
+  +rejectRequest(requestId)
+}
 
-    class UserService {
-      +createRequest(requestor, type, targetUser) : Request
-      +submitRequest(requestId)
-      +cancelRequest(requestId, actor)
-      +approveRequest(requestId, actor)
-      +rejectRequest(requestId, actor)
-      +getRequestsForUser(user) : List<Request>
-    }
+class Request {
+  +Long id
+  +RequestType type
+  +RequestStatus status
+  +DateTime createdAt
+  +Long createdByUserId
+  +Long targetUserId
+}
 
-    enum RequestType {
-      CREATE
-      MODIFY
-      DELETE
-    }
+class UserService {
+  +createUserRequest(requestorId, type, targetUserId)
+  +viewRequest(requestorId, requestId)
+  +cancelRequest(requestorId, requestId)
+  +approveRequest(actorId, requestId)
+  +rejectRequest(actorId, requestId)
+}
 
-    enum RequestStatus {
-      CREATED
-      PENDING_APPROVAL
-      APPROVED
-      REJECTED
-      CANCELLED
-    }
+class RequestType {
+  <<enumeration>>
+  +CREATE
+  +MODIFY
+  +DELETE
+}
 
-    User "1" --> "0..*" Request : creates
-    Request "1" --> "1" User : requestedBy
-    Request "1" --> "1" User : targetUser
+class RequestStatus {
+  <<enumeration>>
+  +PENDING
+  +APPROVED
+  +REJECTED
+  +CANCELLED
+}
 
-    UserService --> Request
-    UserService --> User
-
-
-
-
-
-stateDiagram-v2
-    [*] --> Created : createRequest(requestor)
-
-    Created --> PendingApproval : submitRequest()
-
-    %% Requestor actions
-    PendingApproval --> Cancelled : cancelRequest()\n[actor == requestor]
-
-    %% Other user actions
-    PendingApproval --> Approved : approveRequest()\n[actor != requestor]
-    PendingApproval --> Rejected : rejectRequest()\n[actor != requestor]
-
-    %% View is allowed, no state change
-    state PendingApproval {
-        [*] --> WaitingDecision
-        WaitingDecision --> WaitingDecision : viewRequest()\n[any user]
-    }
-
-    Approved --> [*]
-    Rejected --> [*]
-    Cancelled --> [*]
-
-
-
-
-
-
-classDiagram
-    class User {
-        +id: Long
-        +name: String
-        +role: String
-        +createRequest(type: RequestType, targetUserId: Long): Request
-        +viewRequest(requestId: Long): Request
-        +cancelRequest(requestId: Long)
-        +approveRequest(requestId: Long)
-        +rejectRequest(requestId: Long)
-    }
-
-    class Request {
-        +id: Long
-        +type: RequestType
-        +status: RequestStatus
-        +createdAt: DateTime
-        +createdBy: User
-        +targetUserId: Long
-    }
-
-    class UserService {
-        +createUserRequest(requestorId: Long, type: RequestType, targetUserId: Long): Request
-        +viewRequest(requestorId: Long, requestId: Long): Request
-        +cancelRequest(requestorId: Long, requestId: Long)
-        +approveRequest(actorId: Long, requestId: Long)
-        +rejectRequest(actorId: Long, requestId: Long)
-    }
-
-    enum RequestType {
-        CREATE
-        MODIFY
-        DELETE
-    }
-
-    enum RequestStatus {
-        PENDING
-        APPROVED
-        REJECTED
-        CANCELLED
-    }
-
-    User "1" --> "*" Request : creates >
-    Request "1" --> "1" User : createdBy
-    UserService --> User
-    UserService --> Request
-
-    note for Request "Business rule:
-    - Requestor can view & cancel own request
-    - Requestor CANNOT approve/reject own request
-    - Other users with permission can approve/reject"
-
-
-stateDiagram-v2
-    [*] --> PENDING: createRequest(requestor)
-
-    state PENDING {
-        [*] --> WaitingApproval
-    }
-
-    PENDING --> CANCELLED: cancel(requestor)
-    PENDING --> APPROVED: approve(approver)\n[approver != requestor]
-    PENDING --> REJECTED: reject(approver)\n[approver != requestor]
-
-    APPROVED --> [*]
-    REJECTED --> [*]
-    CANCELLED --> [*]
-
-    note right of PENDING
-      Requestor permissions:
-      - can VIEW
-      - can CANCEL
-      - cannot APPROVE/REJECT
-    end note
-
-    note right of APPROVED
-      Approved by user with
-      proper role where
-      approver != requestor
-    end note
+User "1" --> "0..*" Request : creates >
+UserService --> User : uses >
+UserService --> Request : manages >
+Request --> User : createdBy >
