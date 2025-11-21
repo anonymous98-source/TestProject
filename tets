@@ -1,3 +1,7 @@
+
+
+
+
 classDiagram
 direction LR
 
@@ -48,3 +52,37 @@ User "1" --> "0..*" Request : creates >
 UserService --> User : uses >
 UserService --> Request : manages >
 Request --> User : createdBy >
+
+
+
+
+
+
+
+
+stateDiagram-v2
+    [*] --> PENDING: createRequest(requestor)
+
+    state PENDING {
+        [*] --> WaitingApproval
+    }
+
+    PENDING --> CANCELLED: cancel(requestor)
+    PENDING --> APPROVED: approve(approver)\n[approver != requestor]
+    PENDING --> REJECTED: reject(approver)\n[approver != requestor]
+
+    APPROVED --> [*]
+    REJECTED --> [*]
+    CANCELLED --> [*]
+
+    note right of PENDING
+      Requestor:
+      - can VIEW
+      - can CANCEL
+      - cannot APPROVE/REJECT
+    end note
+
+    note right of APPROVED
+      Approved by another user
+      (approver != requestor)
+    end note
