@@ -1,49 +1,176 @@
+You’re basically running into “too many items in the IN clause” + an N+1 query problem.
 
--------------- service -----------------------------------
+Given your past messages, I’m 99% sure you’re on Oracle. Oracle has this classic limitation:
+
+> ORA-01795: maximum number of expressions in a list is 1000
+
+
+
+So when you pass a List<String> of size ~3000 into frn IN (:frnList), Spring/JPA expands it to IN (?, ?, ?, ..., ?) with 3000 placeholders → Oracle says nope.
+
+On top of that, you're calling getCount(...) once per FRN, which is 3000 DB calls by itself.
+
+Let’s fix both.
+
+
+---
+
+1. Fix the IN clause issue: Chunk the list (simple & reliable)
+
+Keep your native query as-is, but never send more than 1000 FRNs at once. Do the chunking in the service:
+
+private static final int ORACLE_IN_LIMIT = 1000;
 
 @Override
-    public ResponseEntity<List<Map<String, Object>>> getFrnDetails(List<String> frnList, Map<String, Object> user) {
-        List<Map<String, Object>> frnDetails = empanelmentRepository.getFrnDetails(frnList);
-        log.info("getFrnDetails: {}", frnDetails);
-        String loggedUserRole = (String) user.get(ACCESS);
-        List<Map<String, Object>> updatedFrnDetails = frnDetails.stream().map(originalMap -> {
-            Map<String, Object> map = new HashMap<>(originalMap);
-            String frnNumber = (String) map.get("FRN");
-            int frnCount = getCount(frnNumber, loggedUserRole, user.get(FINANCIAL_YEAR).toString());
-            if (frnCount == 0) {
-                map.put("ELIGIBLE", "YES");
-            } else {
-                map.put("ELIGIBLE", "NO");
-            }
-            map.put("PROCESSED_BY", "System");
-            map.put("TIMESTAMP", LocalDateTime.now().toString());
-            return map;
-        }).toList();
+public ResponseEntity<List<Map<String, Object>>> getFrnDetails(List<String> frnList, Map<String, Object> user) {
+    String loggedUserRole = (String) user.get(ACCESS);
+    String financialYear = user.get(FINANCIAL_YEAR).toString();
 
-        return ResponseEntity.ok(updatedFrnDetails);
+    // 1) Fetch FRN details in chunks
+    List<Map<String, Object>> rawFrnDetails = new ArrayList<>();
+
+    for (int i = 0; i < frnList.size(); i += ORACLE_IN_LIMIT) {
+        List<String> subList = frnList.subList(i, Math.min(i + ORACLE_IN_LIMIT, frnList.size()));
+        rawFrnDetails.addAll(empanelmentRepository.getFrnDetails(subList));
     }
 
------------ Repository -----------------------------------
+    log.info("getFrnDetails: {}", rawFrnDetails);
 
-@Query(nativeQuery = true, value = """
+    // 2) (current approach) still calling getCount() per FRN – we'll optimize this in step 2.
+    List<Map<String, Object>> updatedFrnDetails = rawFrnDetails.stream()
+            .map(originalMap -> {
+                Map<String, Object> map = new HashMap<>(originalMap);
+
+                // Depending on JPA/driver, this key might be "FRN" or "frn"
+                String frnNumber = (String) map.getOrDefault("FRN", map.get("frn"));
+
+                int frnCount = getCount(frnNumber, loggedUserRole, financialYear);
+                map.put("ELIGIBLE", frnCount == 0 ? "YES" : "NO");
+                map.put("PROCESSED_BY", "System");
+                map.put("TIMESTAMP", LocalDateTime.now().toString());
+                return map;
+            })
+            .toList();
+
+    return ResponseEntity.ok(updatedFrnDetails);
+}
+
+This alone will solve the native query failing for 3000 rows.
+
+
+---
+
+2. Fix the N+1 problem: bulk getCount instead of per-FRN calls (more optimal)
+
+Right now, for each FRN you do:
+
+int frnCount = getCount(frnNumber, loggedUserRole, user.get(FINANCIAL_YEAR).toString());
+
+If getCount hits DB, that’s 3000 extra queries.
+
+Instead, create a single repository method that returns counts for all FRNs in one shot:
+
+Repository
+
+@Query(
+        nativeQuery = true,
+        value = """
             SELECT
                 frn,
-                firm_name,
-                empaneled_status AS already_empaneled,
-                empanelment_type
-                || '-'
-                || (
-                    SELECT
-                        ASSIGNMENT_SUBTYPE
-                    FROM
-                        iam_assignment_type_master
-                    WHERE
-                        assignment_type_id = TO_NUMBER(empanelment_sub_type)
-                )                AS empanelment_for,
-                empaneled_by
+                COUNT(*) AS cnt
             FROM
-                iam_firm_empanelment
+                some_table  -- TODO: replace with your actual table
             WHERE
-                frn IN ( :frnList )
-            """)
-    List<Map<String, Object>> getFrnDetails(@Param("frnList") List<String> frnList);
+                frn IN (:frnList)
+                AND role = :role
+                AND financial_year = :financialYear
+            GROUP BY
+                frn
+            """
+)
+List<Object[]> getFrnCounts(
+        @Param("frnList") List<String> frnList,
+        @Param("role") String role,
+        @Param("financialYear") String financialYear
+);
+
+> You’ll need to plug in your real table/columns for where getCount is currently reading from.
+
+
+
+Again, apply the same chunking idea (< 1000 FRNs per call) to avoid Oracle’s limit:
+
+Service – bulk counts map
+
+private Map<String, Integer> getFrnCountsForAll(List<String> frnList, String role, String financialYear) {
+    Map<String, Integer> counts = new HashMap<>();
+
+    for (int i = 0; i < frnList.size(); i += ORACLE_IN_LIMIT) {
+        List<String> subList = frnList.subList(i, Math.min(i + ORACLE_IN_LIMIT, frnList.size()));
+        List<Object[]> rows = empanelmentRepository.getFrnCounts(subList, role, financialYear);
+
+        for (Object[] row : rows) {
+            String frn = (String) row[0];
+            Number cnt = (Number) row[1];
+            counts.put(frn, cnt.intValue());
+        }
+    }
+
+    return counts;
+}
+
+Then wire it into your main method
+
+@Override
+public ResponseEntity<List<Map<String, Object>>> getFrnDetails(List<String> frnList, Map<String, Object> user) {
+    String loggedUserRole = (String) user.get(ACCESS);
+    String financialYear = user.get(FINANCIAL_YEAR).toString();
+
+    // 1) Get details in chunks
+    List<Map<String, Object>> rawFrnDetails = new ArrayList<>();
+    for (int i = 0; i < frnList.size(); i += ORACLE_IN_LIMIT) {
+        List<String> subList = frnList.subList(i, Math.min(i + ORACLE_IN_LIMIT, frnList.size()));
+        rawFrnDetails.addAll(empanelmentRepository.getFrnDetails(subList));
+    }
+
+    // 2) Get all counts in bulk (also chunked internally)
+    Map<String, Integer> countByFrn = getFrnCountsForAll(frnList, loggedUserRole, financialYear);
+
+    // 3) Enrich and return
+    List<Map<String, Object>> updatedFrnDetails = rawFrnDetails.stream()
+            .map(originalMap -> {
+                Map<String, Object> map = new HashMap<>(originalMap);
+                String frnNumber = (String) map.getOrDefault("FRN", map.get("frn"));
+
+                int frnCount = countByFrn.getOrDefault(frnNumber, 0);
+                map.put("ELIGIBLE", frnCount == 0 ? "YES" : "NO");
+                map.put("PROCESSED_BY", "System");
+                map.put("TIMESTAMP", LocalDateTime.now().toString());
+                return map;
+            })
+            .toList();
+
+    return ResponseEntity.ok(updatedFrnDetails);
+}
+
+
+---
+
+Summary of the “optimal” approach
+
+1. Solve the immediate error:
+
+Chunk frnList into max 1000 items → call getFrnDetails multiple times.
+
+
+
+2. Improve performance:
+
+Replace getCount per FRN with a single bulk query that returns counts for all FRNs.
+
+Also chunk that query to respect the same Oracle limit.
+
+
+
+
+If you paste your current getCount repository query, I can convert it into a bulk version for you directly.
