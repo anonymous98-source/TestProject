@@ -1,233 +1,57 @@
-package com.tcs.fincore.CommonRequestService.service;
+sequenceDiagram
+    autonumber
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tcs.fincore.CommonRequestService.dto.CreateRequestDto;
-import com.tcs.fincore.CommonRequestService.dto.NotificationConfigDto;
-import com.tcs.fincore.CommonRequestService.dto.ProcessRequestDto;
-import com.tcs.fincore.CommonRequestService.dto.payload.KeyablePayload;
-import com.tcs.fincore.CommonRequestService.exception.ResourceNotFoundException;
-import com.tcs.fincore.CommonRequestService.model.CommonReq;
-import com.tcs.fincore.CommonRequestService.model.enums.RequestStatus;
-import com.tcs.fincore.CommonRequestService.model.enums.RequestType;
-import com.tcs.fincore.CommonRequestService.repository.CommonRequestRepository;
-import com.tcs.fincore.CommonRequestService.service.strategy.RequestStrategyFactory;
-import jakarta.transaction.Transactional;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.stereotype.Service;
+    actor Maker as Maker (Request Initiator)
+    actor Checker as Checker (Approver/Executor)
+    participant UI as Web UI
+    participant S as System (Backend)
 
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Optional;
+    %% --- Maker creates request ---
 
-/**
- * - Injected NotificationWriterService.
- */
-@Service
-@RequiredArgsConstructor
-@Slf4j
-public class RequestServiceImpl implements RequestService {
+    Maker->>UI: Login & navigate to "Add New Circle"
+    UI->>S: POST /auth (credentials)
+    S-->>UI: JWT token
+    UI-->>Maker: Authenticated session (JWT stored)
 
-    private static final String EVENT_SOURCE = "CommonRequestService";
-    private final CommonRequestRepository commonRequestRepository;
-    private final RequestStrategyFactory strategyFactory;
-    private final ObjectMapper objectMapper;
-    private final NotificationWriterService notificationWriterService;
-    private final PermissionConfigService permissionConfigService;
+    Maker->>UI: Fill form & submit
+    UI->>S: POST /create-request (form data, JWT)
+    S->>S: Validate input
+    S->>S: Create CommonReq\nstatus = PENDING\nlinked to maker userId
+    S-->>UI: Response (requestId, status = PENDING)
+    UI-->>Maker: Show confirmation / success message
 
-    @Override
-    @Transactional(rollbackOn = Exception.class) // Ensure rollback on any exception
-    public CommonReq createRequest(
-            CreateRequestDto dto,
-            String creatorId
-    ) throws JsonProcessingException {
+    Maker->>UI: View "My Requests"
+    UI->>S: POST /my-requests (JWT)
+    S->>S: Fetch requests for maker userId
+    S-->>UI: List of maker requests
+    UI-->>Maker: Display submitted requests
 
-        KeyablePayload payload = (KeyablePayload) dto.getPayload();
+    %% --- Checker approves / rejects request ---
 
-        // --- PRE CHECKS ---
-        String targetId = payload.getKey();
-        if (targetId == null || targetId.isBlank()) {
-            throw new IllegalArgumentException("Could not determine targetId from payload.");
-        }
-        log.info("Determined targetId for new request as: {}", targetId);
+    Checker->>UI: Login & navigate to "Pending Requests"
+    UI->>S: POST /auth (credentials)
+    S-->>UI: JWT token
+    UI-->>Checker: Authenticated session (JWT stored)
 
-        List<CommonReq> existingRequests = commonRequestRepository.findByTargetIdAndReqStatus(targetId,
-                RequestStatus.PENDING);
+    Checker->>UI: Open "Pending Requests" screen
+    UI->>S: POST /pending-requests (filters, JWT)
+    S->>S: Retrieve requests with status = PENDING
+    S-->>UI: Pending requests list
+    UI-->>Checker: Display list using\nCOMMON_REQ_SCREEN_CONFIGS
 
-        if (!existingRequests.isEmpty()) {
-            log.warn("Attempted to create a duplicate request for targetId {} which already has a {} request.",
-                    targetId, existingRequests.get(0).getReqStatus());
-            throw new DataIntegrityViolationException(
-                    "An active or pending request for '" + targetId + "' already exists.");
-        }
-        log.info("Uniqueness check passed for targetId: {}", targetId);
+    Checker->>UI: Select request & review details
+    UI-->>Checker: Show request details (configured view)
 
-        // --- CREATE AND SAVE REQUEST ---
-        CommonReq request = new CommonReq();
-        request.setCreatorId(creatorId);
-        request.setReqType(dto.getRequestType());
-        request.setChangeType(dto.getChangeType());
-        request.setPayload(objectMapper.writeValueAsString(payload));
-        request.setTargetId(targetId);
-        request.setReqStatus(RequestStatus.PENDING);
-
-        log.info("Saving new, validated request for targetId {}", targetId);
-        CommonReq savedRequest = commonRequestRepository.save(request);
-
-        try {
-            // --- NOTIFICATION LOGIC ---
-
-            // 1. Fetch Config from CACHE (Fast)
-            String requestTypeKey = dto.getRequestType().name(); // e.g., "SEGMENT_CODE"
-            log.info("Request Type String to fetch role ids from PERMISSIONS: {}", requestTypeKey);
-
-            NotificationConfigDto config = permissionConfigService.getConfig(requestTypeKey);
-
-            // 2. Customize Message
-            String action = dto.getChangeType().name(); // ADD, UPDATE, DELETE
-            String message = "New " + action + " request (" + targetId + ") pending for " + dto.getRequestType();
-
-            // 3. Send to Group (1-to-Many via Outbox)
-            notificationWriterService.createNotification(
-                    creatorId,                  // USER ID TO EXCLUDE FROM ROLES, IN THIS CASE ROLE WILL BE USED TO TARGET USER
-                    config.getTargetRoles(),    // Group to SEND TO "51,55" (Fetched from Cache/DB)
-                    message,
-                    config.getTargetUrl(),      // "/segment-requests" (Fetched from Cache/DB)
-                    savedRequest.getId().toString(),
-                    EVENT_SOURCE
-            );
-
-        } catch (Exception e) {
-            // Log the error and re-throw as a RuntimeException to force a rollback.
-            log.error("CRITICAL: Failed to create 'pending' notification for request: {}. Rolling back transaction.", savedRequest.getId(), e);
-            throw new RuntimeException("Failed to create notification event, rolling back request creation.", e);
-        }
-        return savedRequest;
-    }
-
-    @Override
-    @Transactional(rollbackOn = Exception.class) // Ensure rollback on any exception
-    public Optional<CommonReq> updateRequestStatus(
-            ProcessRequestDto dto,
-            String executorId
-    ) throws JsonProcessingException {
-
-        Long requestId = dto.getRequestId();
-        log.info("Attempting to update status for request ID: {} by executor: {}", requestId, executorId);
-
-        CommonReq request = commonRequestRepository.findById(requestId)
-                .orElseThrow(() -> new ResourceNotFoundException("Request with ID " + requestId + " not found."));
-
-        // SELF-APPROVAL CHECK
-        if (executorId.equals(request.getCreatorId())) {
-            log.warn("SECURITY VIOLATION: User {} attempted to approve their own request (ID: {}).", executorId,
-                    requestId);
-            throw new IllegalStateException("User cannot approve or reject their own request.");
-        }
-
-        if (request.getReqStatus() != RequestStatus.PENDING) {
-            log.warn("Attempted to modify an already processed request. ID: {}, Current Status: {}", dto.getRequestId(),
-                    request.getReqStatus());
-            throw new IllegalStateException("Request has already been processed and cannot be modified.");
-        }
-
-        // --- UPDATE REQUEST STATE ---
-        request.setExecutorId(executorId);
-        request.setExecutorRemarks(dto.getRemarks());
-        request.setExecutionDate(LocalDateTime.now());
-        request.setReqStatus(dto.getStatus());
-
-        // --- PROCESS BUSINESS LOGIC (STRATEGY) & PREPARE NOTIFICATION 1: TO MAKER (1-to-1) ---
-        // This is a 1-to-1, so USER_ID is the recipient, TARGET_ROLE is null.
-        if (RequestStatus.ACCEPTED.equals(dto.getStatus())) {
-            log.info("Request {} ACCEPTED. Applying strategy for type {}", dto.getRequestId(), request.getReqType());
-            // 1. Execute the business logic (e.g., save to master table)
-            strategyFactory.getStrategy(request.getReqType()).processApproval(request);
-
-            // Notify Maker: Approved
-            notificationWriterService.createRequestApprovedNotification(request, executorId);
-            request.setExecutionRemarks("Successfully processed approval.");
-
-        } else {
-            log.info("Request {} REJECTED.", dto.getRequestId());
-
-            // Notify Maker: Rejected
-            notificationWriterService.createRequestRejectedNotification(request, executorId, dto.getRemarks());
-            request.setExecutionRemarks("Request rejected by user.");
-        }
-
-        // --- NOTIFICATION 2: CLOSURE (1-to-Many, Filtered) ---
-        // We wrap this in Try/Catch because if this fails, we do NOT want to roll back the actual Approval.
-        // The approval is critical data; the "FYI" notification to the group is secondary.
-        try {
-            // A. Get Group Config from Cache (Zero DB Cost)
-            NotificationConfigDto config = permissionConfigService.getConfig(request.getReqType().name());
-
-            // B. Prepare Message
-            String action = dto.getStatus().equals(RequestStatus.ACCEPTED) ? "Approved" : "Rejected";
-            String closureMessage = "CLOSURE: Request " + request.getTargetId() + " was " + action + " by " + executorId;
-
-            // C. Send to Group (1-to-Many)
-            // Pass the CHECKER'S ID as the exclusion ID.
-            notificationWriterService.createNotification(
-                    executorId,                 // User to EXCLUDE
-                    config.getTargetRoles(),    // // Group to SEND TO -> The same roles that received the Pending alert excluding the executor
-                    closureMessage,
-                    config.getTargetUrl(),      // Link to history
-                    request.getId().toString(),
-                    "CommonRequestService"
-            );
-            log.info("Sent closure notification to group for Request ID: {}", requestId);
-
-        } catch (Exception e) {
-            // Log error but allow transaction to commit
-            log.error("Failed to send closure notification for Request ID: {}", requestId, e);
-        }
-
-        // --- SAVE THE UPDATED REQUEST ---
-        CommonReq updatedRequest = commonRequestRepository.save(request);
-
-        return Optional.of(updatedRequest);
-    }
-
-    @Override
-    public List<CommonReq> getMyRequests(
-            String userId,
-            RequestType requestType
-    ) {
-        if (requestType == null) {
-            log.info("Request type is missing, Please provide correct request type to fetch requests for user : {}",
-                    userId);
-            throw new IllegalArgumentException(
-                    "Request type is missing, Please provide correct request type to fetch requests.");
-        }
-        log.info("Fetching my requests for user {} with type {}", userId, requestType);
-        return commonRequestRepository.findByCreatorIdAndReqType(userId, requestType);
-    }
-
-    @Override
-    public List<CommonReq> getPendingRequests(
-            String userId,
-            RequestType requestType
-    ) {
-        if (requestType == null) {
-            log.info("Request type is missing, Please provide correct request type to fetch pending requests.");
-            throw new IllegalArgumentException(
-                    "Request type is missing, Please provide correct request type to fetch pending requests."
-            );
-        }
-        log.info("Fetching pending requests for user :  {} with type : {}",userId, requestType);
-        return commonRequestRepository
-                .findByCreatorIdNotAndReqStatusAndReqType(userId, RequestStatus.PENDING, requestType);
-    }
-
-
-    @Override
-    public List<CommonReq> getAllRequests(
-    ) {
-        return commonRequestRepository.findAll();
-    }
-
-}
+    alt Checker accepts request
+        Checker->>UI: Click "Accept"
+        UI->>S: PATCH /update-request\n(requestId, status=ACCEPTED, JWT)
+        S->>S: Update status & process\nunderlying data modification
+        S-->>UI: Updated request (status=ACCEPTED)
+        UI-->>Checker: Show success & updated status
+    else Checker rejects request
+        Checker->>UI: Click "Reject"
+        UI->>S: PATCH /update-request\n(requestId, status=REJECTED, JWT)
+        S->>S: Update status (REJECTED)
+        S-->>UI: Updated request (status=REJECTED)
+        UI-->>Checker: Show rejection confirmation
+    end
