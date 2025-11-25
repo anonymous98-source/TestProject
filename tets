@@ -1,57 +1,23 @@
-sequenceDiagram
-    autonumber
+MuiDialog: {
+  styleOverrides: {
+    paper: ({ theme }) => ({
+      ...glassEffect(18, 0.4),
+      ...glassBorder,
+      borderRadius: theme.shape.borderRadius + 4,
+      boxShadow: theme.palette.mode === "dark"
+        ? "0 8px 40px rgba(0,0,0,0.5)"
+        : "0 8px 40px rgba(0,0,0,0.1)",
+    }),
+  },
+},
 
-    actor Maker as Maker (Request Initiator)
-    actor Checker as Checker (Approver/Executor)
-    participant UI as Web UI
-    participant S as System (Backend)
-
-    %% --- Maker creates request ---
-
-    Maker->>UI: Login & navigate to "Add New Circle"
-    UI->>S: POST /auth (credentials)
-    S-->>UI: JWT token
-    UI-->>Maker: Authenticated session (JWT stored)
-
-    Maker->>UI: Fill form & submit
-    UI->>S: POST /create-request (form data, JWT)
-    S->>S: Validate input
-    S->>S: Create CommonReq\nstatus = PENDING\nlinked to maker userId
-    S-->>UI: Response (requestId, status = PENDING)
-    UI-->>Maker: Show confirmation / success message
-
-    Maker->>UI: View "My Requests"
-    UI->>S: POST /my-requests (JWT)
-    S->>S: Fetch requests for maker userId
-    S-->>UI: List of maker requests
-    UI-->>Maker: Display submitted requests
-
-    %% --- Checker approves / rejects request ---
-
-    Checker->>UI: Login & navigate to "Pending Requests"
-    UI->>S: POST /auth (credentials)
-    S-->>UI: JWT token
-    UI-->>Checker: Authenticated session (JWT stored)
-
-    Checker->>UI: Open "Pending Requests" screen
-    UI->>S: POST /pending-requests (filters, JWT)
-    S->>S: Retrieve requests with status = PENDING
-    S-->>UI: Pending requests list
-    UI-->>Checker: Display list using\nCOMMON_REQ_SCREEN_CONFIGS
-
-    Checker->>UI: Select request & review details
-    UI-->>Checker: Show request details (configured view)
-
-    alt Checker accepts request
-        Checker->>UI: Click "Accept"
-        UI->>S: PATCH /update-request\n(requestId, status=ACCEPTED, JWT)
-        S->>S: Update status & process\nunderlying data modification
-        S-->>UI: Updated request (status=ACCEPTED)
-        UI-->>Checker: Show success & updated status
-    else Checker rejects request
-        Checker->>UI: Click "Reject"
-        UI->>S: PATCH /update-request\n(requestId, status=REJECTED, JWT)
-        S->>S: Update status (REJECTED)
-        S-->>UI: Updated request (status=REJECTED)
-        UI-->>Checker: Show rejection confirmation
-    end
+MuiBackdrop: {
+  styleOverrides: {
+    root: ({ theme }) => ({
+      backgroundColor:
+        theme.palette.mode === "dark"
+          ? "rgba(0,0,0,0.6)"   // darker backdrop in dark mode
+          : "rgba(0,0,0,0.15)"  // lighter backdrop in light mode (reduce here)
+    })
+  }
+}
