@@ -1,23 +1,355 @@
-MuiDialog: {
-  styleOverrides: {
-    paper: ({ theme }) => ({
-      ...glassEffect(18, 0.4),
-      ...glassBorder,
-      borderRadius: theme.shape.borderRadius + 4,
-      boxShadow: theme.palette.mode === "dark"
-        ? "0 8px 40px rgba(0,0,0,0.5)"
-        : "0 8px 40px rgba(0,0,0,0.1)",
-    }),
-  },
-},
+Here’s one way to think about it: IDAM becomes the central identity + access microservice (Spring Boot), and all three monoliths talk to it over REST (ideally using OAuth2/OpenID Connect + JWT).
 
-MuiBackdrop: {
-  styleOverrides: {
-    root: ({ theme }) => ({
-      backgroundColor:
-        theme.palette.mode === "dark"
-          ? "rgba(0,0,0,0.6)"   // darker backdrop in dark mode
-          : "rgba(0,0,0,0.15)"  // lighter backdrop in light mode (reduce here)
-    })
-  }
-}
+I’ll give you:
+
+1. A UML-style architecture description
+
+
+2. Mermaid code you can paste directly into the live editor
+
+
+3. Recommendations on implementation approach
+
+
+4. Where to host the IDAM service in your setup
+
+
+
+
+---
+
+1. UML Architecture (high level)
+
+Key elements:
+
+Actors
+
+EndUser (browser / client)
+
+
+Systems (Components)
+
+BSA (Monolith, WebLogic, Server1)
+
+Tranche (Monolith, WebLogic, Server1)
+
+FinSight (Monolith, WebLogic, Server2)
+
+IDAM Service (Spring Boot, independent)
+
+Identity Store (User/Role/Permission DB or LDAP)
+
+
+
+Relationships (simplified component diagram):
+
+EndUser → BSA, Tranche, FinSight via HTTP/HTTPS
+
+BSA, Tranche, FinSight → IDAM Service via REST APIs
+(e.g., /auth/login, /auth/validateToken, /auth/userinfo, /auth/permissions)
+
+IDAM Service ↔ Identity Store (DB/LDAP)
+
+
+Conceptually:
+
+Each application delegates authentication and authorization decisions to IDAM.
+
+IDAM issues tokens (preferably JWT) and exposes APIs for:
+
+Login / token generation
+
+Token validation / introspection
+
+Fetching user roles/permissions
+
+(Optional) central session management / SSO
+
+
+
+
+---
+
+2. Mermaid code for the architecture
+
+2.1 Deployment / Component View
+
+Paste this into a Mermaid live editor:
+
+flowchart LR
+    %% Clients
+    User[End User\n(Browser / Client)]
+
+    %% Servers
+    subgraph S1[Server 1\nWebLogic Host]
+        BSA[BSA Application\nMonolith]
+        TR[Tranche Application\nMonolith]
+    end
+
+    subgraph S2[Server 2\nWebLogic Host]
+        FS[FinSight Application\nMonolith]
+    end
+
+    subgraph IDAMHost[IDAM Host\nSpring Boot Runtime]
+        IDAM[IDAM Service\n(Spring Boot Microservice)]
+    end
+
+    subgraph Storage[Identity Store]
+        IDDB[(User / Role / Permission DB\nor LDAP)]
+    end
+
+    %% User to Apps
+    User -->|HTTP/HTTPS| BSA
+    User -->|HTTP/HTTPS| TR
+    User -->|HTTP/HTTPS| FS
+
+    %% Apps to IDAM
+    BSA -->|REST APIs\n/OAuth2-OIDC| IDAM
+    TR  -->|REST APIs\n/OAuth2-OIDC| IDAM
+    FS  -->|REST APIs\n/OAuth2-OIDC| IDAM
+
+    %% IDAM to Identity Store
+    IDAM -->|JDBC/LDAP| IDDB
+
+
+---
+
+2.2 Logical Component View of IDAM Service (optional but useful)
+
+This shows internal structure of the Spring Boot IDAM:
+
+classDiagram
+    class AuthController {
+        +login(credentials)
+        +refreshToken(refreshToken)
+        +logout(token)
+    }
+
+    class TokenValidationController {
+        +validateToken(token)
+        +getUserInfo(token)
+        +getPermissions(token, resource)
+    }
+
+    class UserService {
+        +authenticate(username, password)
+        +loadUserByUsername(username)
+    }
+
+    class TokenService {
+        +generateAccessToken(userDetails)
+        +generateRefreshToken(userDetails)
+        +validateToken(token)
+        +parseClaims(token)
+    }
+
+    class PermissionService {
+        +getUserRoles(userId)
+        +getUserPermissions(userId)
+        +isAuthorized(userId, action, resource)
+    }
+
+    class UserRepository {
+        +findByUsername(username)
+        +findById(id)
+    }
+
+    class RoleRepository {
+        +findByUserId(userId)
+    }
+
+    class PermissionRepository {
+        +findByRoleId(roleId)
+    }
+
+    AuthController --> UserService
+    AuthController --> TokenService
+
+    TokenValidationController --> TokenService
+    TokenValidationController --> PermissionService
+
+    UserService --> UserRepository
+    PermissionService --> RoleRepository
+    PermissionService --> PermissionRepository
+
+    TokenService ..> "JWT Library" : uses
+
+
+---
+
+3. Optimal approach to implement the business logic
+
+3.1 Make IDAM a true independent service
+
+Implement IDAM as a separate Spring Boot microservice (as you want), not deployed on WebLogic.
+
+Use:
+
+Spring Boot + Spring Security
+
+Spring Authorization Server or your own lightweight OAuth2/JWT-based implementation.
+
+
+Maintain a single identity store:
+
+A dedicated IDAM_DB schema (User, Role, Permission, ClientApps, etc.)
+
+Or integrate with corporate LDAP/AD if available.
+
+
+
+3.2 Protocol between apps and IDAM
+
+Recommended: OAuth2 + JWT (OpenID Connect style)
+
+Flows:
+
+User hits BSA / Tranche / FinSight.
+
+App either:
+
+Redirects to IDAM login (authorization code flow), or
+
+Calls IDAM’s /auth/login endpoint directly and gets back JWT.
+
+
+
+After login:
+
+IDAM issues access token (JWT) (+ optional refresh token).
+
+Token contains sub, roles, maybe permission claims.
+
+Each monolith:
+
+Validates JWT on every request (public key / shared secret).
+
+Extracts roles to enforce authorization locally.
+
+
+For complex permissions, apps can call IDAM:
+
+/auth/validateToken
+
+/auth/permissions?resource=...&action=...
+
+
+
+
+Why this is good:
+
+Stateless: No shared HTTP session required across servers.
+
+Scalable: IDAM can be scaled independently.
+
+SSO: Same token works across BSA, Tranche, FinSight (if domain and cookie strategy permit).
+
+Loose coupling: Apps do not depend on IDAM’s internal DB, only on its API & token contract.
+
+
+3.3 Changes inside existing monoliths
+
+On each WebLogic app, add:
+
+A security filter / servlet filter (or equivalent):
+
+Extract JWT from header (e.g., Authorization: Bearer <token>).
+
+Validate signature and expiry.
+
+Map roles → app’s security context (e.g., Principal, role list).
+
+
+A small IDAM client (Java library) to:
+
+Call IDAM REST endpoints:
+
+/auth/validateToken
+
+/auth/userinfo
+
+/auth/permissions
+
+
+Handle common configs (base URL, timeouts, retries).
+
+
+
+You can package this as a shared JAR used by all 3 monoliths.
+
+
+---
+
+4. Where to host the IDAM Service
+
+Since all three apps are currently monoliths on WebLogic, you have a few options:
+
+Option A – Separate VM / Server (recommended)
+
+Provision a dedicated server/VM (or container platform) for the Spring Boot IDAM:
+
+Run as a standalone JAR (java -jar idam-service.jar) or Docker container.
+
+
+Put it behind:
+
+Internal load balancer or
+
+Corporate API gateway / reverse proxy.
+
+
+Advantages:
+
+Clean separation of concerns and tech stack.
+
+Independent scaling, deployment, versioning from WebLogic.
+
+Clear boundary: IDAM = microservice; others = monoliths.
+
+
+
+Option B – Same physical machine as Server1/Server2, but different runtime
+
+Run Spring Boot on different ports on the same servers where WebLogic is installed.
+
+Still keep it as independent process (not deployed in WebLogic).
+
+Acceptable for dev / lower environments, but less ideal for production because of resource and blast-radius coupling.
+
+
+Networking & security considerations
+
+IDAM should be accessible from:
+
+BSA/Tranche (Server1)
+
+FinSight (Server2)
+
+
+Expose:
+
+Internal URL for server-to-server REST calls.
+
+Optionally external URL (through gateway) if any external system will consume IDAM APIs directly.
+
+
+Use HTTPS everywhere.
+
+Protect IDAM endpoints with:
+
+Client credentials (for machine-to-machine) or
+
+Mutual TLS, API keys, etc., depending on org standards.
+
+
+
+
+---
+
+If you want, next step we can:
+
+Design specific REST endpoints for IDAM (URLs, request/response JSON).
+
+Draft a security filter snippet for your WebLogic apps (Java).
+
+Or refine the Mermaid diagram to show SSO flows (redirects, token issuing).
