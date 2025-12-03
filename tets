@@ -1,29 +1,22 @@
-flowchart LR
-    User[End User<br/>Browser / Client]
-
-    subgraph S1 [Server 1<br/>WebLogic Host]
-        BSA[BSA Application<br/>Monolith]
-        TR[Tranche Application<br/>Monolith]
-    end
-
-    subgraph S2 [Server 2<br/>WebLogic Host]
-        FS[FinSight Application<br/>Monolith]
-    end
-
-    subgraph IDAMHost [IDAM Host<br/>Spring Boot Runtime]
-        IDAM[IDAM Service<br/>(Spring Boot Microservice)]
-    end
-
-    subgraph Storage [Identity Store]
-        IDDB[(User / Role / Permission DB<br/>or LDAP)]
-    end
-
-    User -->|HTTP/HTTPS| BSA
-    User -->|HTTP/HTTPS| TR
-    User -->|HTTP/HTTPS| FS
-
-    BSA -->|REST APIs / OAuth2-OIDC| IDAM
-    TR  -->|REST APIs / OAuth2-OIDC| IDAM
-    FS  -->|REST APIs / OAuth2-OIDC| IDAM
-
-    IDAM -->|JDBC / LDAP| IDDB
+const theme = useMemo(() => {
+    if (disableCustomTheme) return {};
+    return createTheme({
+      cssVarPrefix: "template",
+      cssVariables: {
+        colorSchemeSelector: "data-mui-color-scheme"
+      },
+      colorSchemes,
+      defaultColorScheme: safeThemeKey,
+      typography,
+      shadows,
+      shape,
+      components: {
+        ...inputsCustomizations,
+        ...dataDisplayCustomizations,
+        ...feedbackCustomizations,
+        ...navigationCustomizations,
+        ...surfacesCustomizations,
+        ...themeComponents
+      }
+    });
+  }, [disableCustomTheme, themeComponents, safeThemeKey]);
