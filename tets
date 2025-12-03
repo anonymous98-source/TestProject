@@ -1,29 +1,13 @@
-MuiDataGrid: {
+MuiDialog: {
   styleOverrides: {
-    columnHeader: {
-      '& .MuiDataGrid-iconButtonContainer': {
-        visibility: 'visible !important',
-      },
-      '& .MuiDataGrid-sortIcon': {
-        color: '#000 !important',      // or white depending on theme
-      },
-      '& .MuiDataGrid-menuIcon': {
-        color: '#000 !important',
-        opacity: 1,
-      },
-      '& .MuiDataGrid-menuIconButton': {
-        width: '28px',
-        height: '28px',
-        color: '#000 !important',
+    paper: {
+      '& .MuiButton-root': {
+        color: '#fff',
+        backgroundColor: theme.palette.primary.main,
+        '&:hover': {
+          backgroundColor: theme.palette.primary.dark,
+        },
       },
     },
-
-    columnHeaders: ({ theme }) => ({
-      backgroundColor:
-        theme.palette.mode === 'dark'
-          ? 'rgba(0,0,0,0.3)'
-          : 'rgba(255,255,255,0.6)', // more opaque so icons show
-      backdropFilter: 'blur(8px)',
-    }),
   },
-}
+},
