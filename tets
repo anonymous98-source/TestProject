@@ -1,105 +1,29 @@
-// src/theme/AppTheme.jsx
-import React, { useMemo, createContext, useState, useEffect } from "react";
-import PropTypes from "prop-types";
-import { CssVarsProvider, createTheme } from "@mui/material/styles";
+MuiDataGrid: {
+  styleOverrides: {
+    columnHeader: {
+      '& .MuiDataGrid-iconButtonContainer': {
+        visibility: 'visible !important',
+      },
+      '& .MuiDataGrid-sortIcon': {
+        color: '#000 !important',      // or white depending on theme
+      },
+      '& .MuiDataGrid-menuIcon': {
+        color: '#000 !important',
+        opacity: 1,
+      },
+      '& .MuiDataGrid-menuIconButton': {
+        width: '28px',
+        height: '28px',
+        color: '#000 !important',
+      },
+    },
 
-import { colorSchemes, typography, shadows, shape } from "./themePrimitives";
-
-// NOTE: customizations may be either plain objects OR functions that accept theme
-import { inputsCustomizations } from "./customizations/inputs";
-import { dataDisplayCustomizations } from "./customizations/dataDisplay";
-import { feedbackCustomizations } from "./customizations/feedback";
-import { navigationCustomizations } from "./customizations/navigation";
-import { surfacesCustomizations } from "./customizations/surfaces";
-
-export const ThemeContext = createContext({
-  currentTheme: "light",
-  changeTheme: () => {}
-});
-
-function AppTheme(props) {
-  const { children, disableCustomTheme, themeComponents } = props;
-  const [currentTheme, setCurrentTheme] = useState("light");
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("app-theme");
-      if (saved && Object.keys(colorSchemes).includes(saved)) {
-        setCurrentTheme(saved);
-      } else {
-        setCurrentTheme("light");
-      }
-    } catch (e) {
-      setCurrentTheme("light");
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      if (currentTheme && Object.keys(colorSchemes).includes(currentTheme)) {
-        localStorage.setItem("app-theme", currentTheme);
-      }
-    } catch (e) {}
-  }, [currentTheme]);
-
-  const changeTheme = (themeName) => {
-    if (themeName && Object.keys(colorSchemes).includes(themeName)) {
-      setCurrentTheme(themeName);
-    } else {
-      console.warn("Trying to set unknown theme:", themeName);
-    }
-  };
-
-  const safeThemeKey = Object.keys(colorSchemes).includes(currentTheme) ? currentTheme : "light";
-
-  const theme = useMemo(() => {
-    if (disableCustomTheme) return {};
-
-    // 1) create a base theme WITHOUT components (so palette exists)
-    const baseTheme = createTheme({
-      cssVarPrefix: "template",
-      cssVariables: { colorSchemeSelector: "data-mui-color-scheme" },
-      colorSchemes,
-      defaultColorScheme: safeThemeKey,
-      typography,
-      shadows,
-      shape
-    });
-
-    // 2) helper to resolve a customization which may be an object or a function(theme) => object
-    const resolve = (c) => (typeof c === "function" ? c(baseTheme) : c || {});
-
-    // 3) build components by resolving each customization against baseTheme
-    const components = {
-      ...resolve(inputsCustomizations),
-      ...resolve(dataDisplayCustomizations),
-      ...resolve(feedbackCustomizations),
-      ...resolve(navigationCustomizations),
-      ...resolve(surfacesCustomizations),
-      ...resolve(themeComponents) // allow overrides passed from props (also supports functions)
-    };
-
-    // 4) create final theme merging components in — this guarantees palette/background/etc exist
-    const finalTheme = createTheme(baseTheme, { components });
-
-    return finalTheme;
-  }, [disableCustomTheme, themeComponents, safeThemeKey]);
-
-  if (disableCustomTheme) return <>{children}</>;
-
-  return (
-    <ThemeContext.Provider value={{ currentTheme, changeTheme }}>
-      <CssVarsProvider theme={theme} disableTransitionOnChange>
-        {children}
-      </CssVarsProvider>
-    </ThemeContext.Provider>
-  );
+    columnHeaders: ({ theme }) => ({
+      backgroundColor:
+        theme.palette.mode === 'dark'
+          ? 'rgba(0,0,0,0.3)'
+          : 'rgba(255,255,255,0.6)', // more opaque so icons show
+      backdropFilter: 'blur(8px)',
+    }),
+  },
 }
-
-AppTheme.propTypes = {
-  children: PropTypes.node,
-  disableCustomTheme: PropTypes.bool,
-  themeComponents: PropTypes.object
-};
-
-export default AppTheme;
