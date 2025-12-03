@@ -1,29 +1,17 @@
-Nice — I see what's happening. You're creating a theme with colorSchemes and cssVarPrefix (the CSS variables approach), but you're still using ThemeProvider. MUI's CSS-variables + multiple color schemes feature requires the CSS-vars provider (CssVarsProvider) so the runtime can toggle the active color-scheme and update the CSS variables. Using ThemeProvider alone won't switch the CSS variables when you change defaultColorScheme (so UI won't update on button click).
-
-Below are (1) a minimal, working fix for AppTheme.jsx (swap ThemeProvider → CssVarsProvider and a couple of small robustness improvements) and (2) a tiny improvement for ThemeSwitcher.jsx so it behaves if currentTheme is unexpected.
-
-
----
-
-1) Updated src/theme/AppTheme.jsx
-
 // src/theme/AppTheme.jsx
 import React, { useMemo, createContext, useState, useEffect } from "react";
 import PropTypes from "prop-types";
-// Use CssVarsProvider when you rely on css variables / colorSchemes
 import { CssVarsProvider, createTheme } from "@mui/material/styles";
 
-// IMPORTANT: use named import for colorSchemes and other primitives
 import { colorSchemes, typography, shadows, shape } from "./themePrimitives";
 
-// IMPORTANT: use named imports for your customization modules (they export named constants)
+// NOTE: customizations may be either plain objects OR functions that accept theme
 import { inputsCustomizations } from "./customizations/inputs";
 import { dataDisplayCustomizations } from "./customizations/dataDisplay";
 import { feedbackCustomizations } from "./customizations/feedback";
 import { navigationCustomizations } from "./customizations/navigation";
 import { surfacesCustomizations } from "./customizations/surfaces";
 
-// ThemeContext for ThemeSwitcher
 export const ThemeContext = createContext({
   currentTheme: "light",
   changeTheme: () => {}
@@ -31,11 +19,8 @@ export const ThemeContext = createContext({
 
 function AppTheme(props) {
   const { children, disableCustomTheme, themeComponents } = props;
-
-  // 1) state to hold current theme key
   const [currentTheme, setCurrentTheme] = useState("light");
 
-  // 2) load saved theme from localStorage (only if valid key)
   useEffect(() => {
     try {
       const saved = localStorage.getItem("app-theme");
@@ -45,20 +30,16 @@ function AppTheme(props) {
         setCurrentTheme("light");
       }
     } catch (e) {
-      // localStorage access failed (e.g. SSR or strict privacy), fallback safely
       setCurrentTheme("light");
     }
   }, []);
 
-  // 3) persist only valid keys
   useEffect(() => {
     try {
       if (currentTheme && Object.keys(colorSchemes).includes(currentTheme)) {
         localStorage.setItem("app-theme", currentTheme);
       }
-    } catch (e) {
-      // ignore storage errors
-    }
+    } catch (e) {}
   }, [currentTheme]);
 
   const changeTheme = (themeName) => {
@@ -69,39 +50,45 @@ function AppTheme(props) {
     }
   };
 
-  // safe key fallback
   const safeThemeKey = Object.keys(colorSchemes).includes(currentTheme) ? currentTheme : "light";
 
   const theme = useMemo(() => {
     if (disableCustomTheme) return {};
-    return createTheme({
+
+    // 1) create a base theme WITHOUT components (so palette exists)
+    const baseTheme = createTheme({
       cssVarPrefix: "template",
-      // optional: small custom cssVariables map
-      cssVariables: {
-        colorSchemeSelector: "data-mui-color-scheme"
-      },
+      cssVariables: { colorSchemeSelector: "data-mui-color-scheme" },
       colorSchemes,
       defaultColorScheme: safeThemeKey,
       typography,
       shadows,
-      shape,
-      components: {
-        ...inputsCustomizations,
-        ...dataDisplayCustomizations,
-        ...feedbackCustomizations,
-        ...navigationCustomizations,
-        ...surfacesCustomizations,
-        ...themeComponents
-      }
+      shape
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    // 2) helper to resolve a customization which may be an object or a function(theme) => object
+    const resolve = (c) => (typeof c === "function" ? c(baseTheme) : c || {});
+
+    // 3) build components by resolving each customization against baseTheme
+    const components = {
+      ...resolve(inputsCustomizations),
+      ...resolve(dataDisplayCustomizations),
+      ...resolve(feedbackCustomizations),
+      ...resolve(navigationCustomizations),
+      ...resolve(surfacesCustomizations),
+      ...resolve(themeComponents) // allow overrides passed from props (also supports functions)
+    };
+
+    // 4) create final theme merging components in — this guarantees palette/background/etc exist
+    const finalTheme = createTheme(baseTheme, { components });
+
+    return finalTheme;
   }, [disableCustomTheme, themeComponents, safeThemeKey]);
 
   if (disableCustomTheme) return <>{children}</>;
 
   return (
     <ThemeContext.Provider value={{ currentTheme, changeTheme }}>
-      {/* Use CssVarsProvider so colorSchemes (css variables) actually update at runtime */}
       <CssVarsProvider theme={theme} disableTransitionOnChange>
         {children}
       </CssVarsProvider>
@@ -116,68 +103,3 @@ AppTheme.propTypes = {
 };
 
 export default AppTheme;
-
-Key change: ThemeProvider → CssVarsProvider (from @mui/material/styles). CssVarsProvider is the provider that knows how to apply the colorSchemes CSS variables and respond to defaultColorScheme changes.
-
-
----
-
-2) Small improvement for src/components/ThemeSwitcher.jsx
-
-Make the switcher robust if currentTheme is not in your order array (prevents -1 index issues):
-
-// src/components/ThemeSwitcher.jsx
-import React, { useContext } from "react";
-import { Button, Box } from "@mui/material";
-import { ThemeContext } from "../theme/AppTheme";
-
-const ThemeSwitcher = () => {
-  const { currentTheme, changeTheme } = useContext(ThemeContext);
-
-  const order = ["light", "dark", "mint"];
-  const idx = order.indexOf(currentTheme);
-  const nextTheme = order[(idx === -1 ? 0 : idx + 1) % order.length];
-
-  return (
-    <Box sx={{ position: "fixed", top: 20, right: 20, zIndex: 2000 }}>
-      <Button variant="contained" onClick={() => changeTheme(nextTheme)}>
-        {nextTheme} Theme
-      </Button>
-    </Box>
-  );
-};
-
-export default ThemeSwitcher;
-
-
----
-
-Extra notes / troubleshooting checklist
-
-1. MUI version: CssVarsProvider and the colorSchemes approach require a modern MUI release (5.10+; the CSS-vars API became stable-ish around 5.12+). If you use an older MUI, update to a compatible version.
-
-
-2. Inspect DOM: After switching, check that the <html> or root element has data-mui-color-scheme="light|dark|mint" or similar CSS variables set — that shows provider applied the scheme.
-
-
-3. Component overrides: If you have hard-coded colors (e.g., inline style={{ color: "#000" }}) those won't react to themes — prefer theme tokens (e.g., theme.palette.primary.main or sx).
-
-
-4. LocalStorage keys: If you previously saved invalid values in app-theme, you might want to clear it during testing.
-
-
-5. Server-side rendering: If SSR, guard localStorage usage (we added try/catch).
-
-
-
-
----
-
-If you want, I can:
-
-provide a tiny runnable Codesandbox/stackblitz example (React + MUI) so you can see switching live, or
-
-scan your other customization modules (inputsCustomizations etc.) to ensure they use theme tokens and respond to palette changes.
-
-
-Want the runnable example?
