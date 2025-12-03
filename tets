@@ -1,22 +1,43 @@
+import { useMemo } from "react";
+import { createTheme } from "@mui/material/styles";
+
 const theme = useMemo(() => {
-    if (disableCustomTheme) return {};
-    return createTheme({
-      cssVarPrefix: "template",
-      cssVariables: {
-        colorSchemeSelector: "data-mui-color-scheme"
-      },
-      colorSchemes,
-      defaultColorScheme: safeThemeKey,
-      typography,
-      shadows,
-      shape,
-      components: {
-        ...inputsCustomizations,
-        ...dataDisplayCustomizations,
-        ...feedbackCustomizations,
-        ...navigationCustomizations,
-        ...surfacesCustomizations,
-        ...themeComponents
-      }
-    });
-  }, [disableCustomTheme, themeComponents, safeThemeKey]);
+  // If custom theme is disabled, return a default MUI theme instead of {}
+  if (disableCustomTheme) {
+    return createTheme(); // safe default theme (has palette.background etc.)
+  }
+
+  return createTheme({
+    cssVarPrefix: "template",
+    cssVariables: {
+      colorSchemeSelector: "data-mui-color-scheme"
+    },
+    colorSchemes,
+    defaultColorScheme: safeThemeKey || "light",
+    typography,
+    shadows,
+    shape,
+    components: {
+      ...inputsCustomizations,
+      ...dataDisplayCustomizations,
+      ...feedbackCustomizations,
+      ...navigationCustomizations,
+      ...surfacesCustomizations,
+      ...themeComponents
+    }
+  });
+  // include ALL external values used inside to avoid stale closures
+}, [
+  disableCustomTheme,
+  colorSchemes,
+  safeThemeKey,
+  typography,
+  shadows,
+  shape,
+  inputsCustomizations,
+  dataDisplayCustomizations,
+  feedbackCustomizations,
+  navigationCustomizations,
+  surfacesCustomizations,
+  themeComponents
+]);
