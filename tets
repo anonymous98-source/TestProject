@@ -1,8 +1,17 @@
+Nice — I see what's happening. You're creating a theme with colorSchemes and cssVarPrefix (the CSS variables approach), but you're still using ThemeProvider. MUI's CSS-variables + multiple color schemes feature requires the CSS-vars provider (CssVarsProvider) so the runtime can toggle the active color-scheme and update the CSS variables. Using ThemeProvider alone won't switch the CSS variables when you change defaultColorScheme (so UI won't update on button click).
+
+Below are (1) a minimal, working fix for AppTheme.jsx (swap ThemeProvider → CssVarsProvider and a couple of small robustness improvements) and (2) a tiny improvement for ThemeSwitcher.jsx so it behaves if currentTheme is unexpected.
+
+
+---
+
+1) Updated src/theme/AppTheme.jsx
 
 // src/theme/AppTheme.jsx
 import React, { useMemo, createContext, useState, useEffect } from "react";
 import PropTypes from "prop-types";
-import { ThemeProvider, createTheme } from "@mui/material/styles";
+// Use CssVarsProvider when you rely on css variables / colorSchemes
+import { CssVarsProvider, createTheme } from "@mui/material/styles";
 
 // IMPORTANT: use named import for colorSchemes and other primitives
 import { colorSchemes, typography, shadows, shape } from "./themePrimitives";
@@ -28,18 +37,27 @@ function AppTheme(props) {
 
   // 2) load saved theme from localStorage (only if valid key)
   useEffect(() => {
-    const saved = localStorage.getItem("app-theme");
-    if (saved && Object.keys(colorSchemes).includes(saved)) {
-      setCurrentTheme(saved);
-    } else {
+    try {
+      const saved = localStorage.getItem("app-theme");
+      if (saved && Object.keys(colorSchemes).includes(saved)) {
+        setCurrentTheme(saved);
+      } else {
+        setCurrentTheme("light");
+      }
+    } catch (e) {
+      // localStorage access failed (e.g. SSR or strict privacy), fallback safely
       setCurrentTheme("light");
     }
   }, []);
 
   // 3) persist only valid keys
   useEffect(() => {
-    if (currentTheme && Object.keys(colorSchemes).includes(currentTheme)) {
-      localStorage.setItem("app-theme", currentTheme);
+    try {
+      if (currentTheme && Object.keys(colorSchemes).includes(currentTheme)) {
+        localStorage.setItem("app-theme", currentTheme);
+      }
+    } catch (e) {
+      // ignore storage errors
     }
   }, [currentTheme]);
 
@@ -54,21 +72,15 @@ function AppTheme(props) {
   // safe key fallback
   const safeThemeKey = Object.keys(colorSchemes).includes(currentTheme) ? currentTheme : "light";
 
-  // debug logs — optional, safe to remove later
-  useEffect(() => {
-    // console.log("AppTheme: currentTheme =", currentTheme, "safeThemeKey =", safeThemeKey);
-    // console.log("Available colorSchemes keys:", Object.keys(colorSchemes));
-  }, [currentTheme, safeThemeKey]);
-
   const theme = useMemo(() => {
     if (disableCustomTheme) return {};
     return createTheme({
       cssVarPrefix: "template",
+      // optional: small custom cssVariables map
       cssVariables: {
         colorSchemeSelector: "data-mui-color-scheme"
       },
       colorSchemes,
-
       defaultColorScheme: safeThemeKey,
       typography,
       shadows,
@@ -82,15 +94,17 @@ function AppTheme(props) {
         ...themeComponents
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [disableCustomTheme, themeComponents, safeThemeKey]);
 
   if (disableCustomTheme) return <>{children}</>;
 
   return (
     <ThemeContext.Provider value={{ currentTheme, changeTheme }}>
-      <ThemeProvider theme={theme} disableTransitionOnChange>
+      {/* Use CssVarsProvider so colorSchemes (css variables) actually update at runtime */}
+      <CssVarsProvider theme={theme} disableTransitionOnChange>
         {children}
-      </ThemeProvider>
+      </CssVarsProvider>
     </ThemeContext.Provider>
   );
 }
@@ -103,245 +117,14 @@ AppTheme.propTypes = {
 
 export default AppTheme;
 
+Key change: ThemeProvider → CssVarsProvider (from @mui/material/styles). CssVarsProvider is the provider that knows how to apply the colorSchemes CSS variables and respond to defaultColorScheme changes.
 
 
+---
 
-  
-import { createTheme, alpha } from "@mui/material/styles";
+2) Small improvement for src/components/ThemeSwitcher.jsx
 
-/* -------------------------------------------------
-   BASE COLOR PALETTES (same structure you already use)
---------------------------------------------------- */
-
-const purple = {
-  50:  "#EDE8FF",
-  100: "#D8CCFF",
-  200: "#A28DF9",
-  300: "#7C63E6",
-  400: "#5D3FD3",
-  500: "#4F30C1",
-  600: "#3E2C70",
-  700: "#2F2157",
-  800: "#241A44",
-  900: "#1B1435"
-};
-
-const gold = {
-  50: "#FFF4CC",
-  100: "#FFE580",
-  200: "#FFD659",
-  300: "#FCC33D",
-  400: "#F5C542",
-  500: "#E6B51F",
-  600: "#B48B00",
-  700: "#8A6B00",
-  800: "#5C4800",
-  900: "#3C2F00"
-};
-
-const gray = {
-  50:  "#F7F7F7",
-  100: "#EDEDED",
-  200: "#E0E0E0",
-  300: "#C7C7C7",
-  400: "#9E9E9E",
-  500: "#6F6F6F",
-  600: "#4F4F4F",
-  700: "#424242",
-  800: "#2E2E2E",
-  900: "#1E1E1E"
-};
-
-/* ------------------ NEW MINT PALETTE ------------------ */
-
-const mint = {
-  50:  "#E7FFF7",
-  100: "#C8FFE9",
-  200: "#A0F5D9",
-  300: "#7BEBC8",
-  400: "#55DEB8",
-  500: "#37D2A5",
-  600: "#2EB58D",
-  700: "#248E6F",
-  800: "#1B6952",
-  900: "#104232"
-};
-
-/* -------------------------------------------------
-   GLASSMORPHISM
---------------------------------------------------- */
-
-export const glass = {
-  panel: (opacity = 0.25) => `rgba(255,255,255,${opacity})`,
-  border: `rgba(255,255,255,0.3)`,
-  chip: `rgba(255,255,255,0.35)`,
-  snackbar: `rgba(255,255,255,0.4)`
-};
-
-export const glassmorphismBaseStyles = (theme) => ({
-  background: "rgba(255,255,255,0.1)",
-  backdropFilter: "blur(20px) saturate(180%)",
-  WebkitBackdropFilter: "blur(20px) saturate(180%)",
-  border: "1px solid rgba(255,255,255,0.15)",
-  boxShadow: theme.shadows?.[10]
-});
-
-/* -------------------------------------------------
-   TYPOGRAPHY / SHAPE / SHADOWS (same as your file)
---------------------------------------------------- */
-
-const base = createTheme();
-
-export const typography = {
-  fontFamily: `"Poppins", Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`,
-  button: { textTransform: "none", fontWeight: 600 },
-  h1: { fontWeight: 600, fontSize: "clamp(2rem, 2.4vw, 2.5rem)" },
-  h2: { fontWeight: 600, fontSize: "clamp(1.6rem, 1.9vw, 2rem)" },
-  h3: { fontWeight: 500, fontSize: base.typography.pxToRem(24) },
-  h4: { fontWeight: 500, fontSize: base.typography.pxToRem(20) },
-  h5: { fontWeight: 500, fontSize: base.typography.pxToRem(16) },
-  body1: { fontSize: base.typography.pxToRem(16) },
-  body2: { fontSize: base.typography.pxToRem(14) }
-};
-
-export const shape = { borderRadius: 12 };
-
-const defaultTheme = createTheme();
-export const shadows = [
-  "none",
-  "var(--template-palette-baseShadow)",
-  ...defaultTheme.shadows.slice(2)
-];
-
-/* -------------------------------------------------
-   FINAL COLOR SCHEMES — ⭐ 3 THEMES ⭐
---------------------------------------------------- */
-
-export const colorSchemes = {
-
-  /* ---------------- LIGHT THEME (original) ---------------- */
-  light: {
-    palette: {
-      mode: "light",
-      primary: {
-        light: purple[200],
-        main: purple[400],
-        dark: purple[600],
-        contrastText: "#fff"
-      },
-      secondary: {
-        light: gold[100],
-        main: gold[400],
-        dark: gold[700],
-        contrastText: gray[900]
-      },
-      grey: { ...gray },
-      divider: alpha(purple[400], 0.2),
-
-      background: {
-        default: glass.panel(0.25),
-        paper: glass.panel(0.25),
-        glass: glass.panel(0.18)
-      },
-
-      text: {
-        primary: "#2A1E4F",
-        secondary: "#3E2C70",
-        disabled: gray[400]
-      },
-
-      baseShadow: "0 8px 25px rgba(0,0,0,0.1)"
-    }
-  },
-
-  /* ---------------- DARK THEME (your purple-dark) ---------------- */
-  dark: {
-    palette: {
-      mode: "dark",
-      primary: {
-        light: purple[300],
-        main: purple[400],
-        dark: purple[700],
-        contrastText: "#fff"
-      },
-      secondary: {
-        light: alpha(gold[100], 0.9),
-        main: gold[400],
-        dark: gold[700],
-        contrastText: "#000"
-      },
-
-      grey: { ...gray },
-      divider: alpha(gray[600], 0.4),
-
-      background: {
-        default: "#0E0E12",
-        paper: alpha("#0E0E12", 0.8),
-        glass: alpha("#0E0E12", 0.5)
-      },
-
-      text: {
-        primary: "#F5F6FA",
-        secondary: alpha("#F5F6FA", 0.8),
-        disabled: alpha("#F5F6FA", 0.4)
-      },
-
-      baseShadow: "0 10px 40px rgba(0,0,0,0.35)"
-    }
-  },
-
-  /* ---------------- MINT THEME (new) ---------------- */
-  mint: {
-    palette: {
-      mode: "light",
-      primary: {
-        light: mint[200],
-        main: mint[400],
-        dark: mint[600],
-        contrastText: "#003326"
-      },
-
-      secondary: {
-        light: purple[200],
-        main: purple[400],
-        dark: purple[700],
-        contrastText: "#fff"
-      },
-
-      grey: { ...gray },
-      divider: alpha(mint[400], 0.3),
-
-      background: {
-        default: mint[50],
-        paper: "#ffffff",
-        glass: alpha(mint[50], 0.4)
-      },
-
-      text: {
-        primary: "#003326",
-        secondary: alpha("#003326", 0.75),
-        disabled: gray[400]
-      },
-
-      baseShadow: "0 8px 25px rgba(0,0,0,0.06)"
-    }
-  }
-
-};
-
-/* EXPORT EVERYTHING */
-export default {
-  purple,
-  gold,
-  gray,
-  mint,
-  glass,
-  typography,
-  shadows,
-  shape,
-  colorSchemes
-};
-
+Make the switcher robust if currentTheme is not in your order array (prevents -1 index issues):
 
 // src/components/ThemeSwitcher.jsx
 import React, { useContext } from "react";
@@ -352,7 +135,8 @@ const ThemeSwitcher = () => {
   const { currentTheme, changeTheme } = useContext(ThemeContext);
 
   const order = ["light", "dark", "mint"];
-  const nextTheme = order[(order.indexOf(currentTheme) + 1) % order.length];
+  const idx = order.indexOf(currentTheme);
+  const nextTheme = order[(idx === -1 ? 0 : idx + 1) % order.length];
 
   return (
     <Box sx={{ position: "fixed", top: 20, right: 20, zIndex: 2000 }}>
@@ -364,3 +148,36 @@ const ThemeSwitcher = () => {
 };
 
 export default ThemeSwitcher;
+
+
+---
+
+Extra notes / troubleshooting checklist
+
+1. MUI version: CssVarsProvider and the colorSchemes approach require a modern MUI release (5.10+; the CSS-vars API became stable-ish around 5.12+). If you use an older MUI, update to a compatible version.
+
+
+2. Inspect DOM: After switching, check that the <html> or root element has data-mui-color-scheme="light|dark|mint" or similar CSS variables set — that shows provider applied the scheme.
+
+
+3. Component overrides: If you have hard-coded colors (e.g., inline style={{ color: "#000" }}) those won't react to themes — prefer theme tokens (e.g., theme.palette.primary.main or sx).
+
+
+4. LocalStorage keys: If you previously saved invalid values in app-theme, you might want to clear it during testing.
+
+
+5. Server-side rendering: If SSR, guard localStorage usage (we added try/catch).
+
+
+
+
+---
+
+If you want, I can:
+
+provide a tiny runnable Codesandbox/stackblitz example (React + MUI) so you can see switching live, or
+
+scan your other customization modules (inputsCustomizations etc.) to ensure they use theme tokens and respond to palette changes.
+
+
+Want the runnable example?
