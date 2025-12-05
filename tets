@@ -1,13 +1,90 @@
-MuiDialog: {
-  styleOverrides: {
-    paper: {
-      '& .MuiButton-root': {
-        color: '#fff',
-        backgroundColor: theme.palette.primary.main,
-        '&:hover': {
-          backgroundColor: theme.palette.primary.dark,
-        },
-      },
-    },
-  },
-},
+flowchart TD
+  %% Swimlanes
+  subgraph ReqUser [Requester]
+    direction TB
+    R_Start((Start))
+    R_CreateReq[/"Create Request (type: CREATE/EDIT/BLOCK/DELETE)"/]
+    R_CancelReq[/"Cancel Request (allowed before approval)"/]
+    R_ViewReq["View Request"]
+  end
+
+  subgraph Sys [System]
+    direction TB
+    S_Validate["Validate payload & permissions\n(hasCreateRequest?)"]
+    S_PersistReq["Save Request (status: CREATED/PENDING)"]
+    S_Notify["Notify approvers / send ack"]
+    S_CheckApprovePerm["Check approver permissions\n(hasApprove?)"]
+    S_RejectOwn["Check requester != approver\n(if same -> deny)"]
+    S_SetApproved["Set Request = APPROVED"]
+    S_SetRejected["Set Request = REJECTED"]
+    S_SetCancelled["Set Request = CANCELLED"]
+    S_ApplyChange["applyIfApproved() -> apply to User table"]
+    S_NotifyResult["Notify requester & audit"]
+  end
+
+  subgraph AppUser [Approver / Any user with rights]
+    direction TB
+    A_View["View Request"]
+    A_Approve["Approve Request"]
+    A_Reject["Reject Request"]
+  end
+
+  subgraph DB [Database / UserTable]
+    direction TB
+    DB_Reqs[(Requests table)]
+    DB_Users[(Users table)]
+    DB_Approvals[(Approvals / Audit)]
+  end
+
+  %% Flow connections: Request creation
+  R_Start --> R_CreateReq
+  R_CreateReq --> S_Validate
+  S_Validate -->|ok| S_PersistReq
+  S_Validate -->|fail| S_NotifyResult
+  S_PersistReq --> DB_Reqs
+  S_PersistReq --> S_Notify
+  S_Notify --> A_View
+
+  %% Requester can view or cancel
+  R_CreateReq --> R_ViewReq
+  R_ViewReq --> A_View
+  R_CreateReq --> R_CancelReq
+  R_CancelReq --> S_SetCancelled
+  S_SetCancelled --> DB_Reqs
+  S_SetCancelled --> S_NotifyResult
+
+  %% Approver views and acts
+  A_View --> S_CheckApprovePerm
+  S_CheckApprovePerm -->|no| S_NotifyResult
+  S_CheckApprovePerm -->|yes| S_RejectOwn
+
+  %% Deny approving own request
+  S_RejectOwn -->|approver == requester| S_NotifyResult
+  S_RejectOwn -->|different users| A_Approve
+  A_Approve --> S_SetApproved
+  S_SetApproved --> DB_Approvals
+  S_SetApproved --> DB_Reqs
+  S_SetApproved --> S_ApplyChange
+
+  %% Apply change to Users table depending on type
+  S_ApplyChange -->|CREATE -> insert| DB_Users
+  S_ApplyChange -->|EDIT -> update| DB_Users
+  S_ApplyChange -->|BLOCK -> set blocked=true| DB_Users
+  S_ApplyChange -->|DELETE -> delete or mark deleted| DB_Users
+  S_ApplyChange --> S_NotifyResult
+
+  %% Rejection path
+  S_CheckApprovePerm -->|reject action| A_Reject
+  A_Reject --> S_SetRejected
+  S_SetRejected --> DB_Approvals
+  S_SetRejected --> DB_Reqs
+  S_SetRejected --> S_NotifyResult
+
+  %% Notifications and final states
+  S_NotifyResult --> R_ViewReq
+  S_NotifyResult -->|audit| DB_Approvals
+
+  %% Notes / constraints
+  classDef note fill:#fff7c2,stroke:#333,stroke-width:1px;
+  N1["Note: Requester CAN view their own requests\nRequester CAN cancel their own request\nApprover MUST NOT be same as requester to approve\nSame approval flow for CREATE/EDIT/BLOCK/DELETE"]:::note
+  DB_Reqs --- N1
