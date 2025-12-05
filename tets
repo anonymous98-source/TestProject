@@ -1,120 +1,123 @@
-flowchart TD
-
-%% ============================
-%% Requester
-%% ============================
-subgraph ReqUser ["👤 Requester"]
+%% 1) Class diagram: domain model
+classDiagram
     direction TB
-    R_Start(("🔵 Start"))
-    R_CreateReq[/"📝 Create Request  
-(CREATE / EDIT / BLOCK / DELETE)"/]
-    R_ViewReq["👁️ View Own Request"]
-    R_CancelReq["❌ Cancel Request"]
-end
+    class User {
+        +UUID id
+        +String username
+        +String email
+        +String role
+        +Boolean blocked
+        +create()
+        +update()
+        +delete()
+        +block()
+        +unblock()
+    }
 
-%% ============================
-%% System
-%% ============================
-subgraph Sys ["🖥️ System"]
-    direction TB
-    S_Validate["🧪 Validate Payload & Permissions"]
-    S_PersistReq["💾 Save Request  
-Status: 🟡 <b style='color:#b58900'>PENDING</b>"]
-    S_Notify["📣 Notify Approvers"]
-    S_CheckApprovePerm["🔐 Check Approver Permissions"]
-    S_RejectOwn["⚠️ Deny If Approver == Requester"]
-    
-    S_SetApproved["<b>🟢 APPROVED</b>  
-✔️ Mark Request APPROVED"]:::approved
-    S_SetRejected["<b>🔴 REJECTED</b>  
-⛔ Mark Request REJECTED"]:::rejected
-    S_SetCancelled["<b>⚫ CANCELLED</b>  
-🚫 Mark Request CANCELLED"]:::cancelled
-    
-    S_ApplyChange["🔧 Apply Change to User Table"]
-    S_NotifyResult["📩 Notify Requester + Audit Entry"]
-end
+    class Request {
+        +UUID id
+        +RequestType type
+        +UUID requesterId
+        +UUID targetUserId    %% null for create user request
+        +Map<String,Object> payload
+        +RequestStatus status
+        +Date createdAt
+        +Date updatedAt
+        +createRequest()
+        +cancelRequest()
+        +applyIfApproved()
+    }
 
-%% ============================
-%% Approver
-%% ============================
-subgraph AppUser ["🛡️ Approver"]
-    direction TB
-    A_View["👁️ View Request"]
-    A_Approve["👍 Approve Request"]
-    A_Reject["👎 Reject Request"]
-end
+    class RequestType {
+        <<enumeration>>
+        +CREATE
+        +EDIT
+        +BLOCK
+        +DELETE
+    }
 
-%% ============================
-%% Database
-%% ============================
-subgraph DB ["🗄️ Database"]
-    direction TB
-    DB_Reqs[(📂 Requests Table)]
-    DB_Users[(👥 Users Table)]
-    DB_Approvals[(🧾 Approvals Log)]
-end
+    class Permission {
+        +UUID id
+        +UUID userId
+        +Boolean canCreateRequest
+        +Boolean canApprove
+        +Boolean canReject
+        +Boolean canViewRequest
+        +Boolean canCancelOwnRequest
+    }
 
-%% ----------------------------
-%% Main Flow
-%% ----------------------------
+    class Approval {
+        +UUID id
+        +UUID requestId
+        +UUID approverId
+        +Boolean approved
+        +String comments
+        +Date actedAt
+    }
 
-R_Start --> R_CreateReq
-R_CreateReq --> S_Validate
+    User "1" o-- "0..*" Request : "creates"
+    Request "1" o-- "0..*" Approval : "has"
+    User "1" o-- "0..1" Permission : "has"
+    RequestType <-- Request : "type"
 
-S_Validate -->|✅ OK| S_PersistReq
-S_Validate -->|❌ Fail| S_NotifyResult
+%% 2) Sequence diagram: create -> approval -> apply
+sequenceDiagram
+    participant A as Requester (User A)
+    participant S as System
+    participant B as Approver (User B)
+    participant DB as UserTable
 
-S_PersistReq --> DB_Reqs
-S_PersistReq --> S_Notify
-S_Notify --> A_View
+    Note over A,S: User A creates a request (CREATE / EDIT / BLOCK / DELETE)
+    A->>S: POST /requests {type, payload}
+    S->>S: validate payload & permissions (canCreateRequest)
+    S-->>A: 201 Created (requestId)
+    Note over A,B: Any user with view rights can see the request
+    B->>S: GET /requests/{id}  (check canViewRequest)
+    S-->>B: 200 + request
 
-%% Viewing / Cancelling
-R_CreateReq --> R_ViewReq
-R_ViewReq --> A_View
+    alt requester == approver
+        Note over S: If approver == requester => Approve API must reject action
+        B->>S: POST /requests/{id}/approve
+        S-->>B: 403 Forbidden "cannot approve own request"
+    else different users
+        B->>S: POST /requests/{id}/approve {comments}
+        S->>S: check canApprove, concurrency lock
+        S->>Approval: create Approval(approved=true)
+        S->>Request: update status = APPROVED
+        S-->>B: 200 Approved
 
-R_CreateReq --> R_CancelReq
-R_CancelReq --> S_SetCancelled
-S_SetCancelled --> DB_Reqs
-S_SetCancelled --> S_NotifyResult
+        Note right of S: On approval, system applies change
+        S->>DB: applyIfApproved(requestId)
+        DB-->>S: 200 OK (user created/updated/blocked/deleted)
+        S-->>A: Notify requester "Approved and applied"
+    end
 
-%% Approver Path
-A_View --> S_CheckApprovePerm
-S_CheckApprovePerm -->|🚫 No Permission| S_NotifyResult
-S_CheckApprovePerm -->|✔️ Allowed| S_RejectOwn
+    alt rejection flow
+        B->>S: POST /requests/{id}/reject {comments}
+        S->>Approval: create Approval(approved=false)
+        S->>Request: update status = REJECTED
+        S-->>A: Notify requester "Rejected"
+    end
 
-S_RejectOwn -->|❌ Same User| S_NotifyResult
-S_RejectOwn -->|✔️ Different User| A_Approve
+    alt cancel by requester
+        A->>S: POST /requests/{id}/cancel
+        S->>Request: if requesterId == A.id and status in [CREATED, PENDING] set CANCELLED
+        S-->>A: 200 Cancelled
+    end
 
-%% Approve
-A_Approve --> S_SetApproved
-S_SetApproved --> DB_Approvals
-S_SetApproved --> DB_Reqs
-S_SetApproved --> S_ApplyChange
-S_ApplyChange --> DB_Users
-S_ApplyChange --> S_NotifyResult
+%% 3) State diagram: request lifecycle
+stateDiagram-v2
+    [*] --> Created
+    Created --> PendingApproval : assigned / queued
+    PendingApproval --> Approved : approver approves
+    PendingApproval --> Rejected : approver rejects
+    Created --> Cancelled : requester cancels
+    PendingApproval --> Cancelled : requester cancels (if allowed)
+    Approved --> Applied : system applies change to User table
+    Applied --> Archived
+    Rejected --> Archived
+    Cancelled --> Archived
 
-%% Reject
-A_Reject --> S_SetRejected
-S_SetRejected --> DB_Approvals
-S_SetRejected --> DB_Reqs
-S_SetRejected --> S_NotifyResult
-
-%% Notifications
-S_NotifyResult --> R_ViewReq
-S_NotifyResult --> DB_Approvals
-
-%% ====== Styles ======
-classDef approved fill:#c8f7c5,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
-classDef rejected fill:#f7c5c5,stroke:#b71c1c,stroke-width:2px,color:#7f0000;
-classDef cancelled fill:#d7d7d7,stroke:#424242,stroke-width:2px,color:#212121;
-
-%% Note
-classDef note fill:#fff7c2,stroke:#333,stroke-width:1px;
-N1["📌 **Status Colors:**  
-🟡 Pending — Request created, waiting for approval  
-🟢 Approved — System applies action to User table  
-🔴 Rejected — No changes applied  
-⚫ Cancelled — Request withdrawn by requester  
-❗ Requester cannot approve their own request"]:::note
-DB_Reqs --- N1
+    note right of Approved
+      On Approved -> system: create/update/block/delete user row
+    end note
