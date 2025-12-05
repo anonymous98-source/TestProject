@@ -1,5 +1,4 @@
-%% Full corrected Mermaid (class + fixed sequence + state)
-%% 1) Class diagram
+%% 1) Class diagram: domain model
 classDiagram
     direction TB
     class User {
@@ -101,7 +100,7 @@ sequenceDiagram
         S-->>A: 200 Cancelled
     end
 
-%% 3) State diagram
+%% 3) State diagram: request lifecycle
 stateDiagram-v2
     [*] --> Created
     Created --> PendingApproval : assigned / queued
