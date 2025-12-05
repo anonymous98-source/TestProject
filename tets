@@ -18,8 +18,8 @@ classDiagram
         +UUID id
         +RequestType type
         +UUID requesterId
-        +UUID targetUserId    %% null for create user request
-        +Map<String,Object> payload
+        +UUID targetUserId
+        +Map payload
         +RequestStatus status
         +Date createdAt
         +Date updatedAt
@@ -30,10 +30,10 @@ classDiagram
 
     class RequestType {
         <<enumeration>>
-        +CREATE
-        +EDIT
-        +BLOCK
-        +DELETE
+        CREATE
+        EDIT
+        BLOCK
+        DELETE
     }
 
     class Permission {
@@ -55,17 +55,17 @@ classDiagram
         +Date actedAt
     }
 
-    User "1" o-- "0..*" Request : "creates"
-    Request "1" o-- "0..*" Approval : "has"
-    User "1" o-- "0..1" Permission : "has"
-    RequestType <-- Request : "type"
+    User "1" o-- "0..*" Request : creates
+    Request "1" o-- "0..*" Approval : has
+    User "1" o-- "0..1" Permission : has
+    Request --> RequestType : type
 
 %% 2) Sequence diagram: create -> approval -> apply
 sequenceDiagram
     participant A as Requester (User A)
     participant S as System
     participant B as Approver (User B)
-    participant DB as UserTable
+    participant DB as Database
 
     Note over A,S: User A creates a request (CREATE / EDIT / BLOCK / DELETE)
     A->>S: POST /requests {type, payload}
@@ -82,26 +82,26 @@ sequenceDiagram
     else different users
         B->>S: POST /requests/{id}/approve {comments}
         S->>S: check canApprove, concurrency lock
-        S->>Approval: create Approval(approved=true)
-        S->>Request: update status = APPROVED
+        S->>DB: insert Approval {requestId, approverId, approved:true, comments}
+        S->>DB: update Request status = APPROVED
         S-->>B: 200 Approved
 
         Note right of S: On approval, system applies change
-        S->>DB: applyIfApproved(requestId)
-        DB-->>S: 200 OK (user created/updated/blocked/deleted)
+        S->>DB: applyIfApproved(requestId) -> (create/update/block/delete user row)
+        DB-->>S: 200 OK (applied)
         S-->>A: Notify requester "Approved and applied"
     end
 
     alt rejection flow
         B->>S: POST /requests/{id}/reject {comments}
-        S->>Approval: create Approval(approved=false)
-        S->>Request: update status = REJECTED
+        S->>DB: insert Approval {requestId, approverId, approved:false, comments}
+        S->>DB: update Request status = REJECTED
         S-->>A: Notify requester "Rejected"
     end
 
     alt cancel by requester
         A->>S: POST /requests/{id}/cancel
-        S->>Request: if requesterId == A.id and status in [CREATED, PENDING] set CANCELLED
+        S->>DB: if requesterId == A.id and status in [CREATED, PENDING] set CANCELLED
         S-->>A: 200 Cancelled
     end
 
@@ -112,7 +112,7 @@ stateDiagram-v2
     PendingApproval --> Approved : approver approves
     PendingApproval --> Rejected : approver rejects
     Created --> Cancelled : requester cancels
-    PendingApproval --> Cancelled : requester cancels (if allowed)
+    PendingApproval --> Cancelled : requester cancels
     Approved --> Applied : system applies change to User table
     Applied --> Archived
     Rejected --> Archived
