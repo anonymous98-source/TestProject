@@ -1,4 +1,5 @@
-%% 1) Class diagram: domain model
+%% Full corrected Mermaid (class + fixed sequence + state)
+%% 1) Class diagram
 classDiagram
     direction TB
     class User {
@@ -13,7 +14,6 @@ classDiagram
         +block()
         +unblock()
     }
-
     class Request {
         +UUID id
         +RequestType type
@@ -27,7 +27,6 @@ classDiagram
         +cancelRequest()
         +applyIfApproved()
     }
-
     class RequestType {
         <<enumeration>>
         CREATE
@@ -35,7 +34,6 @@ classDiagram
         BLOCK
         DELETE
     }
-
     class Permission {
         +UUID id
         +UUID userId
@@ -45,7 +43,6 @@ classDiagram
         +Boolean canViewRequest
         +Boolean canCancelOwnRequest
     }
-
     class Approval {
         +UUID id
         +UUID requestId
@@ -54,18 +51,17 @@ classDiagram
         +String comments
         +Date actedAt
     }
-
     User "1" o-- "0..*" Request : creates
     Request "1" o-- "0..*" Approval : has
     User "1" o-- "0..1" Permission : has
     Request --> RequestType : type
 
-%% 2) Sequence diagram: create -> approval -> apply
+%% 2) Sequence diagram (fixed participant labels)
 sequenceDiagram
-    participant A as Requester (User A)
-    participant S as System
-    participant B as Approver (User B)
-    participant DB as Database
+    participant A as "Requester (User A)"
+    participant S as "System"
+    participant B as "Approver (User B)"
+    participant DB as "Database"
 
     Note over A,S: User A creates a request (CREATE / EDIT / BLOCK / DELETE)
     A->>S: POST /requests {type, payload}
@@ -105,7 +101,7 @@ sequenceDiagram
         S-->>A: 200 Cancelled
     end
 
-%% 3) State diagram: request lifecycle
+%% 3) State diagram
 stateDiagram-v2
     [*] --> Created
     Created --> PendingApproval : assigned / queued
