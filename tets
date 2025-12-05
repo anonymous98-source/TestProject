@@ -1,69 +1,142 @@
-%% === CLASS DIAGRAM ===
-classDiagram
-    class User {
-        +UUID id
-        +String username
-        +String email
-        +String role
-        +Boolean blocked
-    }
+flowchart TD
+  %% Swimlanes (roles)
+  subgraph MAKER["👤 Maker"]
+    direction TB
+    M_Start((Start))
+    M_Create["📝 Create report\n(type: automatic / web / rw23 / rw24)"]
+  end
 
-    class Request {
-        +UUID id
-        +RequestType type
-        +UUID requesterId
-        +UUID targetUserId
-        +Map payload
-        +RequestStatus status
-        +Date createdAt
-        +Date updatedAt
-    }
+  subgraph CHECKER["🔍 Checker"]
+    direction TB
+    C_Receive["🔔 Receive for check"]
+    C_Sign["✍️ Sign (Checker)"]
+    C_Reject["⛔ Reject (Checker)"]
+  end
 
-    class RequestType {
-        <<enumeration>>
-        CREATE
-        EDIT
-        BLOCK
-        DELETE
-    }
+  subgraph AUDITOR["🕵️ Auditor"]
+    direction TB
+    A_Receive["🔔 Receive for audit"]
+    A_Sign["✍️ Sign (Auditor)"]
+    A_Reject["⛔ Reject (Auditor)"]
+  end
 
-    class Permission {
-        +UUID id
-        +UUID userId
-        +Boolean canCreateRequest
-        +Boolean canApprove
-        +Boolean canReject
-        +Boolean canViewRequest
-        +Boolean canCancelOwnRequest
-    }
+  subgraph RO["👨‍💼 RO"]
+    direction TB
+    R_Receive["🔔 Receive for RO"]
+    R_Approve["✔️ Approve (RO)"]
+    R_Reject["⛔ Reject (RO)"]
+  end
 
-    class Approval {
-        +UUID id
-        +UUID requestId
-        +UUID approverId
-        +Boolean approved
-        +String comments
-        +Date actedAt
-    }
+  subgraph LHO["🏢 LHO"]
+    direction TB
+    LHO_Reject["⛔ LHO Reject Frozen Report"]
+  end
 
-    User "1" o-- "0..*" Request
-    Request "1" o-- "0..*" Approval
-    User "1" o-- "0..1" Permission
-    Request --> RequestType
+  subgraph SYS["🖥️ System"]
+    direction TB
+    S_CheckAuditable{"Is branch auditable?"}
+    S_HasData{"(auto only) Has data?"}
+    S_WorklistDone{"Worklist submitted for RW23/RW24?"}
+    S_Freeze["🔒 Freeze report"]
+    S_ToAuditor["→ Send to Auditor"]
+    S_ToRO["→ Send to RO"]
+    S_ToChecker["→ Send to Checker"]
+  end
 
-%% --------------------------------------------------
-%% IMPORTANT: Add exactly one blank line after this
-%% --------------------------------------------------
+  %% Flow: Maker creates report
+  M_Start --> M_Create
+  M_Create -->|rw23| C_Receive
+  M_Create -->|rw24| A_Receive
+  M_Create -->|automatic / web| C_Receive
 
-%% === SEQUENCE DIAGRAM ===
-sequenceDiagram
-    participant A as "Requester (User A)"
-    participant S as "System"
-    participant B as "Approver (User B)"
-    participant DB as "Database"
+  %% RW23 / RW24 special rule: only after worklist submitted
+  C_Receive --> checkRW23{Is type RW23?}
+  A_Receive --> checkRW24{Is type RW24?}
 
-    Note over A,S: User A creates a request
-    A->>S: POST /requests {type, payload}
-    S-->>A: 201 Created (requestId)
-    B->>S: GET /requests/{id}
-    S-->>B: 200 OK
+  checkRW23 -->|yes| S_WorklistDone
+  S_WorklistDone -->|no| C_ReceiveSubWait["⏳ Wait until worklist submitted"] --> S_WorklistDone
+  S_WorklistDone -->|yes| C_Sign
+
+  checkRW23 -->|no| C_Sign
+
+  checkRW24 -->|yes| S_WorklistDone
+  S_WorklistDone -->|no| A_ReceiveSubWait["⏳ Wait until worklist submitted"] --> S_WorklistDone
+  S_WorklistDone -->|yes| A_Sign
+
+  checkRW24 -->|no| A_Sign
+
+  %% Checker actions
+  C_Sign -->|signed| decide_after_checker{"Type & auditable?"}
+  C_Sign --> C_Reject
+  C_Reject --> C_HandleReject
+
+  %% After Checker: if RW23 -> freeze immediately after checker signs
+  decide_after_checker -->|rw23| S_Freeze
+  decide_after_checker -->|auto & branch auditable| S_CheckAuditable
+  decide_after_checker -->|web or auto & not auditable| S_CheckAuditable
+
+  %% System decisions for automatic vs manual
+  S_CheckAuditable -->|yes| S_ToAuditor
+  S_CheckAuditable -->|no| S_ToRO
+
+  %% Automatic reports special case: if auto and has data -> freeze after auditor approval if auditable else freeze after checker approval
+  S_ToAuditor --> A_Receive
+  S_ToRO --> R_Receive
+
+  %% Auditor path
+  A_Receive --> A_Sign
+  A_Sign -->|signed| decide_after_auditor{"If auto & has data or normal flow"}
+  A_Sign --> A_Reject
+  A_Reject --> A_HandleReject
+
+  decide_after_auditor -->|rw24| S_Freeze
+  decide_after_auditor -->|auto & hasData & auditable| S_Freeze
+  decide_after_auditor -->|else| S_ToRO
+
+  %% RO flow
+  R_Receive --> R_Approve
+  R_Receive --> R_Reject
+  R_Approve --> S_Freeze
+  R_Reject --> R_HandleReject
+
+  %% Reject handling - common pattern
+  C_HandleReject["Reject handling: add Approval Remarks\n(Checker/Auditor/RO rejected)"] 
+  A_HandleReject["Reject handling: add Approval Remarks"]
+  R_HandleReject["Reject handling: add Approval Remarks"]
+
+  %% When Auditor/RO/LHO rejects -> goes to Checker for Agree/Disagree
+  A_HandleReject --> S_ToChecker
+  R_HandleReject --> S_ToChecker
+  LHO_Reject --> S_ToChecker
+
+  %% Checker receives disagree/agree decision
+  S_ToChecker --> C_Receive
+  C_Receive --> C_DecideAgree{"Checker: Agree with rejection?"}
+  C_DecideAgree -->|Agree| M_Create_Route["Return to Maker for update"]
+  C_DecideAgree -->|Disagree| check_auditable_after_disagree{"Is branch auditable?"}
+  M_Create_Route --> M_Create
+
+  check_auditable_after_disagree -->|yes| S_ToAuditor
+  check_auditable_after_disagree -->|no| S_ToRO
+
+  %% LHO can reject only after freeze
+  S_Freeze --> Frozen["🧊 Report Frozen (state=FROZEN)"]
+  Frozen -->|LHO rejects| LHO_Reject
+  Frozen -->|only LHO can reject frozen report| endFreeze
+
+  endFreeze -->|no action| DONE((End))
+
+  %% automatic special: if auto & hasData -> after auditor's approval freeze; if not auditable -> after checker
+  %% connect automatic hasData check into decide_after_checker / decide_after_auditor
+  %% Represent hasData check
+  decide_after_checker -->|auto| S_HasData
+  S_HasData -->|yes & auditable| S_ToAuditor
+  S_HasData -->|yes & not auditable| S_Freeze
+  S_HasData -->|no| S_ToAuditor
+
+  %% visual connectors
+  style S_Freeze fill:#b7e4c7,stroke:#2e7d32,stroke-width:2px
+  style Frozen fill:#9fd3c7,stroke:#2e7d32
+  style C_Reject fill:#ffd6d6
+  style A_Reject fill:#ffd6d6
+  style R_Reject fill:#ffd6d6
