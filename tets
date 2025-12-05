@@ -1,142 +1,151 @@
 flowchart TD
-  %% Swimlanes (roles)
-  subgraph MAKER["👤 Maker"]
+  %% ===== Swimlanes (roles) =====
+  subgraph MAKER["Maker"]
     direction TB
-    M_Start((Start))
-    M_Create["📝 Create report\n(type: automatic / web / rw23 / rw24)"]
+    M_Create["Create report\n(type: automatic / web / rw23 / rw24)"]
   end
 
-  subgraph CHECKER["🔍 Checker"]
+  subgraph CHECKER["Checker"]
     direction TB
-    C_Receive["🔔 Receive for check"]
-    C_Sign["✍️ Sign (Checker)"]
-    C_Reject["⛔ Reject (Checker)"]
+    C_Receive["Receive for check"]
+    C_Sign["Checker Sign"]
+    C_Reject["Checker Reject"]
+    C_AgreeDisagree["Checker: Agree with rejection?"]
   end
 
-  subgraph AUDITOR["🕵️ Auditor"]
+  subgraph AUDITOR["Auditor"]
     direction TB
-    A_Receive["🔔 Receive for audit"]
-    A_Sign["✍️ Sign (Auditor)"]
-    A_Reject["⛔ Reject (Auditor)"]
+    A_Receive["Receive for audit"]
+    A_Sign["Auditor Sign"]
+    A_Reject["Auditor Reject"]
   end
 
-  subgraph RO["👨‍💼 RO"]
+  subgraph RO["RO"]
     direction TB
-    R_Receive["🔔 Receive for RO"]
-    R_Approve["✔️ Approve (RO)"]
-    R_Reject["⛔ Reject (RO)"]
+    R_Receive["Receive for RO"]
+    R_Approve["RO Approve"]
+    R_Reject["RO Reject"]
   end
 
-  subgraph LHO["🏢 LHO"]
+  subgraph LHO["LHO"]
     direction TB
-    LHO_Reject["⛔ LHO Reject Frozen Report"]
+    LHO_Reject["LHO Reject Frozen Report"]
   end
 
-  subgraph SYS["🖥️ System"]
+  subgraph SYS["System"]
     direction TB
-    S_CheckAuditable{"Is branch auditable?"}
-    S_HasData{"(auto only) Has data?"}
-    S_WorklistDone{"Worklist submitted for RW23/RW24?"}
-    S_Freeze["🔒 Freeze report"]
-    S_ToAuditor["→ Send to Auditor"]
-    S_ToRO["→ Send to RO"]
-    S_ToChecker["→ Send to Checker"]
+    S_Worklist{"Worklist submitted?"}
+    S_Auditable{"Branch auditable?"}
+    S_HasData{"(auto) Has data?"}
+    S_Freeze["Freeze report"]
+    S_SendToChecker["Send to Checker"]
+    S_SendToAuditor["Send to Auditor"]
+    S_SendToRO["Send to RO"]
   end
 
-  %% Flow: Maker creates report
-  M_Start --> M_Create
-  M_Create -->|rw23| C_Receive
-  M_Create -->|rw24| A_Receive
-  M_Create -->|automatic / web| C_Receive
+  subgraph DB["Database / State"]
+    direction TB
+    STATE_FROZEN["FROZEN"]
+  end
 
-  %% RW23 / RW24 special rule: only after worklist submitted
-  C_Receive --> checkRW23{Is type RW23?}
-  A_Receive --> checkRW24{Is type RW24?}
+  %% ===== Main start & routing by type =====
+  M_Create -->|rw23| S_Worklist
+  M_Create -->|rw24| S_Worklist
+  M_Create -->|automatic / web| S_SendToChecker
 
-  checkRW23 -->|yes| S_WorklistDone
-  S_WorklistDone -->|no| C_ReceiveSubWait["⏳ Wait until worklist submitted"] --> S_WorklistDone
-  S_WorklistDone -->|yes| C_Sign
+  %% worklist gating for rw23 & rw24
+  S_Worklist -->|no| S_WorklistWait["Wait until worklist submitted"] --> S_Worklist
+  S_Worklist -->|yes| worklist_passed
 
-  checkRW23 -->|no| C_Sign
+  worklist_passed -->|rw23| S_SendToChecker
+  worklist_passed -->|rw24| S_SendToAuditor
 
-  checkRW24 -->|yes| S_WorklistDone
-  S_WorklistDone -->|no| A_ReceiveSubWait["⏳ Wait until worklist submitted"] --> S_WorklistDone
-  S_WorklistDone -->|yes| A_Sign
+  %% ===== Checker flow =====
+  S_SendToChecker --> C_Receive
+  C_Receive --> C_Sign
+  C_Receive --> C_Reject
+  C_Reject --> HandleRejectByChecker
 
-  checkRW24 -->|no| A_Sign
+  %% rw23: freeze immediately at checker level after sign
+  C_Sign --> checkType1{"Is type = rw23?"}
+  checkType1 -->|yes| S_Freeze
+  checkType1 -->|no| afterChecker
 
-  %% Checker actions
-  C_Sign -->|signed| decide_after_checker{"Type & auditable?"}
-  C_Sign --> C_Reject
-  C_Reject --> C_HandleReject
+  %% automatic reports: check data & auditable
+  afterChecker -->|auto| S_HasData
+  afterChecker -->|web| S_Auditable
 
-  %% After Checker: if RW23 -> freeze immediately after checker signs
-  decide_after_checker -->|rw23| S_Freeze
-  decide_after_checker -->|auto & branch auditable| S_CheckAuditable
-  decide_after_checker -->|web or auto & not auditable| S_CheckAuditable
+  S_HasData -->|yes| S_Auditable
+  S_HasData -->|no| S_SendToAuditor
 
-  %% System decisions for automatic vs manual
-  S_CheckAuditable -->|yes| S_ToAuditor
-  S_CheckAuditable -->|no| S_ToRO
+  S_Auditable -->|yes| S_SendToAuditor
+  S_Auditable -->|no| S_SendToRO
 
-  %% Automatic reports special case: if auto and has data -> freeze after auditor approval if auditable else freeze after checker approval
-  S_ToAuditor --> A_Receive
-  S_ToRO --> R_Receive
-
-  %% Auditor path
+  %% ===== Auditor flow =====
+  S_SendToAuditor --> A_Receive
   A_Receive --> A_Sign
-  A_Sign -->|signed| decide_after_auditor{"If auto & has data or normal flow"}
-  A_Sign --> A_Reject
-  A_Reject --> A_HandleReject
+  A_Receive --> A_Reject
+  A_Reject --> HandleRejectByAuditor
 
-  decide_after_auditor -->|rw24| S_Freeze
-  decide_after_auditor -->|auto & hasData & auditable| S_Freeze
-  decide_after_auditor -->|else| S_ToRO
+  %% rw24: freeze immediately at auditor level after sign
+  A_Sign --> checkType2{"Is type = rw24?"}
+  checkType2 -->|yes| S_Freeze
+  checkType2 -->|no| afterAuditor
 
-  %% RO flow
+  afterAuditor -->|auto & hasData| S_Freeze
+  afterAuditor -->|else| S_SendToRO
+
+  %% ===== RO flow =====
+  S_SendToRO --> R_Receive
   R_Receive --> R_Approve
   R_Receive --> R_Reject
+  R_Reject --> HandleRejectByRO
   R_Approve --> S_Freeze
-  R_Reject --> R_HandleReject
 
-  %% Reject handling - common pattern
-  C_HandleReject["Reject handling: add Approval Remarks\n(Checker/Auditor/RO rejected)"] 
-  A_HandleReject["Reject handling: add Approval Remarks"]
-  R_HandleReject["Reject handling: add Approval Remarks"]
+  %% ===== Freeze and LHO =====
+  S_Freeze --> STATE_FROZEN
+  STATE_FROZEN -->|LHO rejects only| LHO_Reject
+  LHO_Reject --> HandleLHOReject
 
-  %% When Auditor/RO/LHO rejects -> goes to Checker for Agree/Disagree
-  A_HandleReject --> S_ToChecker
-  R_HandleReject --> S_ToChecker
-  LHO_Reject --> S_ToChecker
+  %% ===== Common reject handling =====
+  HandleRejectByAuditor["Auditor rejected -> go to Checker for agree/disagree"]
+  HandleRejectByRO["RO rejected -> go to Checker for agree/disagree"]
+  HandleLHOReject["LHO rejected (frozen) -> go to Checker for agree/disagree"]
+  HandleRejectByChecker["Checker rejected -> back to Maker"]
+
+  A_Reject --> HandleRejectByAuditor
+  R_Reject --> HandleRejectByRO
+  LHO_Reject --> HandleLHOReject
+  C_Reject --> HandleRejectByChecker
 
   %% Checker receives disagree/agree decision
-  S_ToChecker --> C_Receive
-  C_Receive --> C_DecideAgree{"Checker: Agree with rejection?"}
-  C_DecideAgree -->|Agree| M_Create_Route["Return to Maker for update"]
-  C_DecideAgree -->|Disagree| check_auditable_after_disagree{"Is branch auditable?"}
-  M_Create_Route --> M_Create
+  HandleRejectByAuditor --> S_SendToChecker
+  HandleRejectByRO --> S_SendToChecker
+  HandleLHOReject --> S_SendToChecker
 
-  check_auditable_after_disagree -->|yes| S_ToAuditor
-  check_auditable_after_disagree -->|no| S_ToRO
+  S_SendToChecker --> C_Receive
+  C_AgreeDisagree -->|Agree| BackToMaker
+  C_AgreeDisagree -->|Disagree| DecideAfterCheckerDisagree
 
-  %% LHO can reject only after freeze
-  S_Freeze --> Frozen["🧊 Report Frozen (state=FROZEN)"]
-  Frozen -->|LHO rejects| LHO_Reject
-  Frozen -->|only LHO can reject frozen report| endFreeze
+  C_Receive --> C_AgreeDisagree
 
-  endFreeze -->|no action| DONE((End))
+  BackToMaker["Return to Maker for update"] --> M_Create
 
-  %% automatic special: if auto & hasData -> after auditor's approval freeze; if not auditable -> after checker
-  %% connect automatic hasData check into decide_after_checker / decide_after_auditor
-  %% Represent hasData check
-  decide_after_checker -->|auto| S_HasData
-  S_HasData -->|yes & auditable| S_ToAuditor
-  S_HasData -->|yes & not auditable| S_Freeze
-  S_HasData -->|no| S_ToAuditor
+  DecideAfterCheckerDisagree{"Is branch auditable?"}
+  DecideAfterCheckerDisagree -->|yes| S_SendToAuditor
+  DecideAfterCheckerDisagree -->|no| S_SendToRO
 
-  %% visual connectors
-  style S_Freeze fill:#b7e4c7,stroke:#2e7d32,stroke-width:2px
-  style Frozen fill:#9fd3c7,stroke:#2e7d32
+  %% ===== Visual styles =====
+  style S_Freeze fill:#b7e4c7,stroke:#2e7d32
+  style STATE_FROZEN fill:#9fd3c7,stroke:#2e7d32
   style C_Reject fill:#ffd6d6
   style A_Reject fill:#ffd6d6
   style R_Reject fill:#ffd6d6
+  style LHO_Reject fill:#ffd6d6
+
+  %% ===== Notes =====
+  note right of DecideAfterCheckerDisagree
+    - rw23: always freeze at Checker after Checker sign (worklist required)
+    - rw24: always freeze at Auditor after Auditor sign (worklist required)
+    - Automatic reports: if auditable and has data -> freeze after Auditor; else freeze earlier per rules
+  end
