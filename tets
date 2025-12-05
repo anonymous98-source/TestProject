@@ -1,18 +1,13 @@
-%% 1) Class diagram: domain model
+%% === CLASS DIAGRAM ===
 classDiagram
-    direction TB
     class User {
         +UUID id
         +String username
         +String email
         +String role
         +Boolean blocked
-        +create()
-        +update()
-        +delete()
-        +block()
-        +unblock()
     }
+
     class Request {
         +UUID id
         +RequestType type
@@ -22,10 +17,8 @@ classDiagram
         +RequestStatus status
         +Date createdAt
         +Date updatedAt
-        +createRequest()
-        +cancelRequest()
-        +applyIfApproved()
     }
+
     class RequestType {
         <<enumeration>>
         CREATE
@@ -33,6 +26,7 @@ classDiagram
         BLOCK
         DELETE
     }
+
     class Permission {
         +UUID id
         +UUID userId
@@ -42,6 +36,7 @@ classDiagram
         +Boolean canViewRequest
         +Boolean canCancelOwnRequest
     }
+
     class Approval {
         +UUID id
         +UUID requestId
@@ -50,69 +45,25 @@ classDiagram
         +String comments
         +Date actedAt
     }
-    User "1" o-- "0..*" Request : creates
-    Request "1" o-- "0..*" Approval : has
-    User "1" o-- "0..1" Permission : has
-    Request --> RequestType : type
 
-%% 2) Sequence diagram (fixed participant labels)
+    User "1" o-- "0..*" Request
+    Request "1" o-- "0..*" Approval
+    User "1" o-- "0..1" Permission
+    Request --> RequestType
+
+%% --------------------------------------------------
+%% IMPORTANT: Add exactly one blank line after this
+%% --------------------------------------------------
+
+%% === SEQUENCE DIAGRAM ===
 sequenceDiagram
     participant A as "Requester (User A)"
     participant S as "System"
     participant B as "Approver (User B)"
     participant DB as "Database"
 
-    Note over A,S: User A creates a request (CREATE / EDIT / BLOCK / DELETE)
+    Note over A,S: User A creates a request
     A->>S: POST /requests {type, payload}
-    S->>S: validate payload & permissions (canCreateRequest)
     S-->>A: 201 Created (requestId)
-    Note over A,B: Any user with view rights can see the request
-    B->>S: GET /requests/{id}  (check canViewRequest)
-    S-->>B: 200 + request
-
-    alt requester == approver
-        Note over S: If approver == requester => Approve API must reject action
-        B->>S: POST /requests/{id}/approve
-        S-->>B: 403 Forbidden "cannot approve own request"
-    else different users
-        B->>S: POST /requests/{id}/approve {comments}
-        S->>S: check canApprove, concurrency lock
-        S->>DB: insert Approval {requestId, approverId, approved:true, comments}
-        S->>DB: update Request status = APPROVED
-        S-->>B: 200 Approved
-
-        Note right of S: On approval, system applies change
-        S->>DB: applyIfApproved(requestId) -> (create/update/block/delete user row)
-        DB-->>S: 200 OK (applied)
-        S-->>A: Notify requester "Approved and applied"
-    end
-
-    alt rejection flow
-        B->>S: POST /requests/{id}/reject {comments}
-        S->>DB: insert Approval {requestId, approverId, approved:false, comments}
-        S->>DB: update Request status = REJECTED
-        S-->>A: Notify requester "Rejected"
-    end
-
-    alt cancel by requester
-        A->>S: POST /requests/{id}/cancel
-        S->>DB: if requesterId == A.id and status in [CREATED, PENDING] set CANCELLED
-        S-->>A: 200 Cancelled
-    end
-
-%% 3) State diagram: request lifecycle
-stateDiagram-v2
-    [*] --> Created
-    Created --> PendingApproval : assigned / queued
-    PendingApproval --> Approved : approver approves
-    PendingApproval --> Rejected : approver rejects
-    Created --> Cancelled : requester cancels
-    PendingApproval --> Cancelled : requester cancels
-    Approved --> Applied : system applies change to User table
-    Applied --> Archived
-    Rejected --> Archived
-    Cancelled --> Archived
-
-    note right of Approved
-      On Approved -> system: create/update/block/delete user row
-    end note
+    B->>S: GET /requests/{id}
+    S-->>B: 200 OK
