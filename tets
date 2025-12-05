@@ -1,20 +1,22 @@
 flowchart TD
-  %% ===== Swimlanes (roles) =====
+  %% ===== declare swimlane nodes =====
   subgraph MAKER["Maker"]
     direction TB
-    M_Create["Create report\n(type: automatic / web / rw23 / rw24)"]
+    M_Create["Create report\n(type: automatic / web)"]
   end
 
   subgraph CHECKER["Checker"]
     direction TB
+    C_CreateRW23["Create rw23 (Checker's certificate)"]
     C_Receive["Receive for check"]
     C_Sign["Checker Sign"]
     C_Reject["Checker Reject"]
-    C_AgreeDisagree["Checker: Agree with rejection?"]
+    C_AgreeDisagree["Checker: Agree / Disagree?"]
   end
 
   subgraph AUDITOR["Auditor"]
     direction TB
+    A_CreateRW24["Create rw24 (Auditor's certificate)"]
     A_Receive["Receive for audit"]
     A_Sign["Auditor Sign"]
     A_Reject["Auditor Reject"]
@@ -41,7 +43,7 @@ flowchart TD
     S_SendToChecker["Send to Checker"]
     S_SendToAuditor["Send to Auditor"]
     S_SendToRO["Send to RO"]
-    S_WorklistWait["Wait until worklist submitted"]
+    S_Wait["Wait until worklist submitted"]
   end
 
   subgraph DB["Database / State"]
@@ -50,33 +52,37 @@ flowchart TD
   end
 
   %% ===== Start & routing by type =====
-  M_Create -->|rw23| S_Worklist
-  M_Create -->|rw24| S_Worklist
   M_Create -->|automatic / web| S_SendToChecker
 
-  %% worklist gating for rw23 & rw24
-  S_Worklist -->|no| S_WorklistWait
-  S_WorklistWait --> S_Worklist
-  S_Worklist -->|yes| worklist_passed
+  %% rw23 created by Checker (not Maker)
+  C_CreateRW23 --> S_Worklist
+  S_Worklist -->|no| S_Wait --> S_Worklist
+  S_Worklist -->|yes| C_Receive_RW23["rw23 starts at Checker"]
+  C_Receive_RW23 --> C_Sign_RW23["Checker Sign rw23"]
+  C_Sign_RW23 --> S_Freeze
 
-  worklist_passed -->|rw23| S_SendToChecker
-  worklist_passed -->|rw24| S_SendToAuditor
+  %% rw24 created by Auditor (not Maker)
+  A_CreateRW24 --> S_Worklist
+  S_Worklist -->|no| S_Wait2 --> S_Worklist
+  S_Worklist -->|yes| A_Receive_RW24["rw24 starts at Auditor"]
+  A_Receive_RW24 --> A_Sign_RW24["Auditor Sign rw24"]
+  A_Sign_RW24 --> S_Freeze
 
-  %% ===== Checker flow =====
+  %% worklist gating for other routing (ensure worklist node reused)
   S_SendToChecker --> C_Receive
   C_Receive --> C_Sign
   C_Receive --> C_Reject
 
   C_Reject --> HandleRejectByChecker
 
-  %% rw23: freeze immediately at checker level after sign
-  C_Sign --> checkType1
-  checkType1["Is type = rw23?"] -->|yes| S_Freeze
-  checkType1 -->|no| afterChecker
+  %% After Checker sign: special-case rw23 handled above; for others decide next
+  C_Sign --> Check_IsRW23{"Is type = rw23?"}
+  Check_IsRW23 -->|yes| S_Freeze
+  Check_IsRW23 -->|no| AfterChecker
 
   %% automatic reports: check data & auditable
-  afterChecker --> S_HasData
-  afterChecker --> S_Auditable
+  AfterChecker --> S_HasData
+  AfterChecker --> S_Auditable
 
   S_HasData -->|yes| S_Auditable
   S_HasData -->|no| S_SendToAuditor
@@ -84,49 +90,42 @@ flowchart TD
   S_Auditable -->|yes| S_SendToAuditor
   S_Auditable -->|no| S_SendToRO
 
-  %% ===== Auditor flow =====
+  %% Auditor flow for normal reports
   S_SendToAuditor --> A_Receive
   A_Receive --> A_Sign
   A_Receive --> A_Reject
-
   A_Reject --> HandleRejectByAuditor
 
-  %% rw24: freeze immediately at auditor level after sign
-  A_Sign --> checkType2
-  checkType2["Is type = rw24?"] -->|yes| S_Freeze
-  checkType2 -->|no| afterAuditor
+  A_Sign --> Check_IsRW24{"Is type = rw24?"}
+  Check_IsRW24 -->|yes| S_Freeze
+  Check_IsRW24 -->|no| AfterAuditor
 
-  afterAuditor --> DecisionAfterAuditor
-  DecisionAfterAuditor{"Is this automatic and has data & auditable?"}
+  AfterAuditor --> DecisionAfterAuditor{"Is auto & hasData & auditable?"}
   DecisionAfterAuditor -->|yes| S_Freeze
   DecisionAfterAuditor -->|no| S_SendToRO
 
-  %% wire afterAuditor into DecisionAfterAuditor
-  afterAuditor --> DecisionAfterAuditor
-
-  %% ===== RO flow =====
+  %% RO flow
   S_SendToRO --> R_Receive
   R_Receive --> R_Approve
   R_Receive --> R_Reject
 
-  R_Reject --> HandleRejectByRO
   R_Approve --> S_Freeze
+  R_Reject --> HandleRejectByRO
 
-  %% ===== Freeze and LHO =====
+  %% Freeze and LHO
   S_Freeze --> STATE_FROZEN
   STATE_FROZEN --> LHO_Reject
-
   LHO_Reject --> HandleLHOReject
 
-  %% ===== Common reject handling nodes (declare before linking) =====
-  HandleRejectByAuditor["Auditor rejected → go to Checker for agree/disagree"]
-  HandleRejectByRO["RO rejected → go to Checker for agree/disagree"]
-  HandleLHOReject["LHO rejected (frozen) → go to Checker for agree/disagree"]
+  %% Common reject handling nodes (declared)
+  HandleRejectByAuditor["Auditor rejected → go to Checker for Agree/Disagree"]
+  HandleRejectByRO["RO rejected → go to Checker for Agree/Disagree"]
+  HandleLHOReject["LHO rejected (frozen) → go to Checker for Agree/Disagree"]
   HandleRejectByChecker["Checker rejected → back to Maker"]
   BackToMaker["Return to Maker for update"]
-  DecideAfterCheckerDisagree["Is branch auditable?"]
+  DecideAfterCheckerDisagree{"Is branch auditable?"}
 
-  %% ===== Reject flows wiring =====
+  %% Reject flows wiring
   A_Reject --> HandleRejectByAuditor
   R_Reject --> HandleRejectByRO
   HandleLHOReject --> S_SendToChecker
@@ -153,9 +152,10 @@ flowchart TD
   style R_Reject fill:#ffd6d6
   style LHO_Reject fill:#ffd6d6
 
-  %% ===== Note (properly closed) =====
+  %% ===== Notes =====
   note right of DecideAfterCheckerDisagree
-    - rw23: always freeze at Checker after Checker sign (worklist required)
-    - rw24: always freeze at Auditor after Auditor sign (worklist required)
-    - Automatic reports: if auditable and has data -> freeze after Auditor; else freeze earlier per rules
+    - Maker does NOT create rw23 or rw24.
+    - rw23: created and signed by Checker → freezes at Checker level (worklist required).
+    - rw24: created and signed by Auditor → freezes at Auditor level (worklist required).
+    - Automatic reports: if auditable and has data → freeze after Auditor; else freeze per rules.
   end note
