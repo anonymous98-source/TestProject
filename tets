@@ -1,90 +1,120 @@
 flowchart TD
-  %% Swimlanes
-  subgraph ReqUser [Requester]
+
+%% ============================
+%% Requester
+%% ============================
+subgraph ReqUser ["👤 Requester"]
     direction TB
-    R_Start((Start))
-    R_CreateReq[/"Create Request (type: CREATE/EDIT/BLOCK/DELETE)"/]
-    R_CancelReq[/"Cancel Request (allowed before approval)"/]
-    R_ViewReq["View Request"]
-  end
+    R_Start(("🔵 Start"))
+    R_CreateReq[/"📝 Create Request  
+(CREATE / EDIT / BLOCK / DELETE)"/]
+    R_ViewReq["👁️ View Own Request"]
+    R_CancelReq["❌ Cancel Request"]
+end
 
-  subgraph Sys [System]
+%% ============================
+%% System
+%% ============================
+subgraph Sys ["🖥️ System"]
     direction TB
-    S_Validate["Validate payload & permissions\n(hasCreateRequest?)"]
-    S_PersistReq["Save Request (status: CREATED/PENDING)"]
-    S_Notify["Notify approvers / send ack"]
-    S_CheckApprovePerm["Check approver permissions\n(hasApprove?)"]
-    S_RejectOwn["Check requester != approver\n(if same -> deny)"]
-    S_SetApproved["Set Request = APPROVED"]
-    S_SetRejected["Set Request = REJECTED"]
-    S_SetCancelled["Set Request = CANCELLED"]
-    S_ApplyChange["applyIfApproved() -> apply to User table"]
-    S_NotifyResult["Notify requester & audit"]
-  end
+    S_Validate["🧪 Validate Payload & Permissions"]
+    S_PersistReq["💾 Save Request  
+Status: 🟡 <b style='color:#b58900'>PENDING</b>"]
+    S_Notify["📣 Notify Approvers"]
+    S_CheckApprovePerm["🔐 Check Approver Permissions"]
+    S_RejectOwn["⚠️ Deny If Approver == Requester"]
+    
+    S_SetApproved["<b>🟢 APPROVED</b>  
+✔️ Mark Request APPROVED"]:::approved
+    S_SetRejected["<b>🔴 REJECTED</b>  
+⛔ Mark Request REJECTED"]:::rejected
+    S_SetCancelled["<b>⚫ CANCELLED</b>  
+🚫 Mark Request CANCELLED"]:::cancelled
+    
+    S_ApplyChange["🔧 Apply Change to User Table"]
+    S_NotifyResult["📩 Notify Requester + Audit Entry"]
+end
 
-  subgraph AppUser [Approver / Any user with rights]
+%% ============================
+%% Approver
+%% ============================
+subgraph AppUser ["🛡️ Approver"]
     direction TB
-    A_View["View Request"]
-    A_Approve["Approve Request"]
-    A_Reject["Reject Request"]
-  end
+    A_View["👁️ View Request"]
+    A_Approve["👍 Approve Request"]
+    A_Reject["👎 Reject Request"]
+end
 
-  subgraph DB [Database / UserTable]
+%% ============================
+%% Database
+%% ============================
+subgraph DB ["🗄️ Database"]
     direction TB
-    DB_Reqs[(Requests table)]
-    DB_Users[(Users table)]
-    DB_Approvals[(Approvals / Audit)]
-  end
+    DB_Reqs[(📂 Requests Table)]
+    DB_Users[(👥 Users Table)]
+    DB_Approvals[(🧾 Approvals Log)]
+end
 
-  %% Flow connections: Request creation
-  R_Start --> R_CreateReq
-  R_CreateReq --> S_Validate
-  S_Validate -->|ok| S_PersistReq
-  S_Validate -->|fail| S_NotifyResult
-  S_PersistReq --> DB_Reqs
-  S_PersistReq --> S_Notify
-  S_Notify --> A_View
+%% ----------------------------
+%% Main Flow
+%% ----------------------------
 
-  %% Requester can view or cancel
-  R_CreateReq --> R_ViewReq
-  R_ViewReq --> A_View
-  R_CreateReq --> R_CancelReq
-  R_CancelReq --> S_SetCancelled
-  S_SetCancelled --> DB_Reqs
-  S_SetCancelled --> S_NotifyResult
+R_Start --> R_CreateReq
+R_CreateReq --> S_Validate
 
-  %% Approver views and acts
-  A_View --> S_CheckApprovePerm
-  S_CheckApprovePerm -->|no| S_NotifyResult
-  S_CheckApprovePerm -->|yes| S_RejectOwn
+S_Validate -->|✅ OK| S_PersistReq
+S_Validate -->|❌ Fail| S_NotifyResult
 
-  %% Deny approving own request
-  S_RejectOwn -->|approver == requester| S_NotifyResult
-  S_RejectOwn -->|different users| A_Approve
-  A_Approve --> S_SetApproved
-  S_SetApproved --> DB_Approvals
-  S_SetApproved --> DB_Reqs
-  S_SetApproved --> S_ApplyChange
+S_PersistReq --> DB_Reqs
+S_PersistReq --> S_Notify
+S_Notify --> A_View
 
-  %% Apply change to Users table depending on type
-  S_ApplyChange -->|CREATE -> insert| DB_Users
-  S_ApplyChange -->|EDIT -> update| DB_Users
-  S_ApplyChange -->|BLOCK -> set blocked=true| DB_Users
-  S_ApplyChange -->|DELETE -> delete or mark deleted| DB_Users
-  S_ApplyChange --> S_NotifyResult
+%% Viewing / Cancelling
+R_CreateReq --> R_ViewReq
+R_ViewReq --> A_View
 
-  %% Rejection path
-  S_CheckApprovePerm -->|reject action| A_Reject
-  A_Reject --> S_SetRejected
-  S_SetRejected --> DB_Approvals
-  S_SetRejected --> DB_Reqs
-  S_SetRejected --> S_NotifyResult
+R_CreateReq --> R_CancelReq
+R_CancelReq --> S_SetCancelled
+S_SetCancelled --> DB_Reqs
+S_SetCancelled --> S_NotifyResult
 
-  %% Notifications and final states
-  S_NotifyResult --> R_ViewReq
-  S_NotifyResult -->|audit| DB_Approvals
+%% Approver Path
+A_View --> S_CheckApprovePerm
+S_CheckApprovePerm -->|🚫 No Permission| S_NotifyResult
+S_CheckApprovePerm -->|✔️ Allowed| S_RejectOwn
 
-  %% Notes / constraints
-  classDef note fill:#fff7c2,stroke:#333,stroke-width:1px;
-  N1["Note: Requester CAN view their own requests\nRequester CAN cancel their own request\nApprover MUST NOT be same as requester to approve\nSame approval flow for CREATE/EDIT/BLOCK/DELETE"]:::note
-  DB_Reqs --- N1
+S_RejectOwn -->|❌ Same User| S_NotifyResult
+S_RejectOwn -->|✔️ Different User| A_Approve
+
+%% Approve
+A_Approve --> S_SetApproved
+S_SetApproved --> DB_Approvals
+S_SetApproved --> DB_Reqs
+S_SetApproved --> S_ApplyChange
+S_ApplyChange --> DB_Users
+S_ApplyChange --> S_NotifyResult
+
+%% Reject
+A_Reject --> S_SetRejected
+S_SetRejected --> DB_Approvals
+S_SetRejected --> DB_Reqs
+S_SetRejected --> S_NotifyResult
+
+%% Notifications
+S_NotifyResult --> R_ViewReq
+S_NotifyResult --> DB_Approvals
+
+%% ====== Styles ======
+classDef approved fill:#c8f7c5,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
+classDef rejected fill:#f7c5c5,stroke:#b71c1c,stroke-width:2px,color:#7f0000;
+classDef cancelled fill:#d7d7d7,stroke:#424242,stroke-width:2px,color:#212121;
+
+%% Note
+classDef note fill:#fff7c2,stroke:#333,stroke-width:1px;
+N1["📌 **Status Colors:**  
+🟡 Pending — Request created, waiting for approval  
+🟢 Approved — System applies action to User table  
+🔴 Rejected — No changes applied  
+⚫ Cancelled — Request withdrawn by requester  
+❗ Requester cannot approve their own request"]:::note
+DB_Reqs --- N1
