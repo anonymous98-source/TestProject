@@ -20,3 +20,12 @@ rows.forEach((row, index) => {
     errors.push({ row: rowNumber, issues: rowErrors });
   }
 });
+
+
+
+
+const isEmptyRow = (row) => {
+  return Object.values(row).every(
+    (val) => val === null || String(val).trim() === ""
+  );
+};
