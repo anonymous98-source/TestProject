@@ -37,7 +37,7 @@ flowchart LR
     direction TB
         S_Worklist["Worklist submitted?"]
         S_Auditable["Branch auditable?"]
-        S_HasData["(auto) Has data?"]
+        S_HasData["(Auto) Has data?"]
         S_Freeze["Freeze report"]
         S_SendToChecker["Send to Checker"]
         S_SendToAuditor["Send to Auditor"]
@@ -65,16 +65,13 @@ flowchart LR
     C_Sign --> Check_IsRW23{"Is type = RW-23?"}
     Check_IsRW23 L_Check_IsRW23_S_Freeze_0@-- yes --> S_Freeze
     Check_IsRW23 -- no --> AfterChecker["AfterChecker"]
-
-    %% NEW branch for automatic vs web, both go through Branch auditable
     AfterChecker --> Decide_ReportType{"Report type?"}
     Decide_ReportType -- automatic --> S_HasData
     Decide_ReportType -- web --> S_Auditable
-
     S_HasData -- yes --> S_Auditable
     S_HasData -- no --> S_Auditable
     S_Auditable -- yes --> S_SendToAuditor
-    S_Auditable L_S_Auditable_S_Freeze_0@-- no --> S_Freeze
+    S_Auditable L_S_Auditable_S_Freeze_0@-- no --> S_SendToRO
     S_SendToAuditor --> A_Receive
     A_Receive --> A_Sign & A_Reject
     A_Reject --> HandleRejectByAuditor["Auditor rejected → go to Checker for Agree/Disagree"] & HandleRejectByAuditor
@@ -120,7 +117,7 @@ flowchart LR
     L_C_Sign_RW23_S_Freeze_0@{ animation: slow } 
     L_A_Sign_RW24_S_Freeze_0@{ animation: slow } 
     L_Check_IsRW23_S_Freeze_0@{ animation: slow } 
-    L_S_Auditable_S_Freeze_0@{ animation: slow } 
+    L_S_Auditable_S_Freeze_0@{ animation: none } 
     L_Check_IsRW24_S_Freeze_0@{ animation: slow } 
     L_DecisionAfterAuditor_S_Freeze_0@{ animation: slow } 
     L_R_Approve_S_Freeze_0@{ animation: slow }
