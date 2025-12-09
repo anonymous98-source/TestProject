@@ -65,7 +65,12 @@ flowchart LR
     C_Sign --> Check_IsRW23{"Is type = RW-23?"}
     Check_IsRW23 L_Check_IsRW23_S_Freeze_0@-- yes --> S_Freeze
     Check_IsRW23 -- no --> AfterChecker["AfterChecker"]
-    AfterChecker --> S_HasData & S_Auditable
+
+    %% NEW branch for automatic vs web, both go through Branch auditable
+    AfterChecker --> Decide_ReportType{"Report type?"}
+    Decide_ReportType -- automatic --> S_HasData
+    Decide_ReportType -- web --> S_Auditable
+
     S_HasData -- yes --> S_Auditable
     S_HasData -- no --> S_Auditable
     S_Auditable -- yes --> S_SendToAuditor
