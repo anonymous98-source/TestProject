@@ -4,138 +4,91 @@ config:
   theme: default
 ---
 flowchart LR
- %% === ROLES / LANES ===
- subgraph MAKER["Maker (1)"]
-    direction TB
-        M_Create["Create report<br/>(type: automatic / web)"]
-  end
 
- subgraph CHECKER["Checker (9)"]
-    direction TB
-        C_Receive["Receive for check"]
-        C_Sign["Checker Sign"]
-        C_Reject["Checker Reject"]
-        C_AgreeDisagree["Checker: Agree / Disagree?"]
-        C_CreateRW23@{ label: "Create RW 23 <br/>(Checker's certificate)" }
-        C_Sign_RW23["Sign RW 23 (Freeze at Checker)"]
-  end
+ %% ====== MAKER (Start) ======
+ subgraph MAKER["Maker (Start)"]
+ direction TB
+    M_Create["Create Report<br> (Auto / Web)"]
+ end
 
- subgraph AUDITOR["Auditor (11)"]
-    direction TB
-        A_Receive["Receive for audit"]
-        A_Sign["Auditor Sign"]
-        A_Reject["Auditor Reject"]
-        A_CreateRW24@{ label: "Create RW 24 <br/>(Auditor's certificate)" }
-        A_Sign_RW24["Sign RW 24 (Freeze at Auditor)"]
-  end
+ %% ====== CHECKER ======
+ subgraph CHECKER["Checker"]
+ direction TB
+    C_Receive["Receive for check"]
+    C_Sign["Sign"]
+    C_Reject["Reject"]
+    C_AgreeDisagree["Agree / Disagree"]
 
- subgraph RO["RO (75)"]
-    direction TB
-        R_Receive["Receive for RO"]
-        R_Approve["RO Approve"]
-        R_Reject["RO Reject"]
-  end
+    C_CreateRW23["Create RW-23 (Checker certificate)"]
+    C_Sign_RW23["Sign RW-23 → Freeze"]
+ end
 
- subgraph LHO["LHO (50)"]
-    direction TB
-        LHO_Reject["LHO Reject Frozen Report"]
-  end
+ %% ====== AUDITOR ======
+ subgraph AUDITOR["Auditor"]
+ direction TB
+    A_Receive["Receive for audit"]
+    A_Sign["Sign"]
+    A_Reject["Reject"]
 
- subgraph SYS["CRS System"]
-    direction TB
-        Decide_ReportType{"Report type?"}
-        S_HasData["(Auto) Has data?"]
-        S_Auditable["Branch auditable?"]
-        S_SendToChecker["Send to Checker"]
-        S_SendToAuditor["Send to Auditor"]
-        S_SendToRO["Send to RO"]
-        S_Freeze["Freeze report"]
-  end
+    A_CreateRW24["Create RW-24 (Auditor certificate)"]
+    A_Sign_RW24["Sign RW-24 → Freeze"]
+ end
 
- subgraph DB["Database / State"]
-    direction TB
-        STATE_FROZEN["FROZEN"]
-  end
+ %% ====== RO ======
+ subgraph RO["RO"]
+ direction TB
+    R_Receive["Receive at RO"]
+    R_Approve["Approve"]
+    R_Reject["Reject"]
+ end
 
- %% === MAIN FLOW ===
-    M_Create -- automatic / web --> S_SendToChecker
-    S_SendToChecker --> C_Receive
+ %% ====== FREEZE (End State) ======
+ subgraph FREEZE["Freeze"]
+ direction TB
+    S_Freeze["Freeze Report"]
+    STATE_FROZEN["FROZEN"]
+ end
 
-    %% Checker actions
-    C_Receive --> C_Sign & C_Reject & C_AgreeDisagree
+ %% ====== LHO ======
+ subgraph LHO["LHO (Post-Freeze)"]
+ direction TB
+    LHO_Reject["Reject frozen report"]
+ end
 
-    C_Reject --> HandleRejectByChecker["Checker rejected → back to Maker"]
-    HandleRejectByChecker --> BackToMaker["Return to Maker for update"]
-    BackToMaker --> M_Create
 
-    C_AgreeDisagree -- Agree --> BackToMaker
-    C_AgreeDisagree -- Disagree --> DecideAfterCheckerDisagree{"Is branch auditable?"}
-    DecideAfterCheckerDisagree -- yes --> S_SendToAuditor
-    DecideAfterCheckerDisagree -- no --> S_SendToRO
+ %% ===== MAIN HORIZONTAL FLOW =====
+ M_Create --> C_Receive
+ C_Receive --> C_Sign & C_Reject & C_AgreeDisagree
 
-    %% After normal Checker sign (non-RW23)
-    C_Sign --> Check_IsRW23{"Is type = RW-23?"}
-    Check_IsRW23 -- yes --> C_CreateRW23
-    Check_IsRW23 -- no --> Decide_ReportType
+ C_Sign -->|Normal| Check_IsRW23{"Is RW-23?"}
 
-    %% RW-23 flow (freezes at Checker)
-    C_CreateRW23 --> C_Sign_RW23
-    C_Sign_RW23 --> S_Freeze
+ Check_IsRW23 -- yes --> C_CreateRW23 --> C_Sign_RW23 --> S_Freeze
+ Check_IsRW23 -- no --> Decide_ReportType{"Report type?"}
 
-    %% Type branch after Checker – for BOTH automatic & web
-    Decide_ReportType -- automatic --> S_HasData
-    Decide_ReportType -- web --> S_Auditable
+ Decide_ReportType -- automatic --> S_HasData["Auto: has data?"]
+ Decide_ReportType -- web --> S_Auditable["Branch auditable?"]
 
-    S_HasData -- yes --> S_Auditable
-    S_HasData -- no --> S_Auditable
+ S_HasData --> S_Auditable
 
-    S_Auditable -- yes --> S_SendToAuditor
-    S_Auditable -- no --> S_SendToRO
+ S_Auditable -- yes --> A_Receive
+ S_Auditable -- no --> R_Receive
 
- %% === AUDITOR PATH ===
-    S_SendToAuditor --> A_Receive
-    A_Receive --> A_Sign & A_Reject
+ %% Auditor path
+ A_Receive --> A_Sign & A_Reject
 
-    A_Reject --> HandleRejectByAuditor["Auditor rejected → go to Checker for Agree/Disagree"]
-    HandleRejectByAuditor --> S_SendToChecker
+ A_Sign --> Check_IsRW24{"Is RW-24?"}
+ Check_IsRW24 -- yes --> A_CreateRW24 --> A_Sign_RW24 --> S_Freeze
+ Check_IsRW24 -- no --> R_Receive
 
-    %% After Auditor sign (non-RW24)
-    A_Sign --> Check_IsRW24{"Is type = RW-24?"}
-    Check_IsRW24 -- yes --> A_CreateRW24
-    Check_IsRW24 -- no --> S_SendToRO
+ %% RO path
+ R_Receive --> R_Approve & R_Reject
+ R_Approve --> S_Freeze
 
-    %% RW-24 flow (freezes at Auditor)
-    A_CreateRW24 --> A_Sign_RW24
-    A_Sign_RW24 --> S_Freeze
+ %% Post-freeze
+ S_Freeze --> STATE_FROZEN --> LHO_Reject --> C_Receive
 
- %% === RO PATH ===
-    S_SendToRO --> R_Receive
-    R_Receive --> R_Approve & R_Reject
 
-    R_Approve --> S_Freeze
-
-    R_Reject --> HandleRejectByRO["RO rejected → go to Checker for Agree/Disagree"]
-    HandleRejectByRO --> S_SendToChecker
-
- %% === FROZEN & LHO ===
-    S_Freeze --> STATE_FROZEN
-    STATE_FROZEN --> LHO_Reject
-    LHO_Reject --> HandleLHOReject["LHO rejected (frozen) → go to Checker for Agree/Disagree"]
-    HandleLHOReject --> S_SendToChecker
-
- %% === STYLES ===
-    C_CreateRW23@{ shape: rect }
-    A_CreateRW24@{ shape: rect }
-
-    style C_Reject fill:#ffd6d6
-    style A_Reject fill:#ffd6d6
-    style R_Reject fill:#ffd6d6
-    style LHO_Reject fill:#ffd6d6
-    style S_Freeze fill:#b7e4c7,stroke:#2e7d32
-    style STATE_FROZEN fill:#9fd3c7,stroke:#2e7d32
-    style AUDITOR stroke:#D50000
-    style CHECKER stroke:#FF6D00
-    style MAKER stroke:#FFD600,fill:#FFF9C4
-    style RO stroke:#00C853
-    style SYS fill:#BBDEFB,stroke:#D50000
-    style LHO stroke:#2962FF
+ %% ===== REJECTIONS =====
+ C_Reject --> M_Create
+ A_Reject --> C_Receive
+ R_Reject --> C_Receive
