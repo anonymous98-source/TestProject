@@ -1,31 +1,121 @@
-//  Validate each row
-const errors = [];
-const validRows = [];
+---
+config:
+  layout: elk
+  theme: default
+---
+flowchart LR
+ subgraph MAKER["Maker (1)"]
+    direction TB
+        M_Create["Create report<br>(type: automatic / web)"]
+  end
+ subgraph CHECKER["Checker (9)"]
+    direction TB
+        C_CreateRW23@{ label: "Create RW 23 <br/>(Checker's certificate)" }
+        C_Receive["Receive for check"]
+        C_Sign["Checker Sign"]
+        C_Reject["Checker Reject"]
+        C_AgreeDisagree["Checker: Agree / Disagree?"]
+  end
+ subgraph AUDITOR["Auditor (11)"]
+    direction TB
+        A_CreateRW24@{ label: "Create RW 24 <br/>(Auditor's certificate)" }
+        A_Receive["Receive for audit"]
+        A_Sign["Auditor Sign"]
+        A_Reject["Auditor Reject"]
+  end
+ subgraph RO["RO (75)"]
+    direction TB
+        R_Receive["Receive for RO"]
+        R_Approve["RO Approve"]
+        R_Reject["RO Reject"]
+  end
+ subgraph LHO["LHO (50)"]
+    direction TB
+        LHO_Reject["LHO Reject Frozen Report"]
+  end
+ subgraph SYS["CRS System"]
+    direction TB
+        S_Worklist["Worklist submitted?"]
+        S_Auditable["Branch auditable?"]
+        S_HasData["(auto) Has data?"]
+        S_Freeze["Freeze report"]
+        S_SendToChecker["Send to Checker"]
+        S_SendToAuditor["Send to Auditor"]
+        S_SendToRO["Send to RO"]
+        S_Wait["Wait until worklist submitted"]
+  end
+ subgraph DB["Database / State"]
+    direction TB
+        STATE_FROZEN["FROZEN"]
+  end
+    M_Create -- automatic / web --> S_SendToChecker
+    C_CreateRW23 --> S_Worklist
+    S_Worklist -- no --> S_Wait & S_Wait2["S_Wait2"]
+    S_Wait --> S_Worklist
+    S_Worklist -- yes --> C_Receive_RW23["RW 23 starts at Checker"] & A_Receive_RW24["RW 24 starts at Auditor"]
+    C_Receive_RW23 L_C_Receive_RW23_C_Sign_RW23_0@--> C_Sign_RW23["Checker Sign RW 23"]
+    C_Sign_RW23 L_C_Sign_RW23_S_Freeze_0@--> S_Freeze
+    A_CreateRW24 --> S_Worklist
+    S_Wait2 --> S_Worklist
+    A_Receive_RW24 --> A_Sign_RW24["Auditor Sign RW-24"]
+    A_Sign_RW24 L_A_Sign_RW24_S_Freeze_0@--> S_Freeze
+    S_SendToChecker --> C_Receive & C_Receive
+    C_Receive --> C_Sign & C_Reject & C_AgreeDisagree
+    C_Reject --> HandleRejectByChecker["Checker rejected → back to Maker"]
+    C_Sign --> Check_IsRW23{"Is type = RW-23?"}
+    Check_IsRW23 L_Check_IsRW23_S_Freeze_0@-- yes --> S_Freeze
+    Check_IsRW23 -- no --> AfterChecker["AfterChecker"]
+    AfterChecker --> S_HasData & S_Auditable
+    S_HasData -- yes --> S_Auditable
+    S_HasData -- no --> S_Auditable
+    S_Auditable -- yes --> S_SendToAuditor
+    S_Auditable L_S_Auditable_S_Freeze_0@-- no --> S_Freeze
+    S_SendToAuditor --> A_Receive
+    A_Receive --> A_Sign & A_Reject
+    A_Reject --> HandleRejectByAuditor["Auditor rejected → go to Checker for Agree/Disagree"] & HandleRejectByAuditor
+    A_Sign --> Check_IsRW24{"Is type = RW 24?"}
+    Check_IsRW24 L_Check_IsRW24_S_Freeze_0@-- yes --> S_Freeze
+    Check_IsRW24 -- no --> AfterAuditor["AfterAuditor"]
+    AfterAuditor --> DecisionAfterAuditor{"Is auto & hasData & auditable?"}
+    DecisionAfterAuditor L_DecisionAfterAuditor_S_Freeze_0@-- yes --> S_Freeze
+    DecisionAfterAuditor -- no --> S_SendToRO
+    S_SendToRO --> R_Receive
+    R_Receive --> R_Approve & R_Reject
+    R_Approve L_R_Approve_S_Freeze_0@--> S_Freeze
+    R_Reject --> HandleRejectByRO["RO rejected → go to Checker for Agree/Disagree"] & HandleRejectByRO
+    S_Freeze --> STATE_FROZEN
+    STATE_FROZEN --> LHO_Reject
+    LHO_Reject --> HandleLHOReject["LHO rejected (frozen) → go to Checker for Agree/Disagree"]
+    HandleLHOReject --> S_SendToChecker
+    HandleRejectByAuditor --> S_SendToChecker
+    HandleRejectByRO --> S_SendToChecker
+    HandleRejectByChecker --> BackToMaker["Return to Maker for update"]
+    C_AgreeDisagree -- Agree --> BackToMaker
+    C_AgreeDisagree -- Disagree --> DecideAfterCheckerDisagree{"Is branch auditable?"}
+    BackToMaker --> M_Create
+    DecideAfterCheckerDisagree -- yes --> S_SendToAuditor
+    DecideAfterCheckerDisagree -- no --> S_SendToRO
 
-rows.forEach((row, index) => {
-  // 🔹 Skip completely empty rows
-  if (isEmptyRow(row)) {
-    return; // do not validate or include in validRows
-  }
+    C_CreateRW23@{ shape: rect}
+    A_CreateRW24@{ shape: rect}
+    style C_Reject fill:#ffd6d6
+    style A_Reject fill:#ffd6d6
+    style R_Reject fill:#ffd6d6
+    style LHO_Reject fill:#ffd6d6
+    style S_Freeze fill:#b7e4c7,stroke:#2e7d32
+    style STATE_FROZEN fill:#9fd3c7,stroke:#2e7d32
+    style AUDITOR stroke:#D50000
+    style CHECKER stroke:#FF6D00
+    style MAKER stroke:#FFD600,fill:#FFF9C4
+    style RO stroke:#00C853
+    style SYS fill:#BBDEFB,stroke:#D50000
+    style LHO stroke:#2962FF
 
-  const {
-    rowNumber,
-    isValid,
-    errors: rowErrors,
-  } = validateRow(row, index);
-
-  if (isValid) {
-    validRows.push(row);
-  } else {
-    errors.push({ row: rowNumber, issues: rowErrors });
-  }
-});
-
-
-
-
-const isEmptyRow = (row) => {
-  return Object.values(row).every(
-    (val) => val === null || String(val).trim() === ""
-  );
-};
+    L_C_Receive_RW23_C_Sign_RW23_0@{ animation: none } 
+    L_C_Sign_RW23_S_Freeze_0@{ animation: slow } 
+    L_A_Sign_RW24_S_Freeze_0@{ animation: slow } 
+    L_Check_IsRW23_S_Freeze_0@{ animation: slow } 
+    L_S_Auditable_S_Freeze_0@{ animation: slow } 
+    L_Check_IsRW24_S_Freeze_0@{ animation: slow } 
+    L_DecisionAfterAuditor_S_Freeze_0@{ animation: slow } 
+    L_R_Approve_S_Freeze_0@{ animation: slow }
