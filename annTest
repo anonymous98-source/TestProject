@@ -1,40 +1,322 @@
-//  TOGGLE DUMMY DATA HERE
-  // -------------------------
-  const USE_DUMMY = true;   // <<< SET THIS TO false when using real API
-  // -------------------------
+import React, { useEffect, useState } from "react";
+import {
+  Box,
+  Paper,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody,
+  IconButton,
+  Typography,
+  CircularProgress,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  Fab
+} from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteIcon from "@mui/icons-material/Delete";
+import EditAnnouncementDialog from "./EditAnnouncementDialog";
+import CreateAnnouncementDialog from "./CreateAnnouncementDialog";   // NEW
+import { callApi } from "../../hooks/callApi";
+
+export default function AnnouncementList() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [editRow, setEditRow] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  const [openCreate, setOpenCreate] = useState(false);   // NEW
+
+  const USE_DUMMY = false;
 
   useEffect(() => {
-    if (USE_DUMMY) {
-      loadDummyData();
-    } else {
-      fetchRows();
-    }
+    USE_DUMMY ? loadDummyData() : fetchRows();
   }, []);
 
   function loadDummyData() {
     const dummy = [
-      {
-        id: 1,
-        title: "Server maintenance",
-        message: "The system will be down from 2 AM to 3 AM.",
-        severity: "INFO",
-        is_active: "Y"
-      },
-      {
-        id: 2,
-        title: "High CPU Alert",
-        message: "CPU usage exceeded 90% on node 12.",
-        severity: "CRITICAL",
-        is_active: "Y"
-      },
-      {
-        id: 3,
-        title: "New Feature",
-        message: "Dark mode has been released.",
-        severity: "WARN",
-        is_active: "Y"
-      }
+      { id: 1, title: "Sample 1", message: "Test", severity: "INFO", is_active: "Y" },
+      { id: 2, title: "Sample 2", message: "Test2", severity: "WARN", is_active: "Y" }
     ];
-
     setRows(dummy);
   }
+
+  async function fetchRows() {
+    setLoading(true);
+    try {
+      const res = await callApi({
+        url: "/api/announcements",
+        method: "get",
+        params: { active: "Y" }
+      });
+      setRows(res?.data ?? res);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleCreateSave(payload) {
+    if (USE_DUMMY) {
+      payload.id = rows.length + 1;
+      setRows(prev => [...prev, payload]);
+      setOpenCreate(false);
+      return;
+    }
+
+    try {
+      await callApi({
+        url: "/api/announcements",
+        method: "post",
+        data: payload
+      });
+
+      fetchRows();
+    } catch (err) {
+      console.error(err);
+    }
+    setOpenCreate(false);
+  }
+
+  function handleEdit(row) {
+    setEditRow(row);
+  }
+
+  async function handleSaveEdit(updated) {
+    try {
+      await callApi({ url: `/api/announcements/${updated.id}`, method: "put", data: updated });
+      fetchRows();
+    } catch (e) {
+      console.error(e);
+    }
+    setEditRow(null);
+  }
+
+  async function confirmDeleteNow() {
+    const id = confirmDelete.id;
+    setRows(prev => prev.filter(r => r.id !== id));
+    setConfirmDelete(null);
+
+    if (!USE_DUMMY) {
+      await callApi({ url: `/api/announcements/${id}`, method: "patch", data: { is_active: "N" } });
+    }
+  }
+
+  if (loading) return <Box textAlign="center" mt={6}><CircularProgress /></Box>;
+
+  return (
+    <Box p={2}>
+      <Typography variant="h6" gutterBottom>Announcements</Typography>
+
+      <Paper elevation={1}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Title</TableCell>
+              <TableCell>Message</TableCell>
+              <TableCell>Severity</TableCell>
+              <TableCell align="right">Actions</TableCell>
+            </TableRow>
+          </TableHead>
+
+          <TableBody>
+            {rows.map(r => (
+              <TableRow key={r.id}>
+                <TableCell>{r.title}</TableCell>
+                <TableCell>{r.message}</TableCell>
+                <TableCell>{r.severity}</TableCell>
+                <TableCell align="right">
+                  <Tooltip title="Edit">
+                    <IconButton onClick={() => handleEdit(r)}><EditIcon /></IconButton>
+                  </Tooltip>
+                  <Tooltip title="Delete">
+                    <IconButton onClick={() => setConfirmDelete(r)}><DeleteIcon /></IconButton>
+                  </Tooltip>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Paper>
+
+      {editRow && (
+        <EditAnnouncementDialog
+          open={true}
+          record={editRow}
+          onClose={() => setEditRow(null)}
+          onSave={handleSaveEdit}
+        />
+      )}
+
+      <CreateAnnouncementDialog
+        open={openCreate}
+        onClose={() => setOpenCreate(false)}
+        onSave={handleCreateSave}
+      />
+
+      <Dialog open={Boolean(confirmDelete)} onClose={() => setConfirmDelete(null)}>
+        <DialogTitle>Confirm delete</DialogTitle>
+        <DialogActions>
+          <Button onClick={() => setConfirmDelete(null)}>Cancel</Button>
+          <Button color="error" onClick={confirmDeleteNow}>Delete</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* NEW Create Button */}
+      <Fab
+        color="primary"
+        onClick={() => setOpenCreate(true)}
+        style={{ position: "fixed", bottom: 30, right: 30 }}
+      >
+        <AddIcon />
+      </Fab>
+    </Box>
+  );
+} 
+
+
+
+
+import React, { useState, useEffect } from "react";
+import {
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  TextField, Button, MenuItem, Select, InputLabel,
+  FormControl, Chip
+} from "@mui/material";
+import { callApi } from "../../hooks/ccallApi";
+
+export default function CreateAnnouncementDialog({ open, onClose, onSave }) {
+  const [form, setForm] = useState({
+    title: "",
+    message: "",
+    severity: "INFO",
+    target_roles: [],
+    start_date: "",
+    expiry_date: ""
+  });
+
+  const [roles, setRoles] = useState([]); // dropdown data
+
+  useEffect(() => {
+    if (open) fetchRoles();
+  }, [open]);
+
+  async function fetchRoles() {
+    try {
+      const res = await callApi({ url: "/api/roles", method: "get" });
+      setRoles(res?.data ?? res); // expected: [{id,name}, ...]
+    } catch (err) {
+      console.error("Failed to load roles", err);
+    }
+  }
+
+  function change(e) {
+    setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  }
+
+  function handleSave() {
+    const payload = {
+      ...form,
+      is_active: "Y"     // ALWAYS SET Y
+    };
+    onSave(payload);
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Create Announcement</DialogTitle>
+      <DialogContent dividers>
+
+        <TextField
+          margin="dense"
+          label="Title"
+          name="title"
+          fullWidth
+          value={form.title}
+          onChange={change}
+        />
+
+        <TextField
+          margin="dense"
+          label="Message"
+          name="message"
+          fullWidth
+          multiline
+          minRows={3}
+          value={form.message}
+          onChange={change}
+        />
+
+        <TextField
+          select
+          fullWidth
+          margin="dense"
+          label="Severity"
+          name="severity"
+          value={form.severity}
+          onChange={change}
+        >
+          <MenuItem value="INFO">INFO</MenuItem>
+          <MenuItem value="WARN">WARN</MenuItem>
+          <MenuItem value="CRITICAL">CRITICAL</MenuItem>
+        </TextField>
+
+        {/* TARGET ROLE MULTI SELECT */}
+        <FormControl fullWidth margin="dense">
+          <InputLabel>Target Role</InputLabel>
+          <Select
+            multiple
+            name="target_roles"
+            value={form.target_roles}
+            onChange={e => setForm(prev => ({ ...prev, target_roles: e.target.value }))}
+            renderValue={(selected) => (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {selected.map(val => (
+                  <Chip key={val} label={roles.find(r => r.id === val)?.name} />
+                ))}
+              </div>
+            )}
+          >
+            {roles.map(r => (
+              <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <TextField
+          margin="dense"
+          label="Start Date"
+          type="date"
+          name="start_date"
+          fullWidth
+          InputLabelProps={{ shrink: true }}
+          value={form.start_date}
+          onChange={change}
+        />
+
+        <TextField
+          margin="dense"
+          label="Expiry Date"
+          type="date"
+          name="expiry_date"
+          fullWidth
+          InputLabelProps={{ shrink: true }}
+          value={form.expiry_date}
+          onChange={change}
+        />
+
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" onClick={handleSave}>Save</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
