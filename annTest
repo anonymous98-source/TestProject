@@ -1,50 +1,35 @@
 import React, { useEffect, useState } from "react";
-import {
-  Box,
-  Paper,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-  IconButton,
-  Typography,
-  CircularProgress,
-  Tooltip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  Fab
-} from "@mui/material";
+import { Box, Fab } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
+import { DataGrid } from "@mui/x-data-grid";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
+
+import useApi from "../../../hooks/useApi";
+
+import CreateAnnouncementDialog from "./CreateAnnouncementDialog";
 import EditAnnouncementDialog from "./EditAnnouncementDialog";
-import CreateAnnouncementDialog from "./CreateAnnouncementDialog";   // NEW
-import { callApi } from "../../hooks/callApi";
 
 export default function AnnouncementList() {
+  const { callApi } = useApi();
+
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  const [openCreate, setOpenCreate] = useState(false);
   const [editRow, setEditRow] = useState(null);
-  const [confirmDelete, setConfirmDelete] = useState(null);
 
-  const [openCreate, setOpenCreate] = useState(false);   // NEW
-
-  const USE_DUMMY = false;
+  const USE_DUMMY = false; // set true for testing without backend
 
   useEffect(() => {
-    USE_DUMMY ? loadDummyData() : fetchRows();
+    USE_DUMMY ? loadDummy() : fetchRows();
   }, []);
 
-  function loadDummyData() {
-    const dummy = [
-      { id: 1, title: "Sample 1", message: "Test", severity: "INFO", is_active: "Y" },
-      { id: 2, title: "Sample 2", message: "Test2", severity: "WARN", is_active: "Y" }
-    ];
-    setRows(dummy);
+  function loadDummy() {
+    setRows([
+      { id: 1, title: "Server Down", message: "Maintenance", severity: "INFO", is_active: "Y" },
+      { id: 2, title: "High CPU", message: "CPU 95%", severity: "CRITICAL", is_active: "Y" }
+    ]);
   }
 
   async function fetchRows() {
@@ -55,11 +40,23 @@ export default function AnnouncementList() {
         method: "get",
         params: { active: "Y" }
       });
+
       setRows(res?.data ?? res);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      console.error("Error fetching announcements", err);
+    }
+    setLoading(false);
+  }
+
+  async function handleDelete(row) {
+    setRows(prev => prev.filter(r => r.id !== row.id));
+
+    if (!USE_DUMMY) {
+      await callApi({
+        url: `/api/announcements/${row.id}`,
+        method: "patch",
+        data: { is_active: "N" }
+      });
     }
   }
 
@@ -71,105 +68,69 @@ export default function AnnouncementList() {
       return;
     }
 
-    try {
-      await callApi({
-        url: "/api/announcements",
-        method: "post",
-        data: payload
-      });
+    await callApi({
+      url: "/api/announcements",
+      method: "post",
+      data: payload
+    });
 
-      fetchRows();
-    } catch (err) {
-      console.error(err);
-    }
     setOpenCreate(false);
+    fetchRows();
   }
 
-  function handleEdit(row) {
-    setEditRow(row);
-  }
-
-  async function handleSaveEdit(updated) {
-    try {
-      await callApi({ url: `/api/announcements/${updated.id}`, method: "put", data: updated });
-      fetchRows();
-    } catch (e) {
-      console.error(e);
+  async function handleEditSave(updated) {
+    if (USE_DUMMY) {
+      setRows(prev => prev.map(r => (r.id === updated.id ? updated : r)));
+      setEditRow(null);
+      return;
     }
+
+    await callApi({
+      url: `/api/announcements/${updated.id}`,
+      method: "put",
+      data: updated
+    });
+
     setEditRow(null);
+    fetchRows();
   }
 
-  async function confirmDeleteNow() {
-    const id = confirmDelete.id;
-    setRows(prev => prev.filter(r => r.id !== id));
-    setConfirmDelete(null);
+  const columns = [
+    { field: "title", headerName: "Title", flex: 1 },
+    { field: "message", headerName: "Message", flex: 2 },
+    { field: "severity", headerName: "Severity", width: 120 },
 
-    if (!USE_DUMMY) {
-      await callApi({ url: `/api/announcements/${id}`, method: "patch", data: { is_active: "N" } });
+    {
+      field: "actions",
+      headerName: "Actions",
+      width: 150,
+      renderCell: (params) => (
+        <Box display="flex" gap={1}>
+          <EditIcon
+            style={{ cursor: "pointer" }}
+            onClick={() => setEditRow(params.row)}
+          />
+
+          <DeleteIcon
+            style={{ cursor: "pointer", color: "red" }}
+            onClick={() => handleDelete(params.row)}
+          />
+        </Box>
+      )
     }
-  }
-
-  if (loading) return <Box textAlign="center" mt={6}><CircularProgress /></Box>;
+  ];
 
   return (
-    <Box p={2}>
-      <Typography variant="h6" gutterBottom>Announcements</Typography>
+    <Box p={2} height="80vh">
 
-      <Paper elevation={1}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Title</TableCell>
-              <TableCell>Message</TableCell>
-              <TableCell>Severity</TableCell>
-              <TableCell align="right">Actions</TableCell>
-            </TableRow>
-          </TableHead>
-
-          <TableBody>
-            {rows.map(r => (
-              <TableRow key={r.id}>
-                <TableCell>{r.title}</TableCell>
-                <TableCell>{r.message}</TableCell>
-                <TableCell>{r.severity}</TableCell>
-                <TableCell align="right">
-                  <Tooltip title="Edit">
-                    <IconButton onClick={() => handleEdit(r)}><EditIcon /></IconButton>
-                  </Tooltip>
-                  <Tooltip title="Delete">
-                    <IconButton onClick={() => setConfirmDelete(r)}><DeleteIcon /></IconButton>
-                  </Tooltip>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </Paper>
-
-      {editRow && (
-        <EditAnnouncementDialog
-          open={true}
-          record={editRow}
-          onClose={() => setEditRow(null)}
-          onSave={handleSaveEdit}
-        />
-      )}
-
-      <CreateAnnouncementDialog
-        open={openCreate}
-        onClose={() => setOpenCreate(false)}
-        onSave={handleCreateSave}
+      <DataGrid
+        rows={rows}
+        columns={columns}
+        loading={loading}
+        pageSizeOptions={[5, 10, 20]}
+        disableRowSelectionOnClick
       />
 
-      <Dialog open={Boolean(confirmDelete)} onClose={() => setConfirmDelete(null)}>
-        <DialogTitle>Confirm delete</DialogTitle>
-        <DialogActions>
-          <Button onClick={() => setConfirmDelete(null)}>Cancel</Button>
-          <Button color="error" onClick={confirmDeleteNow}>Delete</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* NEW Create Button */}
       <Fab
         color="primary"
         onClick={() => setOpenCreate(true)}
@@ -177,9 +138,25 @@ export default function AnnouncementList() {
       >
         <AddIcon />
       </Fab>
+
+      <CreateAnnouncementDialog
+        open={openCreate}
+        onClose={() => setOpenCreate(false)}
+        onSave={handleCreateSave}
+      />
+
+      {editRow && (
+        <EditAnnouncementDialog
+          open={Boolean(editRow)}
+          record={editRow}
+          onClose={() => setEditRow(null)}
+          onSave={handleEditSave}
+        />
+      )}
     </Box>
   );
-} 
+}
+
 
 
 
@@ -188,50 +165,66 @@ import React, { useState, useEffect } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Button, MenuItem, Select, InputLabel,
-  FormControl, Chip
+  FormControl, Chip, Box
 } from "@mui/material";
-import { callApi } from "../../hooks/ccallApi";
+
+import useApi from "../../../hooks/useApi";
+
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
+import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 
 export default function CreateAnnouncementDialog({ open, onClose, onSave }) {
-  const [form, setForm] = useState({
+  const { callApi } = useApi();
+
+  const initialForm = {
     title: "",
     message: "",
     severity: "INFO",
     target_roles: [],
-    start_date: "",
-    expiry_date: ""
-  });
+    start_date: null,
+    expiry_date: null
+  };
 
-  const [roles, setRoles] = useState([]); // dropdown data
+  const [form, setForm] = useState(initialForm);
+  const [roles, setRoles] = useState([]);
 
   useEffect(() => {
     if (open) fetchRoles();
+    else setForm(initialForm);
   }, [open]);
 
   async function fetchRoles() {
     try {
-      const res = await callApi({ url: "/api/roles", method: "get" });
-      setRoles(res?.data ?? res); // expected: [{id,name}, ...]
+      const res = await callApi({
+        url: "/api/roles",
+        method: "get"
+      });
+      setRoles(res?.data ?? res);
     } catch (err) {
-      console.error("Failed to load roles", err);
+      console.error("Error fetching roles", err);
     }
   }
 
-  function change(e) {
+  function changeText(e) {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
   }
 
   function handleSave() {
     const payload = {
       ...form,
-      is_active: "Y"     // ALWAYS SET Y
+      start_date: form.start_date?.format("YYYY-MM-DD"),
+      expiry_date: form.expiry_date?.format("YYYY-MM-DD"),
+      is_active: "Y"
     };
+
     onSave(payload);
   }
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Create Announcement</DialogTitle>
+
       <DialogContent dividers>
 
         <TextField
@@ -240,7 +233,7 @@ export default function CreateAnnouncementDialog({ open, onClose, onSave }) {
           name="title"
           fullWidth
           value={form.title}
-          onChange={change}
+          onChange={changeText}
         />
 
         <TextField
@@ -251,13 +244,126 @@ export default function CreateAnnouncementDialog({ open, onClose, onSave }) {
           multiline
           minRows={3}
           value={form.message}
+          onChange={changeText}
+        />
+
+        <TextField
+          select
+          margin="dense"
+          fullWidth
+          label="Severity"
+          name="severity"
+          value={form.severity}
+          onChange={changeText}
+        >
+          <MenuItem value="INFO">INFO</MenuItem>
+          <MenuItem value="WARN">WARN</MenuItem>
+          <MenuItem value="CRITICAL">CRITICAL</MenuItem>
+        </TextField>
+
+        {/* MULTI ROLE DROPDOWN */}
+        <FormControl fullWidth margin="dense">
+          <InputLabel>Target Roles</InputLabel>
+          <Select
+            multiple
+            label="Target Roles"
+            name="target_roles"
+            value={form.target_roles}
+            onChange={(e) =>
+              setForm(prev => ({ ...prev, target_roles: e.target.value }))
+            }
+            renderValue={(selected) => (
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                {selected.map(val => (
+                  <Chip key={val} label={roles.find(r => r.id === val)?.name} />
+                ))}
+              </Box>
+            )}
+          >
+            {roles.map(role => (
+              <MenuItem key={role.id} value={role.id}>
+                {role.name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <LocalizationProvider dateAdapter={AdapterDayjs}>
+          <DatePicker
+            label="Start Date"
+            value={form.start_date}
+            onChange={(v) => setForm(prev => ({ ...prev, start_date: v }))}
+            slotProps={{ textField: { fullWidth: true, margin: "dense" } }}
+          />
+
+          <DatePicker
+            label="Expiry Date"
+            value={form.expiry_date}
+            onChange={(v) => setForm(prev => ({ ...prev, expiry_date: v }))}
+            slotProps={{ textField: { fullWidth: true, margin: "dense" } }}
+          />
+        </LocalizationProvider>
+
+      </DialogContent>
+
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" onClick={handleSave}>Save</Button>
+      </DialogActions>
+    </Dialog>
+  );
+} 
+
+
+import React, { useState, useEffect } from "react";
+import {
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  TextField, Button, MenuItem
+} from "@mui/material";
+
+export default function EditAnnouncementDialog({ open, record, onClose, onSave }) {
+  const [form, setForm] = useState(record);
+
+  useEffect(() => setForm(record), [record]);
+
+  function change(e) {
+    setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  }
+
+  function handleSave() {
+    onSave(form);
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Edit Announcement</DialogTitle>
+
+      <DialogContent dividers>
+
+        <TextField
+          margin="dense"
+          label="Title"
+          fullWidth
+          name="title"
+          value={form.title}
+          onChange={change}
+        />
+
+        <TextField
+          margin="dense"
+          label="Message"
+          fullWidth
+          multiline
+          minRows={3}
+          name="message"
+          value={form.message}
           onChange={change}
         />
 
         <TextField
           select
-          fullWidth
           margin="dense"
+          fullWidth
           label="Severity"
           name="severity"
           value={form.severity}
@@ -268,51 +374,8 @@ export default function CreateAnnouncementDialog({ open, onClose, onSave }) {
           <MenuItem value="CRITICAL">CRITICAL</MenuItem>
         </TextField>
 
-        {/* TARGET ROLE MULTI SELECT */}
-        <FormControl fullWidth margin="dense">
-          <InputLabel>Target Role</InputLabel>
-          <Select
-            multiple
-            name="target_roles"
-            value={form.target_roles}
-            onChange={e => setForm(prev => ({ ...prev, target_roles: e.target.value }))}
-            renderValue={(selected) => (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {selected.map(val => (
-                  <Chip key={val} label={roles.find(r => r.id === val)?.name} />
-                ))}
-              </div>
-            )}
-          >
-            {roles.map(r => (
-              <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        <TextField
-          margin="dense"
-          label="Start Date"
-          type="date"
-          name="start_date"
-          fullWidth
-          InputLabelProps={{ shrink: true }}
-          value={form.start_date}
-          onChange={change}
-        />
-
-        <TextField
-          margin="dense"
-          label="Expiry Date"
-          type="date"
-          name="expiry_date"
-          fullWidth
-          InputLabelProps={{ shrink: true }}
-          value={form.expiry_date}
-          onChange={change}
-        />
-
       </DialogContent>
+
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
         <Button variant="contained" onClick={handleSave}>Save</Button>
