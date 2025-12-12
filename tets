@@ -1,94 +1,20 @@
----
-config:
-  layout: elk
-  theme: default
----
-flowchart LR
+Dear Team,
 
- %% ====== MAKER (Start) ======
- subgraph MAKER["Maker (Start)"]
- direction TB
-    M_Create["Create Report<br> (Auto / Web)"]
- end
+I hope you are all doing well.
 
- %% ====== CHECKER ======
- subgraph CHECKER["Checker"]
- direction TB
-    C_Receive["Receive for check"]
-    C_Sign["Sign"]
-    C_Reject["Reject"]
-    C_AgreeDisagree["Agree / Disagree"]
+As I move on to the next chapter of my career, I wanted to take a moment to express my sincere gratitude to each one of you. Working with this team has been an incredible journey, and I truly appreciate the support, collaboration, and encouragement I have received throughout my time here.
 
-    C_CreateRW23["Create RW-23 (Checker certificate)"]
-    C_Sign_RW23["Sign RW-23 → Freeze"]
- end
+I would especially like to thank [Manager Name 1], [Manager Name 2], and [Mentor Name(s)] for their constant guidance and trust. Your mentorship has played a significant role in my professional growth, and I am genuinely grateful for the opportunities and learning experiences you provided.
 
- %% ====== AUDITOR ======
- subgraph AUDITOR["Auditor"]
- direction TB
-    A_Receive["Receive for audit"]
-    A_Sign["Sign"]
-    A_Reject["Reject"]
+To my fellow colleagues, it has been a pleasure working alongside such talented and dedicated individuals. I have learned a lot from each of you, and I will always cherish the memories, teamwork, and camaraderie we shared. Wishing you all the very best for your future endeavors — may you continue to achieve great success and reach new milestones.
 
-    A_CreateRW24["Create RW-24 (Auditor certificate)"]
-    A_Sign_RW24["Sign RW-24 → Freeze"]
- end
+Although I am moving forward, I hope we stay in touch. You can reach me anytime at:
+Email: [Your Personal Email]
+Phone (optional): [Your Number]
+LinkedIn: [Your LinkedIn Link]
 
- %% ====== RO ======
- subgraph RO["RO"]
- direction TB
-    R_Receive["Receive at RO"]
-    R_Approve["Approve"]
-    R_Reject["Reject"]
- end
+Thank you once again for everything.
+Wishing the entire team continued success and growth.
 
- %% ====== FREEZE (End State) ======
- subgraph FREEZE["Freeze"]
- direction TB
-    S_Freeze["Freeze Report"]
-    STATE_FROZEN["FROZEN"]
- end
-
- %% ====== LHO ======
- subgraph LHO["LHO (Post-Freeze)"]
- direction TB
-    LHO_Reject["Reject frozen report"]
- end
-
-
- %% ===== MAIN HORIZONTAL FLOW =====
- M_Create --> C_Receive
- C_Receive --> C_Sign & C_Reject & C_AgreeDisagree
-
- C_Sign -->|Normal| Check_IsRW23{"Is RW-23?"}
-
- Check_IsRW23 -- yes --> C_CreateRW23 --> C_Sign_RW23 --> S_Freeze
- Check_IsRW23 -- no --> Decide_ReportType{"Report type?"}
-
- Decide_ReportType -- automatic --> S_HasData["Auto: has data?"]
- Decide_ReportType -- web --> S_Auditable["Branch auditable?"]
-
- S_HasData --> S_Auditable
-
- S_Auditable -- yes --> A_Receive
- S_Auditable -- no --> R_Receive
-
- %% Auditor path
- A_Receive --> A_Sign & A_Reject
-
- A_Sign --> Check_IsRW24{"Is RW-24?"}
- Check_IsRW24 -- yes --> A_CreateRW24 --> A_Sign_RW24 --> S_Freeze
- Check_IsRW24 -- no --> R_Receive
-
- %% RO path
- R_Receive --> R_Approve & R_Reject
- R_Approve --> S_Freeze
-
- %% Post-freeze
- S_Freeze --> STATE_FROZEN --> LHO_Reject --> C_Receive
-
-
- %% ===== REJECTIONS =====
- C_Reject --> M_Create
- A_Reject --> C_Receive
- R_Reject --> C_Receive
+Warm regards,
+Rugved Deshpande
