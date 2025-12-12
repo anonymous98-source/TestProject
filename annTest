@@ -1,34 +1,170 @@
-const [form, setForm] = useState({
-  id: null,
-  title: "",
-  message: "",
-  severity: "INFO",
-  targetRoles: [],
-  start_date: null,
-  expiry_date: null,
-  isActive: "Y",
-}); 
+// src/features/announcements/components/ViewAnnouncementDialog.jsx
+import React from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  Box,
+  Grid,
+  Typography,
+  Divider,
+  Chip,
+  Paper,
+} from "@mui/material";
+import dayjs from "dayjs";
+import useApi from "../../../hooks/useApi";
 
-useEffect(() => {
-  if (!open) return;
+const severityColor = {
+  INFO: "primary",
+  WARN: "warning",
+  CRITICAL: "error",
+};
 
-  fetchRoles();
+function fmt(date) {
+  if (!date) return "—";
+  const d = dayjs(date);
+  return d.isValid() ? d.format("DD MMM YYYY, hh:mm A") : "—";
+}
 
-  if (record) {
-    setForm({
-      id: record.id ?? record.announcementId ?? null,
-      title: record.title ?? "",
-      message: record.message ?? "",
-      severity: record.severity ?? "INFO",
-
-      // backend or grid may return targetRole, targetRoles, etc
-      targetRoles: record.targetRoles ?? record.targetRole ?? [],
-
-      // IMPORTANT: keep as raw string; DateTimePicker will convert
-      start_date: record.startDate ?? record.start_date ?? null,
-      expiry_date: record.expiryDate ?? record.expiry_date ?? null,
-
-      isActive: record.isActive ?? record.is_active ?? "Y",
+function normalizeTargetRoles(raw) {
+  // Accepts: array of objects [{id, name}] OR array of ids/strings OR object
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw.map((r) => {
+      if (r && typeof r === "object") {
+        const id = r.id ?? r.roleId ?? r.role_id ?? r.roleId;
+        const name = r.name ?? r.roleName ?? r.role_name ?? r.roleName;
+        return { id: String(id ?? ""), name: String(name ?? id ?? "") };
+      }
+      return { id: String(r), name: String(r) };
     });
   }
-}, [open, record]);
+  // if it's an object map or single object
+  if (typeof raw === "object") {
+    // convert values
+    return Object.keys(raw).map((k) => ({ id: k, name: String(raw[k]) }));
+  }
+  // fallback
+  return [{ id: String(raw), name: String(raw) }];
+}
+
+export default function ViewAnnouncementDialog({ open, onClose, record }) {
+  // kept for consistency with other components though not used here
+  const { callApi } = useApi();
+
+  const data = record ?? {};
+
+  const {
+    id,
+    title,
+    message,
+    severity,
+    targetRoles,
+    startDate,
+    expiryDate,
+    isActive,
+    displayStatus,
+    createdBy,
+    createdAt,
+  } = data;
+
+  const roles = normalizeTargetRoles(targetRoles);
+
+  return (
+    <Dialog open={Boolean(open)} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle sx={{ py: 2 }}>
+        <Grid container alignItems="center" spacing={1}>
+          <Grid item xs={8}>
+            <Typography variant="h6" component="div" noWrap>
+              {title ?? "Untitled Announcement"}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              ID: {id ?? "—"}
+            </Typography>
+          </Grid>
+
+          <Grid item xs={4} container justifyContent="flex-end" alignItems="center">
+            <Chip
+              label={severity ?? "INFO"}
+              color={severityColor[severity] || "default"}
+              size="small"
+            />
+          </Grid>
+        </Grid>
+      </DialogTitle>
+
+      <DialogContent dividers>
+        <Box mb={2}>
+          <Typography variant="subtitle2" gutterBottom>
+            Message
+          </Typography>
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: "background.paper" }}>
+            <Typography variant="body1" sx={{ whiteSpace: "pre-wrap" }}>
+              {message ?? "—"}
+            </Typography>
+          </Paper>
+        </Box>
+
+        <Divider sx={{ my: 2 }} />
+
+        <Box mb={2}>
+          <Typography variant="subtitle2" gutterBottom>
+            Target Roles
+          </Typography>
+
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+            {roles.length ? (
+              roles.map((r) => (
+                <Chip key={r.id + "-" + r.name} label={`${r.id} - ${r.name}`} variant="outlined" />
+              ))
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                ALL
+              </Typography>
+            )}
+          </Box>
+        </Box>
+
+        <Divider sx={{ my: 2 }} />
+
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={6}>
+            <Typography variant="subtitle2">Start Date</Typography>
+            <Typography variant="body2">{fmt(startDate)}</Typography>
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <Typography variant="subtitle2">Expiry Date</Typography>
+            <Typography variant="body2">{fmt(expiryDate)}</Typography>
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <Typography variant="subtitle2">Status</Typography>
+            <Typography variant="body2">{displayStatus ?? (isActive === "Y" ? "ACTIVE" : isActive === "N" ? "DISABLED" : (isActive ?? "—"))}</Typography>
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <Typography variant="subtitle2">Active Flag</Typography>
+            <Typography variant="body2">{isActive ?? "—"}</Typography>
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <Typography variant="subtitle2">Created By</Typography>
+            <Typography variant="body2">{createdBy ?? "—"}</Typography>
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <Typography variant="subtitle2">Created At</Typography>
+            <Typography variant="body2">{fmt(createdAt)}</Typography>
+          </Grid>
+        </Grid>
+      </DialogContent>
+
+      <DialogActions>
+        <Button onClick={onClose}>Close</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
