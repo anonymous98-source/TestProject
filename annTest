@@ -1,43 +1,34 @@
-async function handleSave() {
-  // latest snapshot (keeps up-to-date values)
-  const currentForm = formRef.current;
-  console.log("[handleSave] currentForm:", JSON.stringify(currentForm));
+const [form, setForm] = useState({
+  id: null,
+  title: "",
+  message: "",
+  severity: "INFO",
+  targetRoles: [],
+  start_date: null,
+  expiry_date: null,
+  isActive: "Y",
+}); 
 
-  // run UI validation (validateAll reads `form` state to populate errors)
-  if (!validateAll()) return;
+useEffect(() => {
+  if (!open) return;
 
-  // defensive date check on the snapshot as well
-  if (currentForm.start_date && currentForm.expiry_date) {
-    if (!dayjs(currentForm.expiry_date).isAfter(dayjs(currentForm.start_date))) {
-      setErrors(prev => ({ ...prev, date: "Expiry must be later than Start" }));
-      return;
-    }
+  fetchRoles();
+
+  if (record) {
+    setForm({
+      id: record.id ?? record.announcementId ?? null,
+      title: record.title ?? "",
+      message: record.message ?? "",
+      severity: record.severity ?? "INFO",
+
+      // backend or grid may return targetRole, targetRoles, etc
+      targetRoles: record.targetRoles ?? record.targetRole ?? [],
+
+      // IMPORTANT: keep as raw string; DateTimePicker will convert
+      start_date: record.startDate ?? record.start_date ?? null,
+      expiry_date: record.expiryDate ?? record.expiry_date ?? null,
+
+      isActive: record.isActive ?? record.is_active ?? "Y",
+    });
   }
-
-  // build payload from the snapshot (use currentForm, not form)
-  const payload = {
-    id: currentForm.id ?? null,
-    title: String(currentForm.title ?? "").trim(),
-    message: String(currentForm.message ?? "").trim(),
-    severity: currentForm.severity ?? "INFO",
-    // backend expects numbers for role ids — convert where possible
-    targetRoles: Array.isArray(currentForm.targetRoles)
-      ? currentForm.targetRoles.map(v => (isNaN(Number(v)) ? v : Number(v)))
-      : currentForm.targetRoles ?? "ALL",
-    startDate: currentForm.start_date ? dayjs(currentForm.start_date).format("YYYY-MM-DD HH:mm:ss") : null,
-    expiryDate: currentForm.expiry_date ? dayjs(currentForm.expiry_date).format("YYYY-MM-DD HH:mm:ss") : null,
-    isActive: currentForm.isActive ?? "Y"
-  };
-
-  console.log("[handleSave] payload:", payload);
-
-  setIsSubmitting(true);
-  try {
-    // assume parent onSave handles API call (PUT) and closing
-    await onSave(payload);
-    // if parent doesn't close the dialog, you may call onClose() here
-  } catch (err) {
-    console.error("[handleSave] save error:", err);
-    setIsSubmitting(false);
-  }
-} 
+}, [open, record]);
