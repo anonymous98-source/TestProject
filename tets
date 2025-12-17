@@ -1,20 +1,227 @@
-Dear Team,
+Got it 👍
+You want a clean Java-only project structure (no Maven / Gradle / MEAN / MERN / Spring / etc.), just core Java + Swing.
 
-I hope you are all doing well.
+Below is a simple, professional folder structure that works perfectly for a plain Java application and is also interview-friendly.
 
-As I move on to the next chapter of my career, I wanted to take a moment to express my sincere gratitude to each one of you. Working with this team has been an incredible journey, and I truly appreciate the support, collaboration, and encouragement I have received throughout my time here.
 
-I would especially like to thank [Manager Name 1], [Manager Name 2], and [Mentor Name(s)] for their constant guidance and trust. Your mentorship has played a significant role in my professional growth, and I am genuinely grateful for the opportunities and learning experiences you provided.
+---
 
-To my fellow colleagues, it has been a pleasure working alongside such talented and dedicated individuals. I have learned a lot from each of you, and I will always cherish the memories, teamwork, and camaraderie we shared. Wishing you all the very best for your future endeavors — may you continue to achieve great success and reach new milestones.
+✅ Recommended Folder Structure (Plain Java)
 
-Although I am moving forward, I hope we stay in touch. You can reach me anytime at:
-Email: [Your Personal Email]
-Phone (optional): [Your Number]
-LinkedIn: [Your LinkedIn Link]
+FileHashGenerator/
+│
+├── src/
+│   └── com/
+│       └── yourcompany/
+│           └── filehash/
+│               │
+│               ├── app/
+│               │   └── Main.java
+│               │
+│               ├── ui/
+│               │   └── FileHashGeneratorUI.java
+│               │
+│               ├── service/
+│               │   └── HashService.java
+│               │
+│               ├── model/
+│               │   └── HashResult.java
+│               │
+│               ├── util/
+│               │   └── FileUtils.java
+│               │
+│               └── constants/
+│                   └── HashAlgorithm.java
+│
+├── lib/
+│   └── (empty – not needed unless you add external jars)
+│
+├── bin/
+│   └── (compiled .class files – auto generated)
+│
+└── README.md
 
-Thank you once again for everything.
-Wishing the entire team continued success and growth.
 
-Warm regards,
-Rugved Deshpande
+---
+
+📌 Why This Structure Is Good
+
+Package	Purpose
+
+app	Application entry point
+ui	Swing UI classes only
+service	Business logic (hash generation)
+model	Data objects (results, DTOs)
+util	Common utilities
+constants	Algorithms, static values
+
+
+👉 This is close to MVC, but lightweight and pure Java
+
+
+---
+
+🧩 File Responsibilities
+
+
+---
+
+🔹 Main.java
+
+package com.yourcompany.filehash.app;
+
+import javax.swing.SwingUtilities;
+import com.yourcompany.filehash.ui.FileHashGeneratorUI;
+
+public class Main {
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() ->
+                new FileHashGeneratorUI().setVisible(true)
+        );
+    }
+}
+
+
+---
+
+🔹 HashAlgorithm.java
+
+package com.yourcompany.filehash.constants;
+
+public enum HashAlgorithm {
+    MD5("MD5"),
+    SHA1("SHA-1"),
+    SHA256("SHA-256"),
+    SHA384("SHA-384"),
+    SHA512("SHA-512");
+
+    private final String algorithm;
+
+    HashAlgorithm(String algorithm) {
+        this.algorithm = algorithm;
+    }
+
+    public String getAlgorithm() {
+        return algorithm;
+    }
+}
+
+
+---
+
+🔹 HashResult.java
+
+package com.yourcompany.filehash.model;
+
+public class HashResult {
+
+    private String fileName;
+    private String algorithm;
+    private String hashValue;
+
+    public HashResult(String fileName, String algorithm, String hashValue) {
+        this.fileName = fileName;
+        this.algorithm = algorithm;
+        this.hashValue = hashValue;
+    }
+
+    public String getFileName() {
+        return fileName;
+    }
+
+    public String getAlgorithm() {
+        return algorithm;
+    }
+
+    public String getHashValue() {
+        return hashValue;
+    }
+}
+
+
+---
+
+🔹 HashService.java
+
+package com.yourcompany.filehash.service;
+
+import java.io.File;
+import java.nio.file.Files;
+import java.security.MessageDigest;
+
+public class HashService {
+
+    public static String generateHash(File file, String algorithm) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance(algorithm);
+        byte[] bytes = Files.readAllBytes(file.toPath());
+        byte[] hash = digest.digest(bytes);
+
+        StringBuilder hex = new StringBuilder();
+        for (byte b : hash) {
+            hex.append(String.format("%02x", b));
+        }
+        return hex.toString();
+    }
+}
+
+
+---
+
+🔹 FileHashGeneratorUI.java
+
+(Already shared earlier – lives inside ui package)
+
+
+---
+
+🛠 How to Compile & Run (Without Maven)
+
+cd FileHashGenerator
+javac -d bin src/com/yourcompany/filehash/**/*.java
+java -cp bin com.yourcompany.filehash.app.Main
+
+
+---
+
+💡 Interview-Friendly Explanation
+
+You can say:
+
+> “I separated UI, business logic, models, and constants even though it’s a desktop app.
+This improves maintainability, testability, and scalability.”
+
+
+
+This sounds very strong for a Swing project.
+
+
+---
+
+🔥 Optional Enhancements (Still Plain Java)
+
+Progress bar for large files
+
+Compare two files
+
+Copy hash to clipboard
+
+Drag & drop file
+
+Dark theme (UIManager)
+
+
+
+---
+
+If you want, next I can:
+
+Optimize hashing for large files
+
+Add file compare screen
+
+Create a single runnable JAR
+
+Improve UI layout (GridBagLayout / modern look)
+
+
+Just tell me 👍
