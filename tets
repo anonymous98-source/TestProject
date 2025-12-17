@@ -1,227 +1,92 @@
-Got it 👍
-You want a clean Java-only project structure (no Maven / Gradle / MEAN / MERN / Spring / etc.), just core Java + Swing.
-
-Below is a simple, professional folder structure that works perfectly for a plain Java application and is also interview-friendly.
-
-
----
-
-✅ Recommended Folder Structure (Plain Java)
-
-FileHashGenerator/
-│
-├── src/
-│   └── com/
-│       └── yourcompany/
-│           └── filehash/
-│               │
-│               ├── app/
-│               │   └── Main.java
-│               │
-│               ├── ui/
-│               │   └── FileHashGeneratorUI.java
-│               │
-│               ├── service/
-│               │   └── HashService.java
-│               │
-│               ├── model/
-│               │   └── HashResult.java
-│               │
-│               ├── util/
-│               │   └── FileUtils.java
-│               │
-│               └── constants/
-│                   └── HashAlgorithm.java
-│
-├── lib/
-│   └── (empty – not needed unless you add external jars)
-│
-├── bin/
-│   └── (compiled .class files – auto generated)
-│
-└── README.md
-
-
----
-
-📌 Why This Structure Is Good
-
-Package	Purpose
-
-app	Application entry point
-ui	Swing UI classes only
-service	Business logic (hash generation)
-model	Data objects (results, DTOs)
-util	Common utilities
-constants	Algorithms, static values
-
-
-👉 This is close to MVC, but lightweight and pure Java
-
-
----
-
-🧩 File Responsibilities
-
-
----
-
-🔹 Main.java
-
-package com.yourcompany.filehash.app;
-
-import javax.swing.SwingUtilities;
-import com.yourcompany.filehash.ui.FileHashGeneratorUI;
-
-public class Main {
-    public static void main(String[] args) {
-        SwingUtilities.invokeLater(() ->
-                new FileHashGeneratorUI().setVisible(true)
-        );
-    }
-}
-
-
----
-
-🔹 HashAlgorithm.java
-
-package com.yourcompany.filehash.constants;
-
-public enum HashAlgorithm {
-    MD5("MD5"),
-    SHA1("SHA-1"),
-    SHA256("SHA-256"),
-    SHA384("SHA-384"),
-    SHA512("SHA-512");
-
-    private final String algorithm;
-
-    HashAlgorithm(String algorithm) {
-        this.algorithm = algorithm;
-    }
-
-    public String getAlgorithm() {
-        return algorithm;
-    }
-}
-
-
----
-
-🔹 HashResult.java
-
-package com.yourcompany.filehash.model;
-
-public class HashResult {
-
-    private String fileName;
-    private String algorithm;
-    private String hashValue;
-
-    public HashResult(String fileName, String algorithm, String hashValue) {
-        this.fileName = fileName;
-        this.algorithm = algorithm;
-        this.hashValue = hashValue;
-    }
-
-    public String getFileName() {
-        return fileName;
-    }
-
-    public String getAlgorithm() {
-        return algorithm;
-    }
-
-    public String getHashValue() {
-        return hashValue;
-    }
-}
-
-
----
-
-🔹 HashService.java
-
-package com.yourcompany.filehash.service;
-
+import javax.swing.*;
+import java.awt.*;
 import java.io.File;
-import java.nio.file.Files;
-import java.security.MessageDigest;
 
-public class HashService {
+public class FileHashGeneratorUI extends JFrame {
 
-    public static String generateHash(File file, String algorithm) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance(algorithm);
-        byte[] bytes = Files.readAllBytes(file.toPath());
-        byte[] hash = digest.digest(bytes);
+    private JTextField filePathField;
+    private JComboBox<String> algorithmBox;
+    private JTextArea resultArea;
+    private File selectedFile;
 
-        StringBuilder hex = new StringBuilder();
-        for (byte b : hash) {
-            hex.append(String.format("%02x", b));
+    public FileHashGeneratorUI() {
+        setTitle("File Hash Generator");
+        setSize(600, 400);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        initUI();
+    }
+
+    private void initUI() {
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+
+        // Top panel
+        JPanel topPanel = new JPanel(new BorderLayout(5, 5));
+        filePathField = new JTextField();
+        filePathField.setEditable(false);
+
+        JButton browseBtn = new JButton("Browse");
+        browseBtn.addActionListener(e -> chooseFile());
+
+        topPanel.add(filePathField, BorderLayout.CENTER);
+        topPanel.add(browseBtn, BorderLayout.EAST);
+
+        // Center panel
+        JPanel centerPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        algorithmBox = new JComboBox<>(new String[]{
+                "MD5", "SHA-1", "SHA-256", "SHA-384", "SHA-512"
+        });
+
+        JButton generateBtn = new JButton("Generate Hash");
+        generateBtn.addActionListener(e -> generateHash());
+
+        centerPanel.add(new JLabel("Algorithm:"));
+        centerPanel.add(algorithmBox);
+        centerPanel.add(generateBtn);
+
+        // Result area
+        resultArea = new JTextArea(6, 40);
+        resultArea.setLineWrap(true);
+        resultArea.setWrapStyleWord(true);
+        resultArea.setEditable(false);
+
+        JScrollPane scrollPane = new JScrollPane(resultArea);
+
+        panel.add(topPanel, BorderLayout.NORTH);
+        panel.add(centerPanel, BorderLayout.CENTER);
+        panel.add(scrollPane, BorderLayout.SOUTH);
+
+        add(panel);
+    }
+
+    private void chooseFile() {
+        JFileChooser chooser = new JFileChooser();
+        int option = chooser.showOpenDialog(this);
+
+        if (option == JFileChooser.APPROVE_OPTION) {
+            selectedFile = chooser.getSelectedFile();
+            filePathField.setText(selectedFile.getAbsolutePath());
         }
-        return hex.toString();
+    }
+
+    private void generateHash() {
+        if (selectedFile == null) {
+            JOptionPane.showMessageDialog(this, "Please select a file first!");
+            return;
+        }
+
+        try {
+            String algorithm = (String) algorithmBox.getSelectedItem();
+            String hash = HashService.generateHash(selectedFile, algorithm);
+            resultArea.setText(hash);
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this,
+                    "Error generating hash: " + ex.getMessage());
+        }
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> new FileHashGeneratorUI().setVisible(true));
     }
 }
-
-
----
-
-🔹 FileHashGeneratorUI.java
-
-(Already shared earlier – lives inside ui package)
-
-
----
-
-🛠 How to Compile & Run (Without Maven)
-
-cd FileHashGenerator
-javac -d bin src/com/yourcompany/filehash/**/*.java
-java -cp bin com.yourcompany.filehash.app.Main
-
-
----
-
-💡 Interview-Friendly Explanation
-
-You can say:
-
-> “I separated UI, business logic, models, and constants even though it’s a desktop app.
-This improves maintainability, testability, and scalability.”
-
-
-
-This sounds very strong for a Swing project.
-
-
----
-
-🔥 Optional Enhancements (Still Plain Java)
-
-Progress bar for large files
-
-Compare two files
-
-Copy hash to clipboard
-
-Drag & drop file
-
-Dark theme (UIManager)
-
-
-
----
-
-If you want, next I can:
-
-Optimize hashing for large files
-
-Add file compare screen
-
-Create a single runnable JAR
-
-Improve UI layout (GridBagLayout / modern look)
-
-
-Just tell me 👍
