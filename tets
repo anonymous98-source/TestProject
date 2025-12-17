@@ -1,88 +1,3 @@
-Excellent upgrade request 👌
-We’ll do this properly and cleanly, still pure Java + Swing, no external libraries.
-
-
----
-
-✅ What we will add (cleanly)
-
-✔ Dark theme (consistent colors)
-✔ Drag & Drop file support
-✔ Progress bar for large files (streaming hash)
-✔ Proper spacing & padding
-✔ Signature footer: rugved.dev
-✔ Non-blocking UI (SwingWorker)
-
-
----
-
-🔧 1️⃣ Update HashService (for large files + progress)
-
-📄 HashService.java
-
-package com.kpmg.filehash.service;
-
-import java.io.File;
-import java.io.FileInputStream;
-import java.security.MessageDigest;
-
-public class HashService {
-
-    public static String generateHash(
-            File file,
-            String algorithm,
-            ProgressCallback callback
-    ) throws Exception {
-
-        MessageDigest digest = MessageDigest.getInstance(algorithm);
-        long totalBytes = file.length();
-        long processed = 0;
-
-        try (FileInputStream fis = new FileInputStream(file)) {
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-
-            while ((bytesRead = fis.read(buffer)) != -1) {
-                digest.update(buffer, 0, bytesRead);
-                processed += bytesRead;
-
-                if (callback != null) {
-                    int progress = (int) ((processed * 100) / totalBytes);
-                    callback.onProgress(progress);
-                }
-            }
-        }
-
-        byte[] hashBytes = digest.digest();
-        StringBuilder sb = new StringBuilder();
-        for (byte b : hashBytes) {
-            sb.append(String.format("%02x", b));
-        }
-        return sb.toString();
-    }
-
-    public interface ProgressCallback {
-        void onProgress(int percent);
-    }
-}
-
-
----
-
-🎨 2️⃣ Dark Theme Colors (Centralized)
-
-private static final Color BG = new Color(30, 30, 30);
-private static final Color FG = new Color(220, 220, 220);
-private static final Color PANEL = new Color(45, 45, 45);
-private static final Color ACCENT = new Color(0, 120, 215);
-
-
----
-
-🖥️ 3️⃣ FINAL UI – Dark Theme + DnD + Progress + Footer
-
-📄 FileHashGenerator.java (FULL VERSION)
-
 package com.kpmg.filehash.ui;
 
 import com.kpmg.filehash.constants.HashAlgorithm;
@@ -92,9 +7,7 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.datatransfer.StringSelection;
-import java.awt.dnd.*;
 import java.io.File;
-import java.util.List;
 
 public class FileHashGenerator extends JFrame {
 
@@ -104,11 +17,6 @@ public class FileHashGenerator extends JFrame {
     private JProgressBar progressBar;
     private File selectedFile;
 
-    private static final Color BG = new Color(30, 30, 30);
-    private static final Color FG = new Color(220, 220, 220);
-    private static final Color PANEL = new Color(45, 45, 45);
-    private static final Color ACCENT = new Color(0, 120, 215);
-
     public FileHashGenerator() {
         setTitle("File Hash Generator");
         setSize(650, 420);
@@ -116,24 +24,19 @@ public class FileHashGenerator extends JFrame {
         setDefaultCloseOperation(EXIT_ON_CLOSE);
 
         initUI();
-        enableDragAndDrop();
     }
 
     private void initUI() {
-        JPanel root = new JPanel(new BorderLayout(10, 10));
-        root.setBackground(BG);
+        JPanel root = new JPanel(new BorderLayout(15, 15));
         root.setBorder(new EmptyBorder(15, 15, 15, 15));
         setContentPane(root);
 
         /* ---------- FILE PANEL ---------- */
-        JPanel filePanel = new JPanel(new BorderLayout(8, 8));
-        filePanel.setBackground(PANEL);
-
+        JPanel filePanel = new JPanel(new BorderLayout(10, 10));
         fileField = new JTextField();
         fileField.setEditable(false);
-        styleField(fileField);
 
-        JButton browseBtn = createButton("Browse");
+        JButton browseBtn = new JButton("Browse");
         browseBtn.addActionListener(e -> chooseFile());
 
         filePanel.add(fileField, BorderLayout.CENTER);
@@ -141,65 +44,65 @@ public class FileHashGenerator extends JFrame {
 
         root.add(filePanel, BorderLayout.NORTH);
 
-        /* ---------- CONTROL PANEL ---------- */
-        JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10));
-        controlPanel.setBackground(BG);
+        /* ---------- CENTER PANEL ---------- */
+        JPanel centerPanel = new JPanel();
+        centerPanel.setLayout(new BoxLayout(centerPanel, BoxLayout.Y_AXIS));
+        centerPanel.setBorder(new EmptyBorder(10, 0, 10, 0));
 
+        JPanel algoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 5));
         algoBox = new JComboBox<>(HashAlgorithm.values());
-        styleCombo(algoBox);
 
-        JButton generateBtn = createButton("Generate Hash");
+        JButton generateBtn = new JButton("Generate Hash");
         generateBtn.addActionListener(e -> generateHash());
 
-        controlPanel.add(label("Algorithm:"));
-        controlPanel.add(algoBox);
-        controlPanel.add(generateBtn);
+        algoPanel.add(new JLabel("Algorithm:"));
+        algoPanel.add(algoBox);
+        algoPanel.add(generateBtn);
 
-        root.add(controlPanel, BorderLayout.CENTER);
+        centerPanel.add(algoPanel);
+        centerPanel.add(Box.createVerticalStrut(10));
 
-        /* ---------- RESULT PANEL ---------- */
-        resultArea = new JTextArea(5, 40);
+        /* ---------- RESULT AREA ---------- */
+        resultArea = new JTextArea(4, 40);
         resultArea.setEditable(false);
         resultArea.setLineWrap(true);
         resultArea.setWrapStyleWord(true);
-        styleTextArea(resultArea);
 
-        JScrollPane scroll = new JScrollPane(resultArea);
-        scroll.setBorder(BorderFactory.createTitledBorder(
-                BorderFactory.createLineBorder(ACCENT),
-                "Hash Output",
-                0, 0,
-                null, FG
-        ));
+        JScrollPane resultScroll = new JScrollPane(resultArea);
+        resultScroll.setBorder(
+                BorderFactory.createTitledBorder("Result Hash")
+        );
 
-        root.add(scroll, BorderLayout.SOUTH);
+        centerPanel.add(resultScroll);
+        centerPanel.add(Box.createVerticalStrut(15));
 
-        /* ---------- BOTTOM PANEL ---------- */
-        JPanel bottom = new JPanel(new BorderLayout());
-        bottom.setBackground(BG);
-
+        /* ---------- PROGRESS BAR ---------- */
         progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
+        centerPanel.add(progressBar);
 
-        JButton copyBtn = createButton("Copy to Clipboard");
+        root.add(centerPanel, BorderLayout.CENTER);
+
+        /* ---------- BOTTOM PANEL ---------- */
+        JPanel bottomPanel = new JPanel(new BorderLayout(10, 10));
+
+        JButton copyBtn = new JButton("Copy to Clipboard");
         copyBtn.addActionListener(e -> copyHash());
 
-        JLabel footer = new JLabel("rugved.dev", SwingConstants.RIGHT);
+        JLabel footer = new JLabel("rugved.dev");
         footer.setForeground(Color.GRAY);
 
-        bottom.add(progressBar, BorderLayout.NORTH);
-        bottom.add(copyBtn, BorderLayout.WEST);
-        bottom.add(footer, BorderLayout.EAST);
+        bottomPanel.add(copyBtn, BorderLayout.WEST);
+        bottomPanel.add(footer, BorderLayout.EAST);
 
-        root.add(bottom, BorderLayout.PAGE_END);
+        root.add(bottomPanel, BorderLayout.SOUTH);
     }
-
-    /* ---------- ACTIONS ---------- */
 
     private void chooseFile() {
         JFileChooser chooser = new JFileChooser();
         if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-            setFile(chooser.getSelectedFile());
+            selectedFile = chooser.getSelectedFile();
+            fileField.setText(selectedFile.getAbsolutePath());
         }
     }
 
@@ -209,8 +112,8 @@ public class FileHashGenerator extends JFrame {
             return;
         }
 
-        progressBar.setValue(0);
         resultArea.setText("");
+        progressBar.setValue(0);
 
         SwingWorker<String, Integer> worker = new SwingWorker<>() {
             @Override
@@ -254,96 +157,4 @@ public class FileHashGenerator extends JFrame {
                     );
         }
     }
-
-    /* ---------- DRAG & DROP ---------- */
-    private void enableDragAndDrop() {
-        new DropTarget(this, new DropTargetAdapter() {
-            @Override
-            public void drop(DropTargetDropEvent dtde) {
-                try {
-                    dtde.acceptDrop(DnDConstants.ACTION_COPY);
-                    List<File> files =
-                            (List<File>) dtde.getTransferable()
-                                    .getTransferData(DataFlavor.javaFileListFlavor);
-                    if (!files.isEmpty()) {
-                        setFile(files.get(0));
-                    }
-                } catch (Exception ignored) {}
-            }
-        });
-    }
-
-    private void setFile(File file) {
-        selectedFile = file;
-        fileField.setText(file.getAbsolutePath());
-    }
-
-    /* ---------- STYLES ---------- */
-    private JButton createButton(String text) {
-        JButton btn = new JButton(text);
-        btn.setBackground(ACCENT);
-        btn.setForeground(Color.WHITE);
-        return btn;
-    }
-
-    private JLabel label(String text) {
-        JLabel l = new JLabel(text);
-        l.setForeground(FG);
-        return l;
-    }
-
-    private void styleField(JTextField f) {
-        f.setBackground(BG);
-        f.setForeground(FG);
-        f.setBorder(BorderFactory.createLineBorder(ACCENT));
-    }
-
-    private void styleTextArea(JTextArea a) {
-        a.setBackground(BG);
-        a.setForeground(FG);
-        a.setBorder(new EmptyBorder(8, 8, 8, 8));
-    }
-
-    private void styleCombo(JComboBox<?> c) {
-        c.setBackground(PANEL);
-        c.setForeground(FG);
-    }
 }
-
-
----
-
-🔁 Rebuild JAR (Final)
-
-javac -d bin -sourcepath src src/com/kpmg/filehash/app/Main.java
-jar cfm FileHashGenerator.jar manifest\MANIFEST.MF -C bin .
-java -jar FileHashGenerator.jar
-
-
----
-
-🧠 Interview-Ready Summary
-
-You can confidently say:
-
-> “I implemented streaming hash computation with progress tracking, drag-and-drop support, and a custom dark-themed Swing UI using SwingWorker to keep the UI responsive.”
-
-
-
-That’s very strong desktop Java 💪
-
-
----
-
-If you want next:
-
-Windows EXE with icon
-
-Hash verification mode
-
-Compare two files
-
-System tray support
-
-
-Just say the word 😄
