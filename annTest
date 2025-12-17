@@ -1,170 +1,249 @@
-// src/features/announcements/components/ViewAnnouncementDialog.jsx
-import React from "react";
-import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  Box,
-  Grid,
-  Typography,
-  Divider,
-  Chip,
-  Paper,
-} from "@mui/material";
-import dayjs from "dayjs";
-import useApi from "../../../hooks/useApi";
+@Override
+    @Transactional(rollbackOn = Exception.class) // Ensure rollback on any exception
+    public CommonReq createRequest(
+            CreateRequestDto dto,
+            String creatorId,
+            String token
+    ) throws JsonProcessingException {
 
-const severityColor = {
-  INFO: "primary",
-  WARN: "warning",
-  CRITICAL: "error",
-};
+        // --- LAYER 2 SECURITY CHECK ---
+        // Validate that the user is allowed to perform this SPECIFIC ChangeType (e.g. BLOCK)
+        businessSecurityService.validateUserAction(token, dto.getRequestType(), dto.getChangeType());
 
-function fmt(date) {
-  if (!date) return "—";
-  const d = dayjs(date);
-  return d.isValid() ? d.format("DD MMM YYYY, hh:mm A") : "—";
+        KeyablePayload payload = (KeyablePayload) dto.getPayload();
+
+        // --- PRE CHECKS ---
+        String targetId = payload.getKey();
+        if (targetId == null || targetId.isBlank()) {
+            throw new IllegalArgumentException("Could not determine targetId from payload.");
+        }
+        log.info("Determined targetId for new request as: {}", targetId);
+
+        List<CommonReq> existingRequests = commonRequestRepository.findByTargetIdAndReqStatus(targetId,
+                RequestStatus.PENDING);
+
+        if (!existingRequests.isEmpty()) {
+            log.warn("Attempted to create a duplicate request for targetId {} which already has a {} request.",
+                    targetId, existingRequests.get(0).getReqStatus());
+            throw new DataIntegrityViolationException(
+                    "An active or pending request for '" + targetId + "' already exists.");
+        }
+        log.info("Uniqueness check passed for targetId: {}", targetId);
+
+        // --- CREATE AND SAVE REQUEST ---
+        CommonReq request = new CommonReq();
+        request.setCreatorId(creatorId);
+        request.setReqType(dto.getRequestType());
+        request.setChangeType(dto.getChangeType());
+        request.setPayload(objectMapper.writeValueAsString(payload));
+        request.setTargetId(targetId);
+        request.setReqStatus(RequestStatus.PENDING);
+
+        log.info("Saving new, validated request for targetId {}", targetId);
+        CommonReq savedRequest = commonRequestRepository.save(request);
+@Override
+    @Transactional(rollbackOn = Exception.class) // Ensure rollback on any exception
+    public CommonReq createRequest(
+            CreateRequestDto dto,
+            String creatorId,
+            String token
+    ) throws JsonProcessingException {
+
+        // --- LAYER 2 SECURITY CHECK ---
+        // Validate that the user is allowed to perform this SPECIFIC ChangeType (e.g. BLOCK)
+        businessSecurityService.validateUserAction(token, dto.getRequestType(), dto.getChangeType());
+
+        KeyablePayload payload = (KeyablePayload) dto.getPayload();
+
+        // --- PRE CHECKS ---
+        String targetId = payload.getKey();
+        if (targetId == null || targetId.isBlank()) {
+            throw new IllegalArgumentException("Could not determine targetId from payload.");
+        }
+        log.info("Determined targetId for new request as: {}", targetId);
+
+        List<CommonReq> existingRequests = commonRequestRepository.findByTargetIdAndReqStatus(targetId,
+                RequestStatus.PENDING);
+
+        if (!existingRequests.isEmpty()) {
+            log.warn("Attempted to create a duplicate request for targetId {} which already has a {} request.",
+                    targetId, existingRequests.get(0).getReqStatus());
+            throw new DataIntegrityViolationException(
+                    "An active or pending request for '" + targetId + "' already exists.");
+        }
+        log.info("Uniqueness check passed for targetId: {}", targetId);
+
+        // --- CREATE AND SAVE REQUEST ---
+        CommonReq request = new CommonReq();
+        request.setCreatorId(creatorId);
+        request.setReqType(dto.getRequestType());
+        request.setChangeType(dto.getChangeType());
+        request.setPayload(objectMapper.writeValueAsString(payload));
+        request.setTargetId(targetId);
+        request.setReqStatus(RequestStatus.PENDING);
+
+        log.info("Saving new, validated request for targetId {}", targetId);
+        CommonReq savedRequest = commonRequestRepository.save(request);
+
+
+
+
+
+
+public class CreateRequestDto {
+
+    /**
+     * Specifies the type of entity being requested for change (e.g., SEGMENT, BRANCH, CURRENCY).
+     * Jackson automatically maps the incoming JSON string value to the corresponding {@link RequestType} enum constant.
+     * This field is also used by {@link JsonTypeInfo} to select the correct concrete payload DTO class.
+     */
+    @NotNull(message = "Request Type cannot be null.")
+    private RequestType requestType;
+
+    /**
+     * Specifies the nature of the change requested (e.g., CREATE, UPDATE, DELETE).
+     */
+    @NotNull(message = "Change Type cannot be null.")
+    private ChangeType changeType;
+
+    /**
+     * The identifier of the target entity the request pertains to. This is optional and may be null
+     * (e.g., when creating a new entity where the ID is not yet known).
+     */
+    private String targetId;
+
+    /**
+     * The specific details and data required for the request.
+     * The actual class implementing {@link Payload} is determined at runtime based on the value of {@code requestType}.
+     * The {@link Valid @Valid} annotation ensures that nested validation constraints within the specific payload DTO are checked.
+     */
+    @NotNull(message = "Payload cannot be null.")
+    @Valid // Triggers validation of the nested payload object
+    @JsonTypeInfo(
+            use = JsonTypeInfo.Id.NAME, // Use the logical name to determine the subtype
+            include = JsonTypeInfo.As.EXTERNAL_PROPERTY, // The property defining the type is a sibling field
+            property = "requestType" // The sibling field that determines the payload type
+    )
+    @JsonSubTypes({
+            @JsonSubTypes.Type(value = SegmentPayloadDto.class, name = "SEGMENT_CODE"),
+            @JsonSubTypes.Type(value = CglPayloadDto.class, name = "CGL_CODE"),
+            @JsonSubTypes.Type(value = BranchRequestPayloadDTO.class, name = "BRANCH"),
+            @JsonSubTypes.Type(value = CircleRequestPayloadDTO.class, name = "CIRCLE"),
+            @JsonSubTypes.Type(value = StateReqPayloadDto.class, name = "STATE"),
+            @JsonSubTypes.Type(value = CurrencyMasterDto.class, name = "CURRENCY"),
+            @JsonSubTypes.Type(value = CalenderConfigPayloadDto.class, name = "CALENDER"),
+            @JsonSubTypes.Type(value = CurrencyRateChangeDto.class, name = "CURRENCY_RATE_CHANGE")
+    })
+    private Payload payload;
 }
 
-function normalizeTargetRoles(raw) {
-  // Accepts: array of objects [{id, name}] OR array of ids/strings OR object
-  if (!raw) return [];
-  if (Array.isArray(raw)) {
-    return raw.map((r) => {
-      if (r && typeof r === "object") {
-        const id = r.id ?? r.roleId ?? r.role_id ?? r.roleId;
-        const name = r.name ?? r.roleName ?? r.role_name ?? r.roleName;
-        return { id: String(id ?? ""), name: String(name ?? id ?? "") };
-      }
-      return { id: String(r), name: String(r) };
-    });
-  }
-  // if it's an object map or single object
-  if (typeof raw === "object") {
-    // convert values
-    return Object.keys(raw).map((k) => ({ id: k, name: String(raw[k]) }));
-  }
-  // fallback
-  return [{ id: String(raw), name: String(raw) }];
+
+
+
+@Data
+@JsonTypeName("CGL_CODE") // This must match the RequestType enum name used for processing this payload type
+public class CglPayloadDto implements KeyablePayload {
+
+    /**
+     * Represents the first component of the General Ledger (GL) code combination.
+     * This field is mandatory.
+     */
+    @NotNull(message = "Component 1 (comp1) cannot be null.")
+    private Short comp1;
+
+    /**
+     * Represents the segment code within the GL code combination.
+     * This field is mandatory and has a size constraint.
+     */
+    @NotNull(message = "Segment Code cannot be null.")
+    @Size(min = 1, max = 4, message = "Segment Code must be between 1 and 4 characters.")
+    private String segmentCode;
+
+    /**
+     * Represents the second component of the GL code combination.
+     * This field is mandatory.
+     */
+    @NotNull(message = "Component 2 (comp2) cannot be null.")
+    private Short comp2;
+
+    /**
+     * A human-readable description for the GL code combination.
+     * This field is mandatory and has a size constraint.
+     */
+    @NotNull(message = "Description cannot be null.")
+    @Size(min = 1, max = 100, message = "Description must be between 1 and 100 characters.")
+    private String description;
+
+    /**
+     * The classification of the account (A, L, I, E, M for Asset, Liability, Income, Expense, Memo).
+     * This field is mandatory and has a strict pattern constraint.
+     */
+    @NotNull(message = "A/C Classification cannot be null.")
+    @Pattern(regexp = "[ALIEM]", message = "A/C Classification must be one of: A, L, I, E, M.")
+    private String acClassification;
+
+    /**
+     * Flag indicating whether balance forwarding is enabled (e.g., 0 for No, 1 for Yes).
+     * This field is mandatory.
+     */
+    @NotNull(message = "Balance Forward (balFwd) flag cannot be null.")
+    private Integer balFwd;
+
+    /**
+     * The default balance type for the account ('C' for Credit, 'D' for Debit).
+     * This field is mandatory and has a strict pattern constraint.
+     */
+    @NotNull(message = "Default Balance Type cannot be null.")
+    @Pattern(regexp = "[CD]", message = "Default Balance Type must be 'C' or 'D'.")
+    private String defBalType;
+
+    /**
+     * The status of the GL code (e.g., 0 for Inactive, 1 for Active).
+     * This field is mandatory.
+     */
+    @NotNull(message = "Status cannot be null.")
+    private Integer status;
+
+    /**
+     * Flag indicating if the balance is used for comparison purposes (e.g., 0 for No, 1 for Yes).
+     * This field is mandatory.
+     */
+    @NotNull(message = "Balance Compare (balCompare) flag cannot be null.")
+    private Integer balCompare;
+
+    /**
+     * Flag indicating if manual posting is allowed for this GL code (e.g., 0 for No, 1 for Yes).
+     * This field is mandatory.
+     */
+    @NotNull(message = "Manual Posting flag cannot be null.")
+    private Integer manualPosting;
+
+    /**
+     * Constructs and returns the composite primary key for this DTO.
+     * The key is used for data identification and integrity checks within the service layer.
+     *
+     * @return A string representing the concatenated composite primary key (comp1 + segmentCode + comp2).
+     */
+    @Override
+    @JsonIgnore // Ensures this method's output is not included during JSON serialization of the DTO
+    public String getKey() {
+        // Construct the composite primary key
+        return "" + comp1 + segmentCode + comp2;
+    }
 }
 
-export default function ViewAnnouncementDialog({ open, onClose, record }) {
-  // kept for consistency with other components though not used here
-  const { callApi } = useApi();
 
-  const data = record ?? {};
 
-  const {
-    id,
-    title,
-    message,
-    severity,
-    targetRoles,
-    startDate,
-    expiryDate,
-    isActive,
-    displayStatus,
-    createdBy,
-    createdAt,
-  } = data;
 
-  const roles = normalizeTargetRoles(targetRoles);
 
-  return (
-    <Dialog open={Boolean(open)} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ py: 2 }}>
-        <Grid container alignItems="center" spacing={1}>
-          <Grid item xs={8}>
-            <Typography variant="h6" component="div" noWrap>
-              {title ?? "Untitled Announcement"}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              ID: {id ?? "—"}
-            </Typography>
-          </Grid>
 
-          <Grid item xs={4} container justifyContent="flex-end" alignItems="center">
-            <Chip
-              label={severity ?? "INFO"}
-              color={severityColor[severity] || "default"}
-              size="small"
-            />
-          </Grid>
-        </Grid>
-      </DialogTitle>
-
-      <DialogContent dividers>
-        <Box mb={2}>
-          <Typography variant="subtitle2" gutterBottom>
-            Message
-          </Typography>
-          <Paper variant="outlined" sx={{ p: 2, bgcolor: "background.paper" }}>
-            <Typography variant="body1" sx={{ whiteSpace: "pre-wrap" }}>
-              {message ?? "—"}
-            </Typography>
-          </Paper>
-        </Box>
-
-        <Divider sx={{ my: 2 }} />
-
-        <Box mb={2}>
-          <Typography variant="subtitle2" gutterBottom>
-            Target Roles
-          </Typography>
-
-          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-            {roles.length ? (
-              roles.map((r) => (
-                <Chip key={r.id + "-" + r.name} label={`${r.id} - ${r.name}`} variant="outlined" />
-              ))
-            ) : (
-              <Typography variant="body2" color="text.secondary">
-                ALL
-              </Typography>
-            )}
-          </Box>
-        </Box>
-
-        <Divider sx={{ my: 2 }} />
-
-        <Grid container spacing={2}>
-          <Grid item xs={12} sm={6}>
-            <Typography variant="subtitle2">Start Date</Typography>
-            <Typography variant="body2">{fmt(startDate)}</Typography>
-          </Grid>
-
-          <Grid item xs={12} sm={6}>
-            <Typography variant="subtitle2">Expiry Date</Typography>
-            <Typography variant="body2">{fmt(expiryDate)}</Typography>
-          </Grid>
-
-          <Grid item xs={12} sm={6}>
-            <Typography variant="subtitle2">Status</Typography>
-            <Typography variant="body2">{displayStatus ?? (isActive === "Y" ? "ACTIVE" : isActive === "N" ? "DISABLED" : (isActive ?? "—"))}</Typography>
-          </Grid>
-
-          <Grid item xs={12} sm={6}>
-            <Typography variant="subtitle2">Active Flag</Typography>
-            <Typography variant="body2">{isActive ?? "—"}</Typography>
-          </Grid>
-
-          <Grid item xs={12} sm={6}>
-            <Typography variant="subtitle2">Created By</Typography>
-            <Typography variant="body2">{createdBy ?? "—"}</Typography>
-          </Grid>
-
-          <Grid item xs={12} sm={6}>
-            <Typography variant="subtitle2">Created At</Typography>
-            <Typography variant="body2">{fmt(createdAt)}</Typography>
-          </Grid>
-        </Grid>
-      </DialogContent>
-
-      <DialogActions>
-        <Button onClick={onClose}>Close</Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
+@PostMapping("/create-request")
+	@ResponseStatus(HttpStatus.CREATED)
+	public CommonReq createRequest(
+			@Valid @RequestBody CreateRequestDto createRequestDto,
+			@RequestHeader("Authorization") String token
+	) throws JsonProcessingException {
+		String userId = jwtUtil.getUserIdFromToken(token);
+		log.info("Received request creation call from user: {}", userId);
+		return requestService.createRequest(createRequestDto, userId, token);
+	}
