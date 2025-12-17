@@ -1,294 +1,334 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
-import {
-  Box,
-  Fab,
-  IconButton,
-  Stack,
-  Tooltip,
-  Typography,
-} from "@mui/material";
-import AddIcon from "@mui/icons-material/Add";
-import { DataGrid } from "@mui/x-data-grid";
-import OnlinePredictionIcon from "@mui/icons-material/OnlinePrediction";
-import EditIcon from "@mui/icons-material/Edit";
-import useApi from "../../hooks/useApi";
-import useCustomSnackbar from "../../utils/useCustomSnackbar";
-import CustomChip from "../../utils/CustomChip";
-import CGLDialog from "./CGLDialog";
-import TrendingUpIcon from "@mui/icons-material/TrendingUp";
-import TrendingDownIcon from "@mui/icons-material/TrendingDown";
-import BookmarkAddedIcon from "@mui/icons-material/BookmarkAdded";
-import BookmarkRemoveIcon from "@mui/icons-material/BookmarkRemove";
-import DatasetIcon from "@mui/icons-material/Dataset";
-import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
-import GppGoodIcon from "@mui/icons-material/GppGood";
-import GppBadIcon from "@mui/icons-material/GppBad";
-import NoteIcon from "@mui/icons-material/Note";
-import LoadingOverlay from "../../utils/LoadingOverlay";
-import { useSelector } from "react-redux";
-import { getPermissions } from "../../utils/CommonUtilities";
-import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
-import styled from "@emotion/styled";
-
-const ACCOUNT_CLASSIFICATIONS = [
-  { value: "A", label: "Asset", icon: <DatasetIcon fontSize="small" /> },
-  {
-    value: "L",
-    label: "Liability",
-    icon: <AccountBalanceWalletIcon fontSize="small" />,
-  },
-  { value: "I", label: "Income", icon: <TrendingUpIcon fontSize="small" /> },
-  { value: "E", label: "Expense", icon: <TrendingDownIcon fontSize="small" /> },
-  { value: "M", label: "Memo A/c", icon: <NoteIcon fontSize="small" /> },
-];
-
-const OverlayBox = styled(Box)(() => ({
-  display: "flex",
-  flexDirection: "column",
-  height: "100%",
-  justifyContent: "center",
-  alignItems: "center",
-}));
-
-const CustomNoRowsOverlay = () => {
-  return (
-    <OverlayBox>
-      <ErrorOutlineIcon fontSize="large" />
-      <Typography variant="h5" fontSize="1.2rem">
-        Data is not available
-      </Typography>
-    </OverlayBox>
-  );
-};
-export default function CGLMasterTab() {
-  const selectedMenuItem = useSelector((s) => s.menus.selectedMenuItem);
-  const requestType = selectedMenuItem?.requestType || "";
-  const permissions = getPermissions(selectedMenuItem);
-  const { callApi } = useApi();
-  const snackbar = useCustomSnackbar();
-  const [isLoading, setIsLoading] = useState(false);
-  const [rows, setRows] = useState([]);
-  const [openDialog, setOpenDialog] = useState(false);
-  const [editRow, setEditRow] = useState(null);
-
-  // load grid rows (main owns listing)
-  const fetchRows = useCallback(async () => {
-    if (!requestType) return;
-    try {
-      setIsLoading(true);
-      const resp = await callApi("/CM/cgls", { requestType }, "GET");
-      setRows(resp?.data || []);
-    } catch (err) {
-      snackbar(err?.message || "Failed to load CGLs", "error");
-      setRows([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [callApi, requestType, snackbar]);
-
-  useEffect(() => {
-    fetchRows();
-  }, [fetchRows]);
-
-  const handleSaved = () => {
-    setEditRow(null);
-    setOpenDialog(false);
-  };
-
-  const handleOpenCreate = () => {
-    setEditRow(null);
-    setOpenDialog(true);
-  };
-
-  const handleOpenEdit = (row) => {
-    setEditRow(row);
-    setOpenDialog(true);
-  };
-
-  const columns = useMemo(
-    () => [
-      { field: "cglNumber", headerName: "CGL Code", flex: 1 },
-      { field: "description", headerName: "Description", flex: 2 },
-      {
-        field: "acClassification",
-        headerName: "Account Classification",
-        flex: 1.2,
-        headerAlign: "center",
-        align: "center",
-        renderCell: (params) => {
-          const found = ACCOUNT_CLASSIFICATIONS.find(
-            (x) => x.value === params.row.acClassification
-          );
-          return (
-            <CustomChip
-              label={found.label}
-              icon={found.icon}
-              variant="outlined"
-            />
-          );
+{
+    "success": true,
+    "message": "Operation completed successfully.",
+    "data": {
+        "totalPages": 345,
+        "totalElements": 6882,
+        "size": 20,
+        "content": [
+            {
+                "cglNumber": "1208505003",
+                "comp1": "1208",
+                "segmentCode": "5050",
+                "comp2": "03",
+                "description": "STRM COOP RUR CR REF FND 10 11 18",
+                "acClassification": "A",
+                "balFwd": 1,
+                "defBalType": "D",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "8812505008",
+                "comp1": "8812",
+                "segmentCode": "5050",
+                "comp2": "08",
+                "description": "STIPEND CHG ON APPRENTICESHIP ",
+                "acClassification": "E",
+                "balFwd": 0,
+                "defBalType": "D",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 0,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "1122505001",
+                "comp1": "1122",
+                "segmentCode": "5050",
+                "comp2": "01",
+                "description": "STEPS",
+                "acClassification": "A",
+                "balFwd": 1,
+                "defBalType": "D",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "5051030601",
+                "comp1": "5051",
+                "segmentCode": "0306",
+                "comp2": "01",
+                "description": "STDR_STAFF",
+                "acClassification": "M",
+                "balFwd": 1,
+                "defBalType": "M",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "2051030601",
+                "comp1": "2051",
+                "segmentCode": "0306",
+                "comp2": "01",
+                "description": "STDR_STAFF",
+                "acClassification": "L",
+                "balFwd": 1,
+                "defBalType": "C",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "5051502501",
+                "comp1": "5051",
+                "segmentCode": "5025",
+                "comp2": "01",
+                "description": "STDR_SSI-CB",
+                "acClassification": "M",
+                "balFwd": 1,
+                "defBalType": "M",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "2051502501",
+                "comp1": "2051",
+                "segmentCode": "5025",
+                "comp2": "01",
+                "description": "STDR_SSI-CB",
+                "acClassification": "L",
+                "balFwd": 1,
+                "defBalType": "C",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "5051500501",
+                "comp1": "5051",
+                "segmentCode": "5005",
+                "comp2": "01",
+                "description": "STDR_SSI",
+                "acClassification": "M",
+                "balFwd": 1,
+                "defBalType": "M",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "2051500501",
+                "comp1": "2051",
+                "segmentCode": "5005",
+                "comp2": "01",
+                "description": "STDR_SSI",
+                "acClassification": "L",
+                "balFwd": 1,
+                "defBalType": "C",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "2051270801",
+                "comp1": "2051",
+                "segmentCode": "2708",
+                "comp2": "01",
+                "description": "STDR_SBT",
+                "acClassification": "L",
+                "balFwd": 1,
+                "defBalType": "C",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "5051270801",
+                "comp1": "5051",
+                "segmentCode": "2708",
+                "comp2": "01",
+                "description": "STDR_SBT",
+                "acClassification": "M",
+                "balFwd": 1,
+                "defBalType": "M",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "2051260801",
+                "comp1": "2051",
+                "segmentCode": "2608",
+                "comp2": "01",
+                "description": "STDR_SBS",
+                "acClassification": "L",
+                "balFwd": 1,
+                "defBalType": "C",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "5051260801",
+                "comp1": "5051",
+                "segmentCode": "2608",
+                "comp2": "01",
+                "description": "STDR_SBS",
+                "acClassification": "M",
+                "balFwd": 1,
+                "defBalType": "M",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "5051250801",
+                "comp1": "5051",
+                "segmentCode": "2508",
+                "comp2": "01",
+                "description": "STDR_SBP",
+                "acClassification": "M",
+                "balFwd": 1,
+                "defBalType": "M",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "2051250801",
+                "comp1": "2051",
+                "segmentCode": "2508",
+                "comp2": "01",
+                "description": "STDR_SBP",
+                "acClassification": "L",
+                "balFwd": 1,
+                "defBalType": "C",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "5051240801",
+                "comp1": "5051",
+                "segmentCode": "2408",
+                "comp2": "01",
+                "description": "STDR_SBM",
+                "acClassification": "M",
+                "balFwd": 1,
+                "defBalType": "M",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "2051240801",
+                "comp1": "2051",
+                "segmentCode": "2408",
+                "comp2": "01",
+                "description": "STDR_SBM",
+                "acClassification": "L",
+                "balFwd": 1,
+                "defBalType": "C",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "2051220801",
+                "comp1": "2051",
+                "segmentCode": "2208",
+                "comp2": "01",
+                "description": "STDR_SBH",
+                "acClassification": "L",
+                "balFwd": 1,
+                "defBalType": "C",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "5051220801",
+                "comp1": "5051",
+                "segmentCode": "2208",
+                "comp2": "01",
+                "description": "STDR_SBH",
+                "acClassification": "M",
+                "balFwd": 1,
+                "defBalType": "M",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            },
+            {
+                "cglNumber": "2051500401",
+                "comp1": "2051",
+                "segmentCode": "5004",
+                "comp2": "01",
+                "description": "STDR_SBF",
+                "acClassification": "L",
+                "balFwd": 1,
+                "defBalType": "C",
+                "status": 1,
+                "openDate": "2025-11-25",
+                "closeDate": null,
+                "balCompare": 1,
+                "manualPosting": 1
+            }
+        ],
+        "number": 0,
+        "sort": {
+            "empty": true,
+            "unsorted": true,
+            "sorted": false
         },
-      },
-      {
-        field: "balCompare",
-        headerName: "Balance Compare",
-        flex: 1,
-        headerAlign: "center",
-        align: "center",
-        filterable: false,
-        sortable: false,
-        disableColumnMenu: true,
-        renderCell: (params) => {
-          const isInclude = params.value == "1";
-          const label = isInclude ? "Include" : "Exclude";
-          const icon = isInclude ? (
-            <BookmarkAddedIcon />
-          ) : (
-            <BookmarkRemoveIcon />
-          );
-          return (
-            <CustomChip
-              label={label}
-              icon={icon}
-              // color={params.value == "1" ? "success" : "error"}
-              color={"default"}
-              variant="outlined"
-            />
-          );
+        "first": true,
+        "last": false,
+        "numberOfElements": 20,
+        "pageable": {
+            "pageNumber": 0,
+            "pageSize": 20,
+            "sort": {
+                "empty": true,
+                "unsorted": true,
+                "sorted": false
+            },
+            "offset": 0,
+            "unpaged": false,
+            "paged": true
         },
-      },
-      {
-        field: "manualPosting",
-        headerName: "Manual Posting",
-        flex: 1,
-        headerAlign: "center",
-        align: "center",
-        filterable: false,
-        sortable: false,
-        disableColumnMenu: true,
-        renderCell: (params) => {
-          const isAllowed = params.value == "1";
-          const label = isAllowed ? "Allowed" : "Not Allowed";
-          const icon = isAllowed ? <GppGoodIcon /> : <GppBadIcon />;
-          return (
-            <CustomChip
-              label={label}
-              icon={icon}
-              // color={params.value == "1" ? "success" : "error"}
-              color={"default"}
-              variant="outlined"
-            />
-          );
-        },
-      },
-      {
-        field: "status",
-        headerName: "CGL Status",
-        flex: 1,
-        align: "center",
-        headerAlign: "center",
-        filterable: false,
-        sortable: false,
-        disableColumnMenu: true,
-        renderCell: (params) => (
-          <CustomChip
-            sx={{
-              color: params.row.status == "1" ? "success.dark" : "error.light",
-              "& .MuiChip-icon": {
-                color:
-                  params.row.status == "1" ? "success.dark" : "error.light",
-              },
-            }}
-            variant="outlined"
-            icon={<OnlinePredictionIcon />}
-            label={params.row.status == "1" ? "Active" : "In Active"}
-          />
-        ),
-      },
-
-      {
-        field: "actions",
-        headerName: "Actions",
-        flex: 0.6,
-        headerAlign: "center",
-        align: "center",
-        filterable: false,
-        sortable: false,
-        disableColumnMenu: true,
-        renderCell: (params) => (
-          <Box
-            direction="row"
-            spacing={1}
-            alignItems="center"
-            justifyContent="center"
-            sx={{ Height: "100%" }}
-          >
-            <Tooltip title="Approve">
-              <IconButton
-                color="primary"
-                onClick={() => handleOpenEdit(params.row)}
-              >
-                <EditIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        ),
-      },
-    ],
-    []
-  );
-
-  const filteredColumns = useMemo(() => {
-    if (permissions.modify || permissions.block || permissions.unblock) {
-      return columns;
-    }
-    // Otherwise, filter out the column where field name is 'action'.
-    else {
-      return columns.filter((column) => column.field !== "action");
-    }
-  }, [columns, permissions.block, permissions.modify, permissions.unblock]);
-
-  return (
-    <Box sx={{ p: 1 }}>
-      <DataGrid
-        loading={isLoading}
-        rows={rows}
-        columns={filteredColumns}
-        getRowId={(row) => row.cglNumber}
-        disableRowSelectionOnClick
-        pageSizeOptions={[10, 20, 50, 100]}
-        initialState={{
-          pagination: { paginationModel: { pageSize: 10, page: 0 } },
-        }}
-        slots={{
-          noRowsOverlay: CustomNoRowsOverlay,
-        }}
-      />
-
-      {permissions?.create && !isLoading && (
-        <Fab
-          color="primary"
-          onClick={handleOpenCreate}
-          sx={{
-            position: "fixed",
-            bottom: 80,
-            right: 40,
-            borderRadius: 1,
-          }}
-          variant="extended"
-        >
-          <AddIcon sx={{ mr: 1 }} /> Create
-        </Fab>
-      )}
-
-      <CGLDialog
-        open={openDialog}
-        onClose={() => setOpenDialog(false)}
-        onSaved={handleSaved}
-        editInitialData={editRow}
-        accountClassifications={ACCOUNT_CLASSIFICATIONS}
-        permissions={permissions}
-      />
-      <LoadingOverlay loading={isLoading} />
-    </Box>
-  );
+        "empty": false
+    },
+    "timestamp": "2025-12-17T12:22:15.747449900Z"
 }
