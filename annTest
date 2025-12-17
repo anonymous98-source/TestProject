@@ -1,249 +1,294 @@
-@Override
-    @Transactional(rollbackOn = Exception.class) // Ensure rollback on any exception
-    public CommonReq createRequest(
-            CreateRequestDto dto,
-            String creatorId,
-            String token
-    ) throws JsonProcessingException {
+import React, { useEffect, useState, useCallback, useMemo } from "react";
+import {
+  Box,
+  Fab,
+  IconButton,
+  Stack,
+  Tooltip,
+  Typography,
+} from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
+import { DataGrid } from "@mui/x-data-grid";
+import OnlinePredictionIcon from "@mui/icons-material/OnlinePrediction";
+import EditIcon from "@mui/icons-material/Edit";
+import useApi from "../../hooks/useApi";
+import useCustomSnackbar from "../../utils/useCustomSnackbar";
+import CustomChip from "../../utils/CustomChip";
+import CGLDialog from "./CGLDialog";
+import TrendingUpIcon from "@mui/icons-material/TrendingUp";
+import TrendingDownIcon from "@mui/icons-material/TrendingDown";
+import BookmarkAddedIcon from "@mui/icons-material/BookmarkAdded";
+import BookmarkRemoveIcon from "@mui/icons-material/BookmarkRemove";
+import DatasetIcon from "@mui/icons-material/Dataset";
+import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
+import GppGoodIcon from "@mui/icons-material/GppGood";
+import GppBadIcon from "@mui/icons-material/GppBad";
+import NoteIcon from "@mui/icons-material/Note";
+import LoadingOverlay from "../../utils/LoadingOverlay";
+import { useSelector } from "react-redux";
+import { getPermissions } from "../../utils/CommonUtilities";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
+import styled from "@emotion/styled";
 
-        // --- LAYER 2 SECURITY CHECK ---
-        // Validate that the user is allowed to perform this SPECIFIC ChangeType (e.g. BLOCK)
-        businessSecurityService.validateUserAction(token, dto.getRequestType(), dto.getChangeType());
+const ACCOUNT_CLASSIFICATIONS = [
+  { value: "A", label: "Asset", icon: <DatasetIcon fontSize="small" /> },
+  {
+    value: "L",
+    label: "Liability",
+    icon: <AccountBalanceWalletIcon fontSize="small" />,
+  },
+  { value: "I", label: "Income", icon: <TrendingUpIcon fontSize="small" /> },
+  { value: "E", label: "Expense", icon: <TrendingDownIcon fontSize="small" /> },
+  { value: "M", label: "Memo A/c", icon: <NoteIcon fontSize="small" /> },
+];
 
-        KeyablePayload payload = (KeyablePayload) dto.getPayload();
+const OverlayBox = styled(Box)(() => ({
+  display: "flex",
+  flexDirection: "column",
+  height: "100%",
+  justifyContent: "center",
+  alignItems: "center",
+}));
 
-        // --- PRE CHECKS ---
-        String targetId = payload.getKey();
-        if (targetId == null || targetId.isBlank()) {
-            throw new IllegalArgumentException("Could not determine targetId from payload.");
-        }
-        log.info("Determined targetId for new request as: {}", targetId);
+const CustomNoRowsOverlay = () => {
+  return (
+    <OverlayBox>
+      <ErrorOutlineIcon fontSize="large" />
+      <Typography variant="h5" fontSize="1.2rem">
+        Data is not available
+      </Typography>
+    </OverlayBox>
+  );
+};
+export default function CGLMasterTab() {
+  const selectedMenuItem = useSelector((s) => s.menus.selectedMenuItem);
+  const requestType = selectedMenuItem?.requestType || "";
+  const permissions = getPermissions(selectedMenuItem);
+  const { callApi } = useApi();
+  const snackbar = useCustomSnackbar();
+  const [isLoading, setIsLoading] = useState(false);
+  const [rows, setRows] = useState([]);
+  const [openDialog, setOpenDialog] = useState(false);
+  const [editRow, setEditRow] = useState(null);
 
-        List<CommonReq> existingRequests = commonRequestRepository.findByTargetIdAndReqStatus(targetId,
-                RequestStatus.PENDING);
-
-        if (!existingRequests.isEmpty()) {
-            log.warn("Attempted to create a duplicate request for targetId {} which already has a {} request.",
-                    targetId, existingRequests.get(0).getReqStatus());
-            throw new DataIntegrityViolationException(
-                    "An active or pending request for '" + targetId + "' already exists.");
-        }
-        log.info("Uniqueness check passed for targetId: {}", targetId);
-
-        // --- CREATE AND SAVE REQUEST ---
-        CommonReq request = new CommonReq();
-        request.setCreatorId(creatorId);
-        request.setReqType(dto.getRequestType());
-        request.setChangeType(dto.getChangeType());
-        request.setPayload(objectMapper.writeValueAsString(payload));
-        request.setTargetId(targetId);
-        request.setReqStatus(RequestStatus.PENDING);
-
-        log.info("Saving new, validated request for targetId {}", targetId);
-        CommonReq savedRequest = commonRequestRepository.save(request);
-@Override
-    @Transactional(rollbackOn = Exception.class) // Ensure rollback on any exception
-    public CommonReq createRequest(
-            CreateRequestDto dto,
-            String creatorId,
-            String token
-    ) throws JsonProcessingException {
-
-        // --- LAYER 2 SECURITY CHECK ---
-        // Validate that the user is allowed to perform this SPECIFIC ChangeType (e.g. BLOCK)
-        businessSecurityService.validateUserAction(token, dto.getRequestType(), dto.getChangeType());
-
-        KeyablePayload payload = (KeyablePayload) dto.getPayload();
-
-        // --- PRE CHECKS ---
-        String targetId = payload.getKey();
-        if (targetId == null || targetId.isBlank()) {
-            throw new IllegalArgumentException("Could not determine targetId from payload.");
-        }
-        log.info("Determined targetId for new request as: {}", targetId);
-
-        List<CommonReq> existingRequests = commonRequestRepository.findByTargetIdAndReqStatus(targetId,
-                RequestStatus.PENDING);
-
-        if (!existingRequests.isEmpty()) {
-            log.warn("Attempted to create a duplicate request for targetId {} which already has a {} request.",
-                    targetId, existingRequests.get(0).getReqStatus());
-            throw new DataIntegrityViolationException(
-                    "An active or pending request for '" + targetId + "' already exists.");
-        }
-        log.info("Uniqueness check passed for targetId: {}", targetId);
-
-        // --- CREATE AND SAVE REQUEST ---
-        CommonReq request = new CommonReq();
-        request.setCreatorId(creatorId);
-        request.setReqType(dto.getRequestType());
-        request.setChangeType(dto.getChangeType());
-        request.setPayload(objectMapper.writeValueAsString(payload));
-        request.setTargetId(targetId);
-        request.setReqStatus(RequestStatus.PENDING);
-
-        log.info("Saving new, validated request for targetId {}", targetId);
-        CommonReq savedRequest = commonRequestRepository.save(request);
-
-
-
-
-
-
-public class CreateRequestDto {
-
-    /**
-     * Specifies the type of entity being requested for change (e.g., SEGMENT, BRANCH, CURRENCY).
-     * Jackson automatically maps the incoming JSON string value to the corresponding {@link RequestType} enum constant.
-     * This field is also used by {@link JsonTypeInfo} to select the correct concrete payload DTO class.
-     */
-    @NotNull(message = "Request Type cannot be null.")
-    private RequestType requestType;
-
-    /**
-     * Specifies the nature of the change requested (e.g., CREATE, UPDATE, DELETE).
-     */
-    @NotNull(message = "Change Type cannot be null.")
-    private ChangeType changeType;
-
-    /**
-     * The identifier of the target entity the request pertains to. This is optional and may be null
-     * (e.g., when creating a new entity where the ID is not yet known).
-     */
-    private String targetId;
-
-    /**
-     * The specific details and data required for the request.
-     * The actual class implementing {@link Payload} is determined at runtime based on the value of {@code requestType}.
-     * The {@link Valid @Valid} annotation ensures that nested validation constraints within the specific payload DTO are checked.
-     */
-    @NotNull(message = "Payload cannot be null.")
-    @Valid // Triggers validation of the nested payload object
-    @JsonTypeInfo(
-            use = JsonTypeInfo.Id.NAME, // Use the logical name to determine the subtype
-            include = JsonTypeInfo.As.EXTERNAL_PROPERTY, // The property defining the type is a sibling field
-            property = "requestType" // The sibling field that determines the payload type
-    )
-    @JsonSubTypes({
-            @JsonSubTypes.Type(value = SegmentPayloadDto.class, name = "SEGMENT_CODE"),
-            @JsonSubTypes.Type(value = CglPayloadDto.class, name = "CGL_CODE"),
-            @JsonSubTypes.Type(value = BranchRequestPayloadDTO.class, name = "BRANCH"),
-            @JsonSubTypes.Type(value = CircleRequestPayloadDTO.class, name = "CIRCLE"),
-            @JsonSubTypes.Type(value = StateReqPayloadDto.class, name = "STATE"),
-            @JsonSubTypes.Type(value = CurrencyMasterDto.class, name = "CURRENCY"),
-            @JsonSubTypes.Type(value = CalenderConfigPayloadDto.class, name = "CALENDER"),
-            @JsonSubTypes.Type(value = CurrencyRateChangeDto.class, name = "CURRENCY_RATE_CHANGE")
-    })
-    private Payload payload;
-}
-
-
-
-
-@Data
-@JsonTypeName("CGL_CODE") // This must match the RequestType enum name used for processing this payload type
-public class CglPayloadDto implements KeyablePayload {
-
-    /**
-     * Represents the first component of the General Ledger (GL) code combination.
-     * This field is mandatory.
-     */
-    @NotNull(message = "Component 1 (comp1) cannot be null.")
-    private Short comp1;
-
-    /**
-     * Represents the segment code within the GL code combination.
-     * This field is mandatory and has a size constraint.
-     */
-    @NotNull(message = "Segment Code cannot be null.")
-    @Size(min = 1, max = 4, message = "Segment Code must be between 1 and 4 characters.")
-    private String segmentCode;
-
-    /**
-     * Represents the second component of the GL code combination.
-     * This field is mandatory.
-     */
-    @NotNull(message = "Component 2 (comp2) cannot be null.")
-    private Short comp2;
-
-    /**
-     * A human-readable description for the GL code combination.
-     * This field is mandatory and has a size constraint.
-     */
-    @NotNull(message = "Description cannot be null.")
-    @Size(min = 1, max = 100, message = "Description must be between 1 and 100 characters.")
-    private String description;
-
-    /**
-     * The classification of the account (A, L, I, E, M for Asset, Liability, Income, Expense, Memo).
-     * This field is mandatory and has a strict pattern constraint.
-     */
-    @NotNull(message = "A/C Classification cannot be null.")
-    @Pattern(regexp = "[ALIEM]", message = "A/C Classification must be one of: A, L, I, E, M.")
-    private String acClassification;
-
-    /**
-     * Flag indicating whether balance forwarding is enabled (e.g., 0 for No, 1 for Yes).
-     * This field is mandatory.
-     */
-    @NotNull(message = "Balance Forward (balFwd) flag cannot be null.")
-    private Integer balFwd;
-
-    /**
-     * The default balance type for the account ('C' for Credit, 'D' for Debit).
-     * This field is mandatory and has a strict pattern constraint.
-     */
-    @NotNull(message = "Default Balance Type cannot be null.")
-    @Pattern(regexp = "[CD]", message = "Default Balance Type must be 'C' or 'D'.")
-    private String defBalType;
-
-    /**
-     * The status of the GL code (e.g., 0 for Inactive, 1 for Active).
-     * This field is mandatory.
-     */
-    @NotNull(message = "Status cannot be null.")
-    private Integer status;
-
-    /**
-     * Flag indicating if the balance is used for comparison purposes (e.g., 0 for No, 1 for Yes).
-     * This field is mandatory.
-     */
-    @NotNull(message = "Balance Compare (balCompare) flag cannot be null.")
-    private Integer balCompare;
-
-    /**
-     * Flag indicating if manual posting is allowed for this GL code (e.g., 0 for No, 1 for Yes).
-     * This field is mandatory.
-     */
-    @NotNull(message = "Manual Posting flag cannot be null.")
-    private Integer manualPosting;
-
-    /**
-     * Constructs and returns the composite primary key for this DTO.
-     * The key is used for data identification and integrity checks within the service layer.
-     *
-     * @return A string representing the concatenated composite primary key (comp1 + segmentCode + comp2).
-     */
-    @Override
-    @JsonIgnore // Ensures this method's output is not included during JSON serialization of the DTO
-    public String getKey() {
-        // Construct the composite primary key
-        return "" + comp1 + segmentCode + comp2;
+  // load grid rows (main owns listing)
+  const fetchRows = useCallback(async () => {
+    if (!requestType) return;
+    try {
+      setIsLoading(true);
+      const resp = await callApi("/CM/cgls", { requestType }, "GET");
+      setRows(resp?.data || []);
+    } catch (err) {
+      snackbar(err?.message || "Failed to load CGLs", "error");
+      setRows([]);
+    } finally {
+      setIsLoading(false);
     }
+  }, [callApi, requestType, snackbar]);
+
+  useEffect(() => {
+    fetchRows();
+  }, [fetchRows]);
+
+  const handleSaved = () => {
+    setEditRow(null);
+    setOpenDialog(false);
+  };
+
+  const handleOpenCreate = () => {
+    setEditRow(null);
+    setOpenDialog(true);
+  };
+
+  const handleOpenEdit = (row) => {
+    setEditRow(row);
+    setOpenDialog(true);
+  };
+
+  const columns = useMemo(
+    () => [
+      { field: "cglNumber", headerName: "CGL Code", flex: 1 },
+      { field: "description", headerName: "Description", flex: 2 },
+      {
+        field: "acClassification",
+        headerName: "Account Classification",
+        flex: 1.2,
+        headerAlign: "center",
+        align: "center",
+        renderCell: (params) => {
+          const found = ACCOUNT_CLASSIFICATIONS.find(
+            (x) => x.value === params.row.acClassification
+          );
+          return (
+            <CustomChip
+              label={found.label}
+              icon={found.icon}
+              variant="outlined"
+            />
+          );
+        },
+      },
+      {
+        field: "balCompare",
+        headerName: "Balance Compare",
+        flex: 1,
+        headerAlign: "center",
+        align: "center",
+        filterable: false,
+        sortable: false,
+        disableColumnMenu: true,
+        renderCell: (params) => {
+          const isInclude = params.value == "1";
+          const label = isInclude ? "Include" : "Exclude";
+          const icon = isInclude ? (
+            <BookmarkAddedIcon />
+          ) : (
+            <BookmarkRemoveIcon />
+          );
+          return (
+            <CustomChip
+              label={label}
+              icon={icon}
+              // color={params.value == "1" ? "success" : "error"}
+              color={"default"}
+              variant="outlined"
+            />
+          );
+        },
+      },
+      {
+        field: "manualPosting",
+        headerName: "Manual Posting",
+        flex: 1,
+        headerAlign: "center",
+        align: "center",
+        filterable: false,
+        sortable: false,
+        disableColumnMenu: true,
+        renderCell: (params) => {
+          const isAllowed = params.value == "1";
+          const label = isAllowed ? "Allowed" : "Not Allowed";
+          const icon = isAllowed ? <GppGoodIcon /> : <GppBadIcon />;
+          return (
+            <CustomChip
+              label={label}
+              icon={icon}
+              // color={params.value == "1" ? "success" : "error"}
+              color={"default"}
+              variant="outlined"
+            />
+          );
+        },
+      },
+      {
+        field: "status",
+        headerName: "CGL Status",
+        flex: 1,
+        align: "center",
+        headerAlign: "center",
+        filterable: false,
+        sortable: false,
+        disableColumnMenu: true,
+        renderCell: (params) => (
+          <CustomChip
+            sx={{
+              color: params.row.status == "1" ? "success.dark" : "error.light",
+              "& .MuiChip-icon": {
+                color:
+                  params.row.status == "1" ? "success.dark" : "error.light",
+              },
+            }}
+            variant="outlined"
+            icon={<OnlinePredictionIcon />}
+            label={params.row.status == "1" ? "Active" : "In Active"}
+          />
+        ),
+      },
+
+      {
+        field: "actions",
+        headerName: "Actions",
+        flex: 0.6,
+        headerAlign: "center",
+        align: "center",
+        filterable: false,
+        sortable: false,
+        disableColumnMenu: true,
+        renderCell: (params) => (
+          <Box
+            direction="row"
+            spacing={1}
+            alignItems="center"
+            justifyContent="center"
+            sx={{ Height: "100%" }}
+          >
+            <Tooltip title="Approve">
+              <IconButton
+                color="primary"
+                onClick={() => handleOpenEdit(params.row)}
+              >
+                <EditIcon />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        ),
+      },
+    ],
+    []
+  );
+
+  const filteredColumns = useMemo(() => {
+    if (permissions.modify || permissions.block || permissions.unblock) {
+      return columns;
+    }
+    // Otherwise, filter out the column where field name is 'action'.
+    else {
+      return columns.filter((column) => column.field !== "action");
+    }
+  }, [columns, permissions.block, permissions.modify, permissions.unblock]);
+
+  return (
+    <Box sx={{ p: 1 }}>
+      <DataGrid
+        loading={isLoading}
+        rows={rows}
+        columns={filteredColumns}
+        getRowId={(row) => row.cglNumber}
+        disableRowSelectionOnClick
+        pageSizeOptions={[10, 20, 50, 100]}
+        initialState={{
+          pagination: { paginationModel: { pageSize: 10, page: 0 } },
+        }}
+        slots={{
+          noRowsOverlay: CustomNoRowsOverlay,
+        }}
+      />
+
+      {permissions?.create && !isLoading && (
+        <Fab
+          color="primary"
+          onClick={handleOpenCreate}
+          sx={{
+            position: "fixed",
+            bottom: 80,
+            right: 40,
+            borderRadius: 1,
+          }}
+          variant="extended"
+        >
+          <AddIcon sx={{ mr: 1 }} /> Create
+        </Fab>
+      )}
+
+      <CGLDialog
+        open={openDialog}
+        onClose={() => setOpenDialog(false)}
+        onSaved={handleSaved}
+        editInitialData={editRow}
+        accountClassifications={ACCOUNT_CLASSIFICATIONS}
+        permissions={permissions}
+      />
+      <LoadingOverlay loading={isLoading} />
+    </Box>
+  );
 }
-
-
-
-
-
-
-@PostMapping("/create-request")
-	@ResponseStatus(HttpStatus.CREATED)
-	public CommonReq createRequest(
-			@Valid @RequestBody CreateRequestDto createRequestDto,
-			@RequestHeader("Authorization") String token
-	) throws JsonProcessingException {
-		String userId = jwtUtil.getUserIdFromToken(token);
-		log.info("Received request creation call from user: {}", userId);
-		return requestService.createRequest(createRequestDto, userId, token);
-	}
