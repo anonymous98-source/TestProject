@@ -1,11 +1,9 @@
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Box, Fab, IconButton, Tooltip, Typography } from "@mui/material";
 import { DataGrid } from "@mui/x-data-grid";
 import { styled } from "@mui/material/styles";
 import { useSelector } from "react-redux";
 
-/* Icons */
 import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
@@ -20,17 +18,12 @@ import GppGoodIcon from "@mui/icons-material/GppGood";
 import GppBadIcon from "@mui/icons-material/GppBad";
 import OnlinePredictionIcon from "@mui/icons-material/OnlinePrediction";
 
-/* Local imports */
 import { useApi } from "@/hooks/useApi";
 import { useCustomSnackbar } from "@/hooks/useCustomSnackbar";
 import { getPermissions } from "@/utils/permissions";
 import CustomChip from "@/components/CustomChip";
 import LoadingOverlay from "@/components/LoadingOverlay";
 import CGLDialog from "./CGLDialog";
-
-/* -------------------------------------------------------------------------- */
-/* Constants                                                                  */
-/* -------------------------------------------------------------------------- */
 
 const ACCOUNT_CLASSIFICATIONS = [
   { value: "A", label: "Asset", icon: <DatasetIcon fontSize="small" /> },
@@ -39,10 +32,6 @@ const ACCOUNT_CLASSIFICATIONS = [
   { value: "E", label: "Expense", icon: <TrendingDownIcon fontSize="small" /> },
   { value: "M", label: "Memo A/c", icon: <NoteIcon fontSize="small" /> },
 ];
-
-/* -------------------------------------------------------------------------- */
-/* No Rows Overlay                                                            */
-/* -------------------------------------------------------------------------- */
 
 const OverlayBox = styled(Box)(() => ({
   height: "100%",
@@ -59,77 +48,33 @@ const CustomNoRowsOverlay = () => (
   </OverlayBox>
 );
 
-/* -------------------------------------------------------------------------- */
-/* Component                                                                  */
-/* -------------------------------------------------------------------------- */
-
 export default function CGLMasterTab() {
-  /* Redux */
   const selectedMenuItem = useSelector((s) => s.menus.selectedMenuItem);
   const requestType = selectedMenuItem?.requestType || "";
   const permissions = getPermissions(selectedMenuItem);
 
-  /* Hooks */
   const { callApi } = useApi();
   const snackbar = useCustomSnackbar();
 
-  /* Grid state */
   const [rows, setRows] = useState([]);
   const [rowCount, setRowCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
 
-  /* Pagination */
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(20);
 
-  /* Sorting */
   const [sortModel, setSortModel] = useState([
     { field: "cglNumber", sort: "asc" },
   ]);
 
-  /* Filtering */
-  const [filterModel, setFilterModel] = useState({ items: [] });
-  const [debouncedFilterModel, setDebouncedFilterModel] = useState(filterModel);
-
-  /* Dialog */
   const [openDialog, setOpenDialog] = useState(false);
   const [editRow, setEditRow] = useState(null);
-
-  /* ------------------------------------------------------------------------ */
-  /* Debounce filter input                                                     */
-  /* ------------------------------------------------------------------------ */
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setDebouncedFilterModel(filterModel);
-      setPage(0);
-    }, 400);
-
-    return () => clearTimeout(timeout);
-  }, [filterModel]);
-
-  /* ------------------------------------------------------------------------ */
-  /* Helpers                                                                   */
-  /* ------------------------------------------------------------------------ */
 
   const buildSortParam = useCallback(() => {
     if (!sortModel.length) return undefined;
     const { field, sort } = sortModel[0];
     return `${field},${sort}`;
   }, [sortModel]);
-
-  const buildSearchParams = useCallback(() => {
-    const item = debouncedFilterModel.items?.[0];
-    if (!item?.value) return {};
-    return {
-      searchField: item.field,
-      searchValue: item.value,
-    };
-  }, [debouncedFilterModel]);
-
-  /* ------------------------------------------------------------------------ */
-  /* API call                                                                  */
-  /* ------------------------------------------------------------------------ */
 
   const fetchRows = useCallback(async () => {
     if (!requestType) return;
@@ -144,7 +89,6 @@ export default function CGLMasterTab() {
           page,
           size: pageSize,
           sort: buildSortParam(),
-          ...buildSearchParams(),
         },
         "GET"
       );
@@ -160,23 +104,11 @@ export default function CGLMasterTab() {
     } finally {
       setIsLoading(false);
     }
-  }, [
-    callApi,
-    requestType,
-    page,
-    pageSize,
-    buildSortParam,
-    buildSearchParams,
-    snackbar,
-  ]);
+  }, [callApi, requestType, page, pageSize, buildSortParam, snackbar]);
 
   useEffect(() => {
     fetchRows();
   }, [fetchRows]);
-
-  /* ------------------------------------------------------------------------ */
-  /* Dialog handlers                                                           */
-  /* ------------------------------------------------------------------------ */
 
   const handleCreate = () => {
     setEditRow(null);
@@ -193,13 +125,10 @@ export default function CGLMasterTab() {
     fetchRows();
   };
 
-  /* ------------------------------------------------------------------------ */
-  /* Columns                                                                   */
-  /* ------------------------------------------------------------------------ */
-
   const columns = useMemo(
     () => [
       { field: "cglNumber", headerName: "CGL Code", flex: 1 },
+
       { field: "description", headerName: "Description", flex: 2 },
 
       {
@@ -259,11 +188,17 @@ export default function CGLMasterTab() {
         align: "center",
         headerAlign: "center",
         sortable: false,
-        renderCell: ({ value }) => (
+        renderCell: (params) => (
           <CustomChip
-            icon={<OnlinePredictionIcon />}
-            label={value === 1 ? "Active" : "Inactive"}
+            sx={{
+              color: params.value === 1 ? "success.dark" : "error.light",
+              "& .MuiChip-icon": {
+                color: params.value === 1 ? "success.dark" : "error.light",
+              },
+            }}
             variant="outlined"
+            icon={<OnlinePredictionIcon />}
+            label={params.value === 1 ? "Active" : "Inactive"}
           />
         ),
       },
@@ -295,10 +230,6 @@ export default function CGLMasterTab() {
     return columns.filter((c) => c.field !== "actions");
   }, [columns, permissions]);
 
-  /* ------------------------------------------------------------------------ */
-  /* Render                                                                    */
-  /* ------------------------------------------------------------------------ */
-
   return (
     <Box sx={{ p: 1 }}>
       <DataGrid
@@ -309,7 +240,6 @@ export default function CGLMasterTab() {
         disableRowSelectionOnClick
         paginationMode="server"
         sortingMode="server"
-        filterMode="server"
         rowCount={rowCount}
         paginationModel={{ page, pageSize }}
         onPaginationModelChange={({ page, pageSize }) => {
@@ -321,8 +251,266 @@ export default function CGLMasterTab() {
           setSortModel(model);
           setPage(0);
         }}
-        filterModel={filterModel}
-        onFilterModelChange={setFilterModel}
+        pageSizeOptions={[10, 20, 50, 100]}
+        slots={{ noRowsOverlay: CustomNoRowsOverlay }}
+      />
+
+      {permissions?.create && (
+        <Fab
+          color="primary"
+      import { useCallback, useEffect, useMemo, useState } from "react";
+import { Box, Fab, IconButton, Tooltip, Typography } from "@mui/material";
+import { DataGrid } from "@mui/x-data-grid";
+import { styled } from "@mui/material/styles";
+import { useSelector } from "react-redux";
+
+import AddIcon from "@mui/icons-material/Add";
+import EditIcon from "@mui/icons-material/Edit";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
+import DatasetIcon from "@mui/icons-material/Dataset";
+import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
+import TrendingUpIcon from "@mui/icons-material/TrendingUp";
+import TrendingDownIcon from "@mui/icons-material/TrendingDown";
+import NoteIcon from "@mui/icons-material/Note";
+import BookmarkAddedIcon from "@mui/icons-material/BookmarkAdded";
+import BookmarkRemoveIcon from "@mui/icons-material/BookmarkRemove";
+import GppGoodIcon from "@mui/icons-material/GppGood";
+import GppBadIcon from "@mui/icons-material/GppBad";
+import OnlinePredictionIcon from "@mui/icons-material/OnlinePrediction";
+
+import { useApi } from "@/hooks/useApi";
+import { useCustomSnackbar } from "@/hooks/useCustomSnackbar";
+import { getPermissions } from "@/utils/permissions";
+import CustomChip from "@/components/CustomChip";
+import LoadingOverlay from "@/components/LoadingOverlay";
+import CGLDialog from "./CGLDialog";
+
+const ACCOUNT_CLASSIFICATIONS = [
+  { value: "A", label: "Asset", icon: <DatasetIcon fontSize="small" /> },
+  { value: "L", label: "Liability", icon: <AccountBalanceWalletIcon fontSize="small" /> },
+  { value: "I", label: "Income", icon: <TrendingUpIcon fontSize="small" /> },
+  { value: "E", label: "Expense", icon: <TrendingDownIcon fontSize="small" /> },
+  { value: "M", label: "Memo A/c", icon: <NoteIcon fontSize="small" /> },
+];
+
+const OverlayBox = styled(Box)(() => ({
+  height: "100%",
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+}));
+
+const CustomNoRowsOverlay = () => (
+  <OverlayBox>
+    <ErrorOutlineIcon fontSize="large" />
+    <Typography variant="h6">Data is not available</Typography>
+  </OverlayBox>
+);
+
+export default function CGLMasterTab() {
+  const selectedMenuItem = useSelector((s) => s.menus.selectedMenuItem);
+  const requestType = selectedMenuItem?.requestType || "";
+  const permissions = getPermissions(selectedMenuItem);
+
+  const { callApi } = useApi();
+  const snackbar = useCustomSnackbar();
+
+  const [rows, setRows] = useState([]);
+  const [rowCount, setRowCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
+
+  const [sortModel, setSortModel] = useState([
+    { field: "cglNumber", sort: "asc" },
+  ]);
+
+  const [openDialog, setOpenDialog] = useState(false);
+  const [editRow, setEditRow] = useState(null);
+
+  const buildSortParam = useCallback(() => {
+    if (!sortModel.length) return undefined;
+    const { field, sort } = sortModel[0];
+    return `${field},${sort}`;
+  }, [sortModel]);
+
+  const fetchRows = useCallback(async () => {
+    if (!requestType) return;
+
+    try {
+      setIsLoading(true);
+
+      const response = await callApi(
+        "/CM/cgls",
+        {
+          requestType,
+          page,
+          size: pageSize,
+          sort: buildSortParam(),
+        },
+        "GET"
+      );
+
+      const pageData = response?.data;
+
+      setRows(pageData?.content ?? []);
+      setRowCount(pageData?.totalElements ?? 0);
+    } catch (error) {
+      snackbar(error?.message || "Failed to load CGLs", "error");
+      setRows([]);
+      setRowCount(0);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [callApi, requestType, page, pageSize, buildSortParam, snackbar]);
+
+  useEffect(() => {
+    fetchRows();
+  }, [fetchRows]);
+
+  const handleCreate = () => {
+    setEditRow(null);
+    setOpenDialog(true);
+  };
+
+  const handleEdit = (row) => {
+    setEditRow(row);
+    setOpenDialog(true);
+  };
+
+  const handleSaved = () => {
+    setOpenDialog(false);
+    fetchRows();
+  };
+
+  const columns = useMemo(
+    () => [
+      { field: "cglNumber", headerName: "CGL Code", flex: 1 },
+
+      { field: "description", headerName: "Description", flex: 2 },
+
+      {
+        field: "acClassification",
+        headerName: "Account Classification",
+        flex: 1.2,
+        align: "center",
+        headerAlign: "center",
+        renderCell: ({ value }) => {
+          const found = ACCOUNT_CLASSIFICATIONS.find((x) => x.value === value);
+          return (
+            <CustomChip
+              label={found?.label}
+              icon={found?.icon}
+              variant="outlined"
+            />
+          );
+        },
+      },
+
+      {
+        field: "balCompare",
+        headerName: "Balance Compare",
+        flex: 1,
+        align: "center",
+        headerAlign: "center",
+        sortable: false,
+        renderCell: ({ value }) => (
+          <CustomChip
+            label={value === 1 ? "Include" : "Exclude"}
+            icon={value === 1 ? <BookmarkAddedIcon /> : <BookmarkRemoveIcon />}
+            variant="outlined"
+          />
+        ),
+      },
+
+      {
+        field: "manualPosting",
+        headerName: "Manual Posting",
+        flex: 1,
+        align: "center",
+        headerAlign: "center",
+        sortable: false,
+        renderCell: ({ value }) => (
+          <CustomChip
+            label={value === 1 ? "Allowed" : "Not Allowed"}
+            icon={value === 1 ? <GppGoodIcon /> : <GppBadIcon />}
+            variant="outlined"
+          />
+        ),
+      },
+
+      {
+        field: "status",
+        headerName: "CGL Status",
+        flex: 1,
+        align: "center",
+        headerAlign: "center",
+        sortable: false,
+        renderCell: (params) => (
+          <CustomChip
+            sx={{
+              color: params.value === 1 ? "success.dark" : "error.light",
+              "& .MuiChip-icon": {
+                color: params.value === 1 ? "success.dark" : "error.light",
+              },
+            }}
+            variant="outlined"
+            icon={<OnlinePredictionIcon />}
+            label={params.value === 1 ? "Active" : "Inactive"}
+          />
+        ),
+      },
+
+      {
+        field: "actions",
+        headerName: "Actions",
+        flex: 0.6,
+        align: "center",
+        headerAlign: "center",
+        sortable: false,
+        filterable: false,
+        renderCell: (params) => (
+          <Tooltip title="Edit">
+            <IconButton onClick={() => handleEdit(params.row)}>
+              <EditIcon />
+            </IconButton>
+          </Tooltip>
+        ),
+      },
+    ],
+    []
+  );
+
+  const visibleColumns = useMemo(() => {
+    if (permissions.modify || permissions.block || permissions.unblock) {
+      return columns;
+    }
+    return columns.filter((c) => c.field !== "actions");
+  }, [columns, permissions]);
+
+  return (
+    <Box sx={{ p: 1 }}>
+      <DataGrid
+        rows={rows}
+        columns={visibleColumns}
+        getRowId={(row) => row.cglNumber}
+        loading={isLoading}
+        disableRowSelectionOnClick
+        paginationMode="server"
+        sortingMode="server"
+        rowCount={rowCount}
+        paginationModel={{ page, pageSize }}
+        onPaginationModelChange={({ page, pageSize }) => {
+          setPage(page);
+          setPageSize(pageSize);
+        }}
+        sortModel={sortModel}
+        onSortModelChange={(model) => {
+          setSortModel(model);
+          setPage(0);
+        }}
         pageSizeOptions={[10, 20, 50, 100]}
         slots={{ noRowsOverlay: CustomNoRowsOverlay }}
       />
@@ -350,4 +538,24 @@ export default function CGLMasterTab() {
       <LoadingOverlay loading={isLoading} />
     </Box>
   );
-}
+}    variant="extended"
+          onClick={handleCreate}
+          sx={{ position: "fixed", bottom: 80, right: 40 }}
+        >
+          <AddIcon sx={{ mr: 1 }} /> Create
+        </Fab>
+      )}
+
+      <CGLDialog
+        open={openDialog}
+        onClose={() => setOpenDialog(false)}
+        onSaved={handleSaved}
+        editInitialData={editRow}
+        accountClassifications={ACCOUNT_CLASSIFICATIONS}
+        permissions={permissions}
+      />
+
+      <LoadingOverlay loading={isLoading} />
+    </Box>
+  );
+} 
