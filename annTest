@@ -1,125 +1,19 @@
-PaginatedResponseDto<CGLMaster> response = new PaginatedResponseDto<>();
-
-response.setData(pageResult.getContent());
-response.setTotalElements(pageResult.getTotalElements());
-response.setTotalPages(pageResult.getTotalPages());
-response.setPageSize(pageResult.getSize());
-response.setCurrentPage(pageResult.getNumber());
-
-return response;
-
-import lombok.Getter;
-import lombok.Setter;
-import java.util.List;
-
-@Getter
-@Setter
-public class SearchRequest {
-    private String requestType;
-    private int page;
-    private int size;
-    private List<FilterRequest> filters;
-}
-
-
-package com.yourpkg.dto;
-
-import lombok.Getter;
-import lombok.Setter;
-
-@Getter
-@Setter
-public class FilterRequest {
-    private String field;
-    private String operator;   // contains, equals
-    private String value;
-}
-
-
-
-
-package com.yourpkg.specification;
-
-import com.yourpkg.dto.FilterRequest;
-import com.yourpkg.entity.CGLMaster;
-import org.springframework.data.jpa.domain.Specification;
-
-import jakarta.persistence.criteria.Predicate;
-import java.util.ArrayList;
-import java.util.List;
-
-public class CGLSpecification {
-
-    public static Specification<CGLMaster> build(List<FilterRequest> filters) {
-
-        return (root, query, cb) -> {
-            List<Predicate> predicates = new ArrayList<>();
-
-            for (FilterRequest filter : filters) {
-
-                String field = filter.getField();
-                String operator = filter.getOperator();
-                String value = filter.getValue();
-
-                if (value == null || value.isBlank()) {
-                    continue;
-                }
-
-                if ("contains".equalsIgnoreCase(operator)) {
-                    predicates.add(
-                        cb.like(
-                            cb.lower(root.get(field)),
-                            "%" + value.toLowerCase() + "%"
-                        )
-                    );
-                } 
-                else if ("equals".equalsIgnoreCase(operator)) {
-                    predicates.add(
-                        cb.equal(root.get(field), value)
-                    );
-                }
-            }
-
-            return cb.and(predicates.toArray(new Predicate[0]));
-        };
-    }
-}
-
+CalenderConfigModel findFirstByOrderByIdDesc();
 
 @Override
-public PaginatedResponseDTO<CGLMaster> getCGLs(SearchRequest request) {
-
-    PageRequest pageRequest =
-            PageRequest.of(request.getPage(), request.getSize());
-
-    Page<CGLMaster> pageResult;
-
-    if (request.getFilters() == null || request.getFilters().isEmpty()) {
-        pageResult = cglMasterRepository.findAll(pageRequest);
-    } else {
-        pageResult = cglMasterRepository.findAll(
-                CGLSpecification.build(request.getFilters()),
-                pageRequest
-        );
-    }
-
-    return PaginatedResponseDTO.<CGLMaster>builder()
-            .content(pageResult.getContent())
-            .totalElements(pageResult.getTotalElements())
-            .totalPages(pageResult.getTotalPages())
-            .size(pageResult.getSize())
-            .page(pageResult.getNumber())
-            .success(true)
-            .message("Operation completed successfully")
-            .build();
-}
+	public CalenderConfigModel getCalenderConfig() {
+		return calenderConfigRepository.findFirstByOrderByIdDesc();
+	}
 
 
+@GetMapping("/calendar-configuration")
+	public CalenderConfigModel getCalenderConfig(@RequestHeader("Authorization") String authorizationHeader) {
+		return service.getCalenderConfig();
+	}
 
-@PostMapping("/cgls")
-public PaginatedResponseDTO<CGLMaster> getCGLs(
-        @RequestHeader("Authorization") String authorizationHeader,
-        @RequestBody SearchRequest request
-) {
-    return commonMasterService.getCGLs(request);
-}
+"data": {
+        "id": 41,
+        "yearStartDate": "2025-04-01",
+        "yearEndDate": "2026-03-31",
+        "remarks": "ewfew"
+    },
