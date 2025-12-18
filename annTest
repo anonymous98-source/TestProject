@@ -1,4 +1,12 @@
-
+PaginatedResponseDto<CGLMaster> response = new PaginatedResponseDto<>();
+response.setContent(pageResult.getContent());
+response.setTotalElements(pageResult.getTotalElements());
+response.setTotalPages(pageResult.getTotalPages());
+response.setSize(pageResult.getSize());
+response.setPage(pageResult.getNumber());
+response.setSuccess(true);
+response.setMessage("Operation completed successfully");
+return response; 
 
 import lombok.Getter;
 import lombok.Setter;
