@@ -90,3 +90,31 @@ public class CalenderConfigModel {
     @Column(name = "REQUESTEDBY", length = 50)
     private String requestedBy;
 }
+
+
+
+// private void handleUpdate(CommonReq request) throws JsonProcessingException {
+    //     String targetId = request.getTargetId();
+    //     if (targetId == null || targetId.isBlank()) {
+    //         throw new IllegalArgumentException("Target ID is required for an UPDATE operation.");
+    //     }
+
+    //     log.info("{}","Fetching existing entry");
+    //     CalenderConfigModel existingCalenderConfig = calenderConfigRepository.findFirstByOrderByIdDesc()
+    //             .orElseThrow(() -> new ResourceNotFoundException(
+    //                     "Entry Not Found"));
+
+    //     CalenderConfigModel updates = objectMapper.readValue(request.getPayload(), CalenderConfigModel.class);
+
+
+    //     existingCalenderConfig.setYearStartDate(updates.getYearStartDate());
+    //     existingCalenderConfig.setYearEndDate(updates.getYearEndDate());
+    //     existingCalenderConfig.setRemarks(updates.getRemarks());
+    //     existingCalenderConfig.setApprovedBy(request.getExecutorId());
+    //     existingCalenderConfig.setApprovedAt(request.getExecutionDate());
+    //     existingCalenderConfig.setRequestedBy(request.getCreatorId());
+    //     existingCalenderConfig.setRequestedAt(request.getReqDate());
+
+    //     calenderConfigRepository.save(existingCalenderConfig);
+    //     log.info("{}","Successfully updated Calender Configuration");
+    // }
