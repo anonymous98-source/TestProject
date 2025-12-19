@@ -25,3 +25,68 @@
        CalenderConfigModel savedCalenderConfig = calenderConfigRepository.save(calenderConfigModel);
        log.info("Succesfully added new calender config: {}", savedCalenderConfig.getYearStartDate() + " " + savedCalenderConfig.getYearEndDate());
    }
+
+
+ */
+@Entity
+@Table(name = "CALENDER_CONFIG")
+@Data
+public class CalenderConfigModel {
+
+    /**
+     * The unique identifier for the calendar configuration record.
+     * This field serves as the primary key for the CALENDER_CONFIG table.
+     */
+    @Id
+    @Column(name = "ID")
+    private Long id;
+
+    /**
+     * The start date of the configured financial year.
+     * This field is mandatory and cannot be null.
+     */
+    @Column(name = "YEAR_START_DATE", nullable = false)
+    private LocalDate yearStartDate;
+
+    /**
+     * The end date of the configured financial year.
+     * This field is mandatory and cannot be null.
+     */
+    @Column(name = "YEAR_END_DATE", nullable = false)
+    private LocalDate yearEndDate;
+
+    /**
+     * Any relevant remarks or comments concerning this calendar configuration.
+     * This field is mandatory and has a maximum length of 255 characters.
+     */
+    @Column(name = "REMARKS", nullable = false, length = 255)
+    private String remarks;
+
+    /**
+     * The timestamp indicating when this calendar configuration was approved.
+     * Can be null if not yet approved.
+     */
+    @Column(name = "APPROVEDAT")
+    private LocalDateTime approvedAt;
+
+    /**
+     * The user ID or name of the individual who approved the configuration.
+     * Can be null if not yet approved. Maximum length is 50 characters.
+     */
+    @Column(name = "APPROVEDBY", length = 50)
+    private String approvedBy;
+
+    /**
+     * The timestamp indicating when this calendar configuration was requested.
+     * Can be null.
+     */
+    @Column(name = "REQUESTEDAT")
+    private LocalDateTime requestedAt;
+
+    /**
+     * The user ID or name of the individual who requested the configuration.
+     * Can be null. Maximum length is 50 characters.
+     */
+    @Column(name = "REQUESTEDBY", length = 50)
+    private String requestedBy;
+}
