@@ -1,160 +1,37 @@
-package com.kpmg.filehash.ui;
+flowchart TD
 
-import com.kpmg.filehash.constants.HashAlgorithm;
-import com.kpmg.filehash.service.HashService;
+%% --- KI MODULE FLOW ---
 
-import javax.swing.*;
-import javax.swing.border.EmptyBorder;
-import java.awt.*;
-import java.awt.datatransfer.StringSelection;
-import java.io.File;
+subgraph KI_Module[KI Module Flow]
 
-public class FileHashGenerator extends JFrame {
+A1[ORMD Maker<br/>Creates KI] --> A2[ORMD Checker<br/>Approves / Rejects]
 
-    private JTextField fileField;
-    private JComboBox<HashAlgorithm> algoBox;
-    private JTextArea resultArea;
-    private JProgressBar progressBar;
-    private File selectedFile;
+A2 -->|Approved| A3[Department Maker & Checker<br/>View KI]
 
-    public FileHashGenerator() {
-        setTitle("File Hash Generator");
-        setSize(650, 420);
-        setLocationRelativeTo(null);
-        setDefaultCloseOperation(EXIT_ON_CLOSE);
+A3 --> A4[Department Maker<br/>Adds KI Data
+• Backend Upload
+• CSV Upload
+• Web Entry]
 
-        initUI();
-    }
+A4 --> A5[Department Checker<br/>Final Approval]
 
-    private void initUI() {
-        JPanel root = new JPanel(new BorderLayout(15, 15));
-        root.setBorder(new EmptyBorder(15, 15, 15, 15));
-        setContentPane(root);
+A5 --> A6[Final KI Sent for Reporting]
 
-        /* ---------- FILE PANEL ---------- */
-        JPanel filePanel = new JPanel(new BorderLayout(10, 10));
-        fileField = new JTextField();
-        fileField.setEditable(false);
+A2 -->|Rejected| A1
 
-        JButton browseBtn = new JButton("Browse");
-        browseBtn.addActionListener(e -> chooseFile());
+end
 
-        filePanel.add(fileField, BorderLayout.CENTER);
-        filePanel.add(browseBtn, BorderLayout.EAST);
 
-        root.add(filePanel, BorderLayout.NORTH);
+%% --- IMM MODULE FLOW ---
 
-        /* ---------- CENTER PANEL ---------- */
-        JPanel centerPanel = new JPanel();
-        centerPanel.setLayout(new BoxLayout(centerPanel, BoxLayout.Y_AXIS));
-        centerPanel.setBorder(new EmptyBorder(10, 0, 10, 0));
+subgraph IMM_Module[IMM Module Flow]
 
-        JPanel algoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 5));
-        algoBox = new JComboBox<>(HashAlgorithm.values());
+B1[Incident Owner<br/>Creates & Reports Incident]
+--> B2[Reviewer<br/>Reviews]
 
-        JButton generateBtn = new JButton("Generate Hash");
-        generateBtn.addActionListener(e -> generateHash());
+B2 --> B3[Approver<br/>From Different Branch]
 
-        algoPanel.add(new JLabel("Algorithm:"));
-        algoPanel.add(algoBox);
-        algoPanel.add(generateBtn);
+B3 -->|Approved| B4[Sent for Recommendation/Closure]
+B3 -->|Rejected| B2
 
-        centerPanel.add(algoPanel);
-        centerPanel.add(Box.createVerticalStrut(10));
-
-        /* ---------- RESULT AREA ---------- */
-        resultArea = new JTextArea(4, 40);
-        resultArea.setEditable(false);
-        resultArea.setLineWrap(true);
-        resultArea.setWrapStyleWord(true);
-
-        JScrollPane resultScroll = new JScrollPane(resultArea);
-        resultScroll.setBorder(
-                BorderFactory.createTitledBorder("Result Hash")
-        );
-
-        centerPanel.add(resultScroll);
-        centerPanel.add(Box.createVerticalStrut(15));
-
-        /* ---------- PROGRESS BAR ---------- */
-        progressBar = new JProgressBar(0, 100);
-        progressBar.setStringPainted(true);
-        centerPanel.add(progressBar);
-
-        root.add(centerPanel, BorderLayout.CENTER);
-
-        /* ---------- BOTTOM PANEL ---------- */
-        JPanel bottomPanel = new JPanel(new BorderLayout(10, 10));
-
-        JButton copyBtn = new JButton("Copy to Clipboard");
-        copyBtn.addActionListener(e -> copyHash());
-
-        JLabel footer = new JLabel("rugved.dev");
-        footer.setForeground(Color.GRAY);
-
-        bottomPanel.add(copyBtn, BorderLayout.WEST);
-        bottomPanel.add(footer, BorderLayout.EAST);
-
-        root.add(bottomPanel, BorderLayout.SOUTH);
-    }
-
-    private void chooseFile() {
-        JFileChooser chooser = new JFileChooser();
-        if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-            selectedFile = chooser.getSelectedFile();
-            fileField.setText(selectedFile.getAbsolutePath());
-        }
-    }
-
-    private void generateHash() {
-        if (selectedFile == null) {
-            JOptionPane.showMessageDialog(this, "Please select a file.");
-            return;
-        }
-
-        resultArea.setText("");
-        progressBar.setValue(0);
-
-        SwingWorker<String, Integer> worker = new SwingWorker<>() {
-            @Override
-            protected String doInBackground() throws Exception {
-                return HashService.generateHash(
-                        selectedFile,
-                        ((HashAlgorithm) algoBox.getSelectedItem()).getAlgorithm(),
-                        this::setProgress
-                );
-            }
-
-            @Override
-            protected void done() {
-                try {
-                    resultArea.setText(get());
-                } catch (Exception e) {
-                    JOptionPane.showMessageDialog(
-                            FileHashGenerator.this,
-                            "Error: " + e.getMessage()
-                    );
-                }
-            }
-        };
-
-        worker.addPropertyChangeListener(evt -> {
-            if ("progress".equals(evt.getPropertyName())) {
-                progressBar.setValue((Integer) evt.getNewValue());
-            }
-        });
-
-        worker.execute();
-    }
-
-    private void copyHash() {
-        if (!resultArea.getText().isEmpty()) {
-            Toolkit.getDefaultToolkit()
-                    .getSystemClipboard()
-                    .setContents(
-                            new StringSelection(resultArea.getText()),
-                            null
-                    );
-        }
-    }
-}
+end
