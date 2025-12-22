@@ -1,30 +1,122 @@
+@PatchMapping("/update-request")
+	public CommonReq updateRequestStatus(
+			@RequestHeader("Authorization") String token,
+			@RequestBody ProcessRequestDto processRequestDto
+	) throws JsonProcessingException {
+		String executorId = jwtUtil.getUserIdFromToken(token);
+		// The service layer throws a ResourceNotFoundException if the optional is
+		// empty,
+		// which is caught by the GlobalExceptionHandler.
+		return requestService.updateRequestStatus(processRequestDto, executorId).get();
+	}
 
-private void handleAdd(CommonReq request) {
 
-    // 1. Validate payload presence
-    if (request.getPayload() == null) {
-        throw new IllegalArgumentException("Payload is required for ADD operation");
+
+
+@Table(name = "COMMON_REQ")
+public class CommonReq {
+    /**
+     * The unique identifier for the request.
+     * Generated using a sequence "COMMON_REQ_SEQ".
+     */
+    @Id
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "COMMON_REQ_id_gen")
+    @SequenceGenerator(name = "COMMON_REQ_id_gen", sequenceName = "COMMON_REQ_SEQ", allocationSize = 1)
+    @Column(name = "REQ_ID", nullable = false)
+    private Long id;
+
+    /**
+     * The type of request (e.g., New, Update, Delete).
+     * Mapped to the "REQ_TYPE" column. Handled by an auto-applied JPA converter.
+     */
+    @Column(name = "REQ_TYPE", nullable = false, length = 20)
+    private RequestType reqType;
+
+    /**
+     * The specific type of change associated with the request.
+     * Mapped to the "CHANGE_TYPE" column. Handled by an auto-applied JPA converter.
+     */
+    @Column(name = "CHANGE_TYPE", nullable = false, length = 2)
+    private ChangeType changeType;
+
+    /**
+     * The current status of the request (e.g., PENDING, APPROVED, REJECTED).
+     * Mapped to the "REQ_STATUS" column. Handled by an auto-applied JPA converter.
+     */
+    @Column(name = "REQ_STATUS", nullable = false, length = 2)
+    private RequestStatus reqStatus;
+
+    /**
+     * The timestamp when the request was created.
+     * Automatically set upon entity creation and is not updatable.
+     */
+    @CreationTimestamp
+    @Column(name = "REQ_DATE", nullable = false, updatable = false)
+    private LocalDateTime reqDate;
+
+    /**
+     * The ID of the user who created the request.
+     * Mapped to the "CREATOR_ID" column.
+     */
+    @Column(name = "CREATOR_ID", nullable = false, length = 12)
+    private String creatorId;
+
+    /**
+     * The timestamp when the request was executed or processed.
+     * Mapped to the "EXECUTION_DATE" column.
+     */
+    @Column(name = "EXECUTION_DATE")
+    private LocalDateTime executionDate;
+
+    /**
+     * General remarks regarding the execution process.
+     * Stored as a Large Object (LOB) in the "EXECUTION_REMARKS" column.
+     */
+    @Lob
+    @Column(name = "EXECUTION_REMARKS")
+    private String executionRemarks;
+
+    /**
+     * The ID of the user who executed or processed the request.
+     * Mapped to the "EXECUTOR_ID" column.
+     */
+    @Column(name = "EXECUTOR_ID", length = 12)
+    private String executorId;
+
+    /**
+     * Specific remarks provided by the executor.
+     * Mapped to the "EXECUTOR_REMARKS" column.
+     */
+    @Column(name = "EXECUTOR_REMARKS", length = 500)
+    private String executorRemarks;
+
+    /**
+     * The request's main data payload, typically a JSON string.
+     * Stored as a Large Object (LOB) in the "PAYLOAD" column.
+     */
+    @Lob
+    @Column(name = "PAYLOAD", nullable = false)
+    private String payload;
+
+    /**
+     * An identifier for the target entity affected by the request (e.g., account number, user ID).
+     * Mapped to the "TARGET_ID" column.
+     */
+    @Column(name = "TARGET_ID", length = 4000)
+    private String targetId;
+
+
+    /**
+     * Retrieves the payload and marks it for raw JSON serialization.
+     *
+     * When this entity is serialized to JSON (e.g., in a REST API response),
+     * the value returned by this getter will be inserted directly as raw JSON,
+     * assuming the {@link #payload} field already contains a valid JSON string.
+     *
+     * @return The raw JSON payload string.
+     */
+    @JsonRawValue
+    public String getPayload() {
+        return payload;
     }
-
-    // 2. Convert payload object → entity (NOT readValue)
-    CalenderConfigModel model =
-        objectMapper.convertValue(request.getPayload(), CalenderConfigModel.class);
-
-    // 3. Force INSERT (critical)
-    model.setId(null);
-
-    // 4. Mandatory audit fields
-    model.setApprovedBy(request.getExecutorId());
-    model.setApprovedAt(request.getExecutionDate());
-    model.setRequestedBy(request.getCreatorId());
-    model.setRequestedAt(request.getReqDate());
-
-    // 5. Persist
-    calenderConfigRepository.save(model);
-
-    log.info(
-        "Calendar config added successfully: {} to {}",
-        model.getYearStartDate(),
-        model.getYearEndDate()
-    );
-} 
+}
