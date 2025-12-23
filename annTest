@@ -1,140 +1,124 @@
-package com.tcs.fincore.CommonMasterService.enums;
+package com.tcs.fincore.CommonMasterService.specification;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
+import com.tcs.fincore.CommonMasterService.dto.FilterRequest;
+import com.tcs.fincore.CommonMasterService.enums.Operators;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.Path;
+import jakarta.persistence.criteria.Predicate;
+import org.springframework.data.jpa.domain.Specification;
 
-public enum Operator {
+import java.util.ArrayList;
+import java.util.List;
 
-    // ---------- STRING OPERATORS ----------
-    CONTAINS,
-    NOT_CONTAINS,
-    STARTS_WITH,
-    ENDS_WITH,
+public class GenericSpecification<T> {
 
-    // ---------- EQUALITY ----------
-    EQUALS,
-    NOT_EQUALS,
+    public static <T> Specification<T> build(List<FilterRequest> filters) {
 
-    // ---------- NULL CHECK ----------
-    IS_NULL,
-    IS_NOT_NULL,
+        return (root, query, cb) -> {
 
-    // ---------- COLLECTION ----------
-    IN;
+            if (filters == null || filters.isEmpty()) {
+                return cb.conjunction();
+            }
 
-    /**
-     * Used by Jackson while deserializing JSON.
-     * Converts UI/operator strings to enum safely.
-     */
-    @JsonCreator
-    public static Operator fromJson(String value) {
-        return from(value);
-    }
+            List<Predicate> predicates = new ArrayList<>();
 
-    /**
-     * Centralized operator mapping.
-     * UI labels → backend enum.
-     */
-    public static Operator from(String value) {
+            for (FilterRequest filter : filters) {
 
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("Operator cannot be null or empty");
-        }
+                String field = filter.getField();
+                Operators operator = Operators.from(filter.getOperator());
+                Object value = filter.getValue();
 
-        return switch (value.toLowerCase()) {
+                // skip invalid filters
+                if (operator == null) {
+                    continue;
+                }
 
-            // ---------- STRING ----------
-            case "contains" ->
-                    CONTAINS;
+                if (value == null && operator != Operators.IS_NULL && operator != Operators.IS_NOT_NULL) {
+                    continue;
+                }
 
-            case "does not contain", "not_contains" ->
-                    NOT_CONTAINS;
+                if (value != null && value.toString().isBlank()
+                        && operator != Operators.IS_NULL
+                        && operator != Operators.IS_NOT_NULL) {
+                    continue;
+                }
 
-            case "starts with", "starts_with" ->
-                    STARTS_WITH;
+                Path<?> path = root.get(field);
+                Class<?> type = path.getJavaType();
 
-            case "ends with", "ends_with" ->
-                    ENDS_WITH;
+                switch (operator) {
 
-            // ---------- EQUALITY ----------
-            case "is", "equals" ->
-                    EQUALS;
+                    case CONTAINS ->
+                            predicates.add(cb.like(
+                                    cb.lower(path.as(String.class)),
+                                    "%" + value.toString().toLowerCase() + "%"
+                            ));
 
-            case "is not", "not equals", "not_equals" ->
-                    NOT_EQUALS;
+                    case NOT_CONTAINS ->
+                            predicates.add(cb.notLike(
+                                    cb.lower(path.as(String.class)),
+                                    "%" + value.toString().toLowerCase() + "%"
+                            ));
 
-            // ---------- NULL ----------
-            case "is empty", "is_null" ->
-                    IS_NULL;
+                    case STARTS_WITH ->
+                            predicates.add(cb.like(
+                                    cb.lower(path.as(String.class)),
+                                    value.toString().toLowerCase() + "%"
+                            ));
 
-            case "is not empty", "is_not_null" ->
-                    IS_NOT_NULL;
+                    case ENDS_WITH ->
+                            predicates.add(cb.like(
+                                    cb.lower(path.as(String.class)),
+                                    "%" + value.toString().toLowerCase()
+                            ));
 
-            // ---------- IN ----------
-            case "is any of", "in" ->
-                    IN;
+                    case EQUALS ->
+                            predicates.add(cb.equal(
+                                    path, convert(type, value)
+                            ));
 
-            default ->
-                    throw new IllegalArgumentException(
-                            "Unsupported operator: " + value
-                    );
+                    case NOT_EQUALS ->
+                            predicates.add(cb.notEqual(
+                                    path, convert(type, value)
+                            ));
+
+                    case IS_NULL ->
+                            predicates.add(cb.isNull(path));
+
+                    case IS_NOT_NULL ->
+                            predicates.add(cb.isNotNull(path));
+
+                    case IN -> {
+                        CriteriaBuilder.In<Object> in = cb.in(path);
+                        ((List<?>) value)
+                                .forEach(v -> in.value(convert(type, v)));
+                        predicates.add(in);
+                    }
+                }
+            }
+
+            return cb.and(predicates.toArray(new Predicate[0]));
         };
     }
-} 
 
+    private static Object convert(Class<?> type, Object value) {
 
+        if (value == null) return null;
 
+        String v = value.toString();
 
+        if (type == Integer.class || type == int.class)
+            return Integer.valueOf(v);
 
+        if (type == Long.class || type == long.class)
+            return Long.valueOf(v);
 
-Operator op = filter.getOperator();
+        if (type == Boolean.class || type == boolean.class)
+            return Boolean.valueOf(v);
 
-switch (op) {
+        if (Enum.class.isAssignableFrom(type))
+            return Enum.valueOf((Class<Enum>) type, v);
 
-    case CONTAINS ->
-        predicates.add(cb.like(
-            cb.lower(path.as(String.class)),
-            "%" + value.toString().toLowerCase() + "%"
-        ));
-
-    case NOT_CONTAINS ->
-        predicates.add(cb.notLike(
-            cb.lower(path.as(String.class)),
-            "%" + value.toString().toLowerCase() + "%"
-        ));
-
-    case STARTS_WITH ->
-        predicates.add(cb.like(
-            cb.lower(path.as(String.class)),
-            value.toString().toLowerCase() + "%"
-        ));
-
-    case ENDS_WITH ->
-        predicates.add(cb.like(
-            cb.lower(path.as(String.class)),
-            "%" + value.toString().toLowerCase()
-        ));
-
-    case EQUALS ->
-        predicates.add(cb.equal(
-            path, convert(type, value)
-        ));
-
-    case NOT_EQUALS ->
-        predicates.add(cb.notEqual(
-            path, convert(type, value)
-        ));
-
-    case IS_NULL ->
-        predicates.add(cb.isNull(path));
-
-    case IS_NOT_NULL ->
-        predicates.add(cb.isNotNull(path));
-
-    case IN -> {
-        CriteriaBuilder.In<Object> in = cb.in(path);
-        ((List<?>) value)
-                .forEach(v -> in.value(convert(type, v)));
-        predicates.add(in);
+        return v;
     }
-}
-
+} 
