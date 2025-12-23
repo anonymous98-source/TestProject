@@ -1,6 +1,6 @@
 flowchart LR
     %% ======================
-    %% ORAA HLD DIAGRAM
+    %% ORAA - HLD
     %% ======================
 
     subgraph ORAA["ORAA - Operational Risk Analysis Application"]
@@ -14,18 +14,22 @@ flowchart LR
             %% Web Tier
             UAT_WEB["Web Server
             IP: 10.191.153.140
-            UI: /imm/html/uat/ui"]
+            UI Deployment Path:
+            /imm/html/uat/ui"]
 
             %% App Tier
             subgraph UAT_APP["Application Server
             IP: 10.191.159.96"]
                 direction TB
-                UAT_IMM["IMM Module
-                /var/imm/uat"]
-                UAT_KI["KI Module
-                /var/ki/uat"]
-                UAT_ELD["ELD Module
-                /var/eld/sit"]
+
+                UAT_IMM["IMM Module (JAR)
+                Path: /var/imm/uat"]
+
+                UAT_KI["KI Module (JAR)
+                Path: /var/ki/uat"]
+
+                UAT_ELD["ELD Module (JAR)
+                Path: /var/eld/sit"]
             end
 
             %% DB Tier
@@ -33,8 +37,8 @@ flowchart LR
             IP: 10.191.156.93"]
 
             %% Flow
-            UAT_WEB --> UAT_APP
-            UAT_APP --> UAT_DB
+            UAT_WEB -->|HTTP/HTTPS| UAT_APP
+            UAT_APP -->|JDBC| UAT_DB
         end
 
         %% ======================
@@ -46,18 +50,22 @@ flowchart LR
             %% Web Tier
             PROD_WEB["Web Server
             IP: 10.189.32.220
-            UI: /home/WebAdmin/oraa"]
+            UI Deployment Path:
+            /home/WebAdmin/oraa"]
 
             %% App Tier
             subgraph PROD_APP["Application Server
             IP: 10.191.68.162"]
                 direction TB
-                PROD_IMM["IMM Module
-                /home/AppAdmin/oraa/imm"]
-                PROD_KI["KI Module
-                /home/AppAdmin/oraa/ki"]
-                PROD_ELD["ELD Module
-                /home/AppAdmin/oraa/eld"]
+
+                PROD_IMM["IMM Module (JAR)
+                Path: /home/AppAdmin/oraa/imm"]
+
+                PROD_KI["KI Module (JAR)
+                Path: /home/AppAdmin/oraa/ki"]
+
+                PROD_ELD["ELD Module (JAR)
+                Path: /home/AppAdmin/oraa/eld"]
             end
 
             %% DB Tier
@@ -65,8 +73,8 @@ flowchart LR
             IP: 10.191.213.232"]
 
             %% Flow
-            PROD_WEB --> PROD_APP
-            PROD_APP --> PROD_DB
+            PROD_WEB -->|HTTP/HTTPS| PROD_APP
+            PROD_APP -->|JDBC| PROD_DB
         end
 
     end
