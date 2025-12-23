@@ -9,70 +9,64 @@ flowchart LR
         %% UAT ENVIRONMENT
         %% ======================
         subgraph UAT["UAT Environment"]
-            direction TB
+            direction LR
 
+            %% Web Tier
             UAT_WEB["Web Server
             IP: 10.191.153.140
-            UI Path: /imm/html/uat/ui"]
+            UI: /imm/html/uat/ui"]
 
-            UAT_APP["Application Server
+            %% App Tier
+            subgraph UAT_APP["Application Server
             IP: 10.191.159.96"]
+                direction TB
+                UAT_IMM["IMM Module
+                /var/imm/uat"]
+                UAT_KI["KI Module
+                /var/ki/uat"]
+                UAT_ELD["ELD Module
+                /var/eld/sit"]
+            end
 
+            %% DB Tier
             UAT_DB["Database Server
             IP: 10.191.156.93"]
 
-            %% UAT Modules
-            UAT_IMM["IMM Module
-            /var/imm/uat"]
-
-            UAT_KI["KI Module
-            /var/ki/uat"]
-
-            UAT_ELD["ELD Module
-            /var/eld/sit"]
-
-            %% Connections
+            %% Flow
             UAT_WEB --> UAT_APP
             UAT_APP --> UAT_DB
-
-            UAT_APP --> UAT_IMM
-            UAT_APP --> UAT_KI
-            UAT_APP --> UAT_ELD
         end
 
         %% ======================
         %% PRODUCTION ENVIRONMENT
         %% ======================
         subgraph PROD["Production Environment"]
-            direction TB
+            direction LR
 
+            %% Web Tier
             PROD_WEB["Web Server
             IP: 10.189.32.220
-            UI Path: /home/WebAdmin/oraa"]
+            UI: /home/WebAdmin/oraa"]
 
-            PROD_APP["Application Server
+            %% App Tier
+            subgraph PROD_APP["Application Server
             IP: 10.191.68.162"]
+                direction TB
+                PROD_IMM["IMM Module
+                /home/AppAdmin/oraa/imm"]
+                PROD_KI["KI Module
+                /home/AppAdmin/oraa/ki"]
+                PROD_ELD["ELD Module
+                /home/AppAdmin/oraa/eld"]
+            end
 
+            %% DB Tier
             PROD_DB["Database Server
             IP: 10.191.213.232"]
 
-            %% PROD Modules
-            PROD_IMM["IMM Module
-            /home/AppAdmin/oraa/imm"]
-
-            PROD_KI["KI Module
-            /home/AppAdmin/oraa/ki"]
-
-            PROD_ELD["ELD Module
-            /home/AppAdmin/oraa/eld"]
-
-            %% Connections
+            %% Flow
             PROD_WEB --> PROD_APP
             PROD_APP --> PROD_DB
-
-            PROD_APP --> PROD_IMM
-            PROD_APP --> PROD_KI
-            PROD_APP --> PROD_ELD
         end
 
     end
