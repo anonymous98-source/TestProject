@@ -1,37 +1,78 @@
-flowchart TD
+flowchart LR
+    %% ======================
+    %% ORAA HLD DIAGRAM
+    %% ======================
 
-%% --- KI MODULE FLOW ---
+    subgraph ORAA["ORAA - Operational Risk Analysis Application"]
 
-subgraph KI_Module[KI Module Flow]
+        %% ======================
+        %% UAT ENVIRONMENT
+        %% ======================
+        subgraph UAT["UAT Environment"]
+            direction TB
 
-A1[ORMD Maker<br/>Creates KI] --> A2[ORMD Checker<br/>Approves / Rejects]
+            UAT_WEB["Web Server
+            IP: 10.191.153.140
+            UI Path: /imm/html/uat/ui"]
 
-A2 -->|Approved| A3[Department Maker & Checker<br/>View KI]
+            UAT_APP["Application Server
+            IP: 10.191.159.96"]
 
-A3 --> A4[Department Maker<br/>Adds KI Data
-• Backend Upload
-• CSV Upload
-• Web Entry]
+            UAT_DB["Database Server
+            IP: 10.191.156.93"]
 
-A4 --> A5[Department Checker<br/>Final Approval]
+            %% UAT Modules
+            UAT_IMM["IMM Module
+            /var/imm/uat"]
 
-A5 --> A6[Final KI Sent for Reporting]
+            UAT_KI["KI Module
+            /var/ki/uat"]
 
-A2 -->|Rejected| A1
+            UAT_ELD["ELD Module
+            /var/eld/sit"]
 
-end
+            %% Connections
+            UAT_WEB --> UAT_APP
+            UAT_APP --> UAT_DB
 
+            UAT_APP --> UAT_IMM
+            UAT_APP --> UAT_KI
+            UAT_APP --> UAT_ELD
+        end
 
-%% --- IMM MODULE FLOW ---
+        %% ======================
+        %% PRODUCTION ENVIRONMENT
+        %% ======================
+        subgraph PROD["Production Environment"]
+            direction TB
 
-subgraph IMM_Module[IMM Module Flow]
+            PROD_WEB["Web Server
+            IP: 10.189.32.220
+            UI Path: /home/WebAdmin/oraa"]
 
-B1[Incident Owner<br/>Creates & Reports Incident]
---> B2[Reviewer<br/>Reviews]
+            PROD_APP["Application Server
+            IP: 10.191.68.162"]
 
-B2 --> B3[Approver<br/>From Different Branch]
+            PROD_DB["Database Server
+            IP: 10.191.213.232"]
 
-B3 -->|Approved| B4[Sent for Recommendation/Closure]
-B3 -->|Rejected| B2
+            %% PROD Modules
+            PROD_IMM["IMM Module
+            /home/AppAdmin/oraa/imm"]
 
-end
+            PROD_KI["KI Module
+            /home/AppAdmin/oraa/ki"]
+
+            PROD_ELD["ELD Module
+            /home/AppAdmin/oraa/eld"]
+
+            %% Connections
+            PROD_WEB --> PROD_APP
+            PROD_APP --> PROD_DB
+
+            PROD_APP --> PROD_IMM
+            PROD_APP --> PROD_KI
+            PROD_APP --> PROD_ELD
+        end
+
+    end
