@@ -1,78 +1,284 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-	<modelVersion>4.0.0</modelVersion>
-	<parent>
-		<groupId>org.springframework.boot</groupId>
-		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>4.0.1</version>
-		<relativePath/> <!-- lookup parent from repository -->
-	</parent>
-	<groupId>com.kpmg</groupId>
-	<artifactId>email</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
-	<name>email</name>
-	<description>Demo project email automation</description>
-	<url/>
-	<licenses>
-		<license/>
-	</licenses>
-	<developers>
-		<developer/>
-	</developers>
-	<scm>
-		<connection/>
-		<developerConnection/>
-		<tag/>
-		<url/>
-	</scm>
-	<properties>
-		<java.version>25</java.version>
-	</properties>
-    <dependencies>
+Perfect 👍
+Now I’ll do this specifically for YOUR pom.xml and tell you exactly what to download via Chrome and where to put it in .m2, so Maven works offline.
 
-        <!-- https://mvnrepository.com/artifact/org.springframework.boot/spring-boot-starter-web -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-            <version>4.0.1</version>
-        </dependency>
+> ⚠️ Important upfront notes (very important for you)
 
-        <!-- Mail -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-mail</artifactId>
-        </dependency>
 
-        <!-- Validation -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-        </dependency>
 
-        <!-- Thymeleaf for HTML Emails -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-thymeleaf</artifactId>
-        </dependency>
+1. Spring Boot 4.0.1 is NOT released yet (as of now).
 
-    </dependencies>
 
-	<build>
-		<plugins>
-			<plugin>
-				<groupId>org.springframework.boot</groupId>
-				<artifactId>spring-boot-maven-plugin</artifactId>
-			</plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <source>7</source>
-                    <target>7</target>
-                </configuration>
-            </plugin>
-        </plugins>
-	</build>
+2. Java 25 is NOT supported by Spring Boot.
 
-</project>
+
+3. maven-compiler-plugin is set to Java 7, which is incompatible with Spring Boot.
+
+
+
+👉 If you keep these values, Maven will never work, even if dependencies are present.
+
+
+---
+
+✅ STEP 0: Fix your pom.xml (MANDATORY)
+
+🔴 Change these first
+
+<parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.2.5</version>   <!-- ✅ Stable -->
+</parent>
+
+<properties>
+    <java.version>17</java.version> <!-- ✅ LTS -->
+</properties>
+
+🔴 Fix compiler plugin
+
+<plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-compiler-plugin</artifactId>
+    <configuration>
+        <source>17</source>
+        <target>17</target>
+    </configuration>
+</plugin>
+
+👉 Do NOT proceed unless you do this.
+
+
+---
+
+✅ STEP 1: Dependencies YOU NEED (Exact List)
+
+From your pom.xml, Maven needs:
+
+1️⃣ Parent POM (VERY IMPORTANT)
+
+org.springframework.boot:spring-boot-starter-parent:3.2.5
+
+Download from Chrome:
+
+https://repo1.maven.org/maven2/org/springframework/boot/spring-boot-starter-parent/3.2.5/
+
+📥 Download:
+
+spring-boot-starter-parent-3.2.5.pom
+
+
+📂 Place here:
+
+.m2/repository/org/springframework/boot/spring-boot-starter-parent/3.2.5/
+
+
+---
+
+2️⃣ Spring Boot Dependencies BOM
+
+org.springframework.boot:spring-boot-dependencies:3.2.5
+
+📥 Download:
+
+spring-boot-dependencies-3.2.5.pom
+
+📂 Path:
+
+.m2/repository/org/springframework/boot/spring-boot-dependencies/3.2.5/
+
+
+---
+
+✅ STEP 2: Starters (Core)
+
+3️⃣ Web Starter
+
+org.springframework.boot:spring-boot-starter-web:3.2.5
+
+📥 Download:
+
+spring-boot-starter-web-3.2.5.jar
+
+spring-boot-starter-web-3.2.5.pom
+
+
+📂 Path:
+
+.m2/repository/org/springframework/boot/spring-boot-starter-web/3.2.5/
+
+
+---
+
+4️⃣ Mail Starter
+
+org.springframework.boot:spring-boot-starter-mail:3.2.5
+
+📥 Download:
+
+spring-boot-starter-mail-3.2.5.jar
+
+spring-boot-starter-mail-3.2.5.pom
+
+
+📂 Path:
+
+.m2/repository/org/springframework/boot/spring-boot-starter-mail/3.2.5/
+
+
+---
+
+5️⃣ Validation Starter
+
+org.springframework.boot:spring-boot-starter-validation:3.2.5
+
+📥 Download:
+
+spring-boot-starter-validation-3.2.5.jar
+
+spring-boot-starter-validation-3.2.5.pom
+
+
+📂 Path:
+
+.m2/repository/org/springframework/boot/spring-boot-starter-validation/3.2.5/
+
+
+---
+
+6️⃣ Thymeleaf Starter
+
+org.springframework.boot:spring-boot-starter-thymeleaf:3.2.5
+
+📥 Download:
+
+spring-boot-starter-thymeleaf-3.2.5.jar
+
+spring-boot-starter-thymeleaf-3.2.5.pom
+
+
+📂 Path:
+
+.m2/repository/org/springframework/boot/spring-boot-starter-thymeleaf/3.2.5/
+
+
+---
+
+✅ STEP 3: REQUIRED Transitive Dependencies (Must-have)
+
+You MUST also download these (Chrome only):
+
+Core Boot
+
+spring-boot
+spring-boot-autoconfigure
+spring-boot-starter
+
+Web stack
+
+spring-web
+spring-webmvc
+spring-context
+spring-core
+spring-beans
+spring-expression
+
+JSON
+
+jackson-core
+jackson-databind
+jackson-annotations
+
+Embedded Server
+
+tomcat-embed-core
+tomcat-embed-websocket
+
+Mail
+
+jakarta.mail
+jakarta.activation
+
+Validation
+
+hibernate-validator
+jakarta.validation-api
+
+Thymeleaf
+
+thymeleaf
+thymeleaf-spring6
+
+📌 Each one needs BOTH
+
+.jar
+
+.pom in its correct folder.
+
+
+
+---
+
+📁 Folder Pattern (Example)
+
+For:
+
+org.springframework:spring-web:6.1.6
+
+Folder:
+
+.m2/repository/org/springframework/spring-web/6.1.6/
+
+Files inside:
+
+spring-web-6.1.6.jar
+spring-web-6.1.6.pom
+
+
+---
+
+✅ STEP 4: Verify Offline Build
+
+Run:
+
+mvn clean package -o
+
+If Maven tries internet ❌ → something missing
+If build starts ✔️ → setup is correct
+
+
+---
+
+🚀 BEST PRACTICE (Strong Recommendation)
+
+Instead of manual pain:
+
+👉 Ask any teammate to zip:
+
+~/.m2/repository/org/springframework
+~/.m2/repository/com/fasterxml
+~/.m2/repository/org/apache
+~/.m2/repository/jakarta
+
+Paste into your .m2.
+
+✔️ 5 minutes
+✔️ Zero errors
+✔️ Industry standard in restricted networks
+
+
+---
+
+❓Next?
+
+If you want, I can:
+
+✅ Give you a ready-to-download ZIP list
+
+✅ Tell you minimum required versions only
+
+✅ Fix any Maven error message you’re seeing
+
+✅ Convert this into a microservice-ready email service
+
+
+Just tell me what you want next.
