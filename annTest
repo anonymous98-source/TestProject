@@ -1,124 +1,26 @@
-package com.tcs.fincore.CommonMasterService.specification;
+MuiMenu: {
+  styleOverrides: {
+    paper: ({ theme }) => ({
+      backdropFilter: 'none',
+      backgroundColor:
+        theme.palette.mode === 'dark'
+          ? theme.palette.background.paper
+          : '#fff',
+      boxShadow: theme.shadows[8],
+      borderRadius: theme.shape.borderRadius,
+    }),
+  },
+}, 
 
-import com.tcs.fincore.CommonMasterService.dto.FilterRequest;
-import com.tcs.fincore.CommonMasterService.enums.Operators;
-import jakarta.persistence.criteria.CriteriaBuilder;
-import jakarta.persistence.criteria.Path;
-import jakarta.persistence.criteria.Predicate;
-import org.springframework.data.jpa.domain.Specification;
 
-import java.util.ArrayList;
-import java.util.List;
-
-public class GenericSpecification<T> {
-
-    public static <T> Specification<T> build(List<FilterRequest> filters) {
-
-        return (root, query, cb) -> {
-
-            if (filters == null || filters.isEmpty()) {
-                return cb.conjunction();
-            }
-
-            List<Predicate> predicates = new ArrayList<>();
-
-            for (FilterRequest filter : filters) {
-
-                String field = filter.getField();
-                Operators operator = Operators.from(filter.getOperator());
-                Object value = filter.getValue();
-
-                // skip invalid filters
-                if (operator == null) {
-                    continue;
-                }
-
-                if (value == null && operator != Operators.IS_NULL && operator != Operators.IS_NOT_NULL) {
-                    continue;
-                }
-
-                if (value != null && value.toString().isBlank()
-                        && operator != Operators.IS_NULL
-                        && operator != Operators.IS_NOT_NULL) {
-                    continue;
-                }
-
-                Path<?> path = root.get(field);
-                Class<?> type = path.getJavaType();
-
-                switch (operator) {
-
-                    case CONTAINS ->
-                            predicates.add(cb.like(
-                                    cb.lower(path.as(String.class)),
-                                    "%" + value.toString().toLowerCase() + "%"
-                            ));
-
-                    case NOT_CONTAINS ->
-                            predicates.add(cb.notLike(
-                                    cb.lower(path.as(String.class)),
-                                    "%" + value.toString().toLowerCase() + "%"
-                            ));
-
-                    case STARTS_WITH ->
-                            predicates.add(cb.like(
-                                    cb.lower(path.as(String.class)),
-                                    value.toString().toLowerCase() + "%"
-                            ));
-
-                    case ENDS_WITH ->
-                            predicates.add(cb.like(
-                                    cb.lower(path.as(String.class)),
-                                    "%" + value.toString().toLowerCase()
-                            ));
-
-                    case EQUALS ->
-                            predicates.add(cb.equal(
-                                    path, convert(type, value)
-                            ));
-
-                    case NOT_EQUALS ->
-                            predicates.add(cb.notEqual(
-                                    path, convert(type, value)
-                            ));
-
-                    case IS_NULL ->
-                            predicates.add(cb.isNull(path));
-
-                    case IS_NOT_NULL ->
-                            predicates.add(cb.isNotNull(path));
-
-                    case IN -> {
-                        CriteriaBuilder.In<Object> in = cb.in(path);
-                        ((List<?>) value)
-                                .forEach(v -> in.value(convert(type, v)));
-                        predicates.add(in);
-                    }
-                }
-            }
-
-            return cb.and(predicates.toArray(new Predicate[0]));
-        };
-    }
-
-    private static Object convert(Class<?> type, Object value) {
-
-        if (value == null) return null;
-
-        String v = value.toString();
-
-        if (type == Integer.class || type == int.class)
-            return Integer.valueOf(v);
-
-        if (type == Long.class || type == long.class)
-            return Long.valueOf(v);
-
-        if (type == Boolean.class || type == boolean.class)
-            return Boolean.valueOf(v);
-
-        if (Enum.class.isAssignableFrom(type))
-            return Enum.valueOf((Class<Enum>) type, v);
-
-        return v;
-    }
-} 
+MuiPopover: {
+  styleOverrides: {
+    paper: ({ theme }) => ({
+      backdropFilter: 'none',
+      backgroundColor:
+        theme.palette.mode === 'dark'
+          ? theme.palette.background.paper
+          : '#fff',
+    }),
+  },
+},
