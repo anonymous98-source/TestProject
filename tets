@@ -1,80 +1,78 @@
-flowchart LR
-    %% ======================
-    %% ORAA - HLD
-    %% ======================
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>4.0.1</version>
+		<relativePath/> <!-- lookup parent from repository -->
+	</parent>
+	<groupId>com.kpmg</groupId>
+	<artifactId>email</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>email</name>
+	<description>Demo project email automation</description>
+	<url/>
+	<licenses>
+		<license/>
+	</licenses>
+	<developers>
+		<developer/>
+	</developers>
+	<scm>
+		<connection/>
+		<developerConnection/>
+		<tag/>
+		<url/>
+	</scm>
+	<properties>
+		<java.version>25</java.version>
+	</properties>
+    <dependencies>
 
-    subgraph ORAA["ORAA - Operational Risk Analysis Application"]
+        <!-- https://mvnrepository.com/artifact/org.springframework.boot/spring-boot-starter-web -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+            <version>4.0.1</version>
+        </dependency>
 
-        %% ======================
-        %% UAT ENVIRONMENT
-        %% ======================
-        subgraph UAT["UAT Environment"]
-            direction LR
+        <!-- Mail -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
 
-            %% Web Tier
-            UAT_WEB["Web Server
-            IP: 10.191.153.140
-            UI Deployment Path:
-            /imm/html/uat/ui"]
+        <!-- Validation -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
 
-            %% App Tier
-            subgraph UAT_APP["Application Server
-            IP: 10.191.159.96"]
-                direction TB
+        <!-- Thymeleaf for HTML Emails -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-thymeleaf</artifactId>
+        </dependency>
 
-                UAT_IMM["IMM Module (JAR)
-                Path: /var/imm/uat"]
+    </dependencies>
 
-                UAT_KI["KI Module (JAR)
-                Path: /var/ki/uat"]
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>7</source>
+                    <target>7</target>
+                </configuration>
+            </plugin>
+        </plugins>
+	</build>
 
-                UAT_ELD["ELD Module (JAR)
-                Path: /var/eld/sit"]
-            end
-
-            %% DB Tier
-            UAT_DB["Database Server
-            IP: 10.191.156.93"]
-
-            %% Flow
-            UAT_WEB -->|HTTP/HTTPS| UAT_APP
-            UAT_APP -->|JDBC| UAT_DB
-        end
-
-        %% ======================
-        %% PRODUCTION ENVIRONMENT
-        %% ======================
-        subgraph PROD["Production Environment"]
-            direction LR
-
-            %% Web Tier
-            PROD_WEB["Web Server
-            IP: 10.189.32.220
-            UI Deployment Path:
-            /home/WebAdmin/oraa"]
-
-            %% App Tier
-            subgraph PROD_APP["Application Server
-            IP: 10.191.68.162"]
-                direction TB
-
-                PROD_IMM["IMM Module (JAR)
-                Path: /home/AppAdmin/oraa/imm"]
-
-                PROD_KI["KI Module (JAR)
-                Path: /home/AppAdmin/oraa/ki"]
-
-                PROD_ELD["ELD Module (JAR)
-                Path: /home/AppAdmin/oraa/eld"]
-            end
-
-            %% DB Tier
-            PROD_DB["Database Server
-            IP: 10.191.213.232"]
-
-            %% Flow
-            PROD_WEB -->|HTTP/HTTPS| PROD_APP
-            PROD_APP -->|JDBC| PROD_DB
-        end
-
-    end
+</project>
