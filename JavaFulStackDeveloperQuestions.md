@@ -1,10 +1,3 @@
-Perfect 👍
-Below is an enhanced, GitHub-ready Markdown version of your document with concise, interview-quality sample answers added.
-Answers are clear, practical, and aligned with 4+ years experience expectations.
-
-You can directly push this as SpringBoot-React-Interview.md.
-
-
 ---
 
 🚀 Spring Boot & React Interview Questions with Sample Answers (4+ Years Experience)
