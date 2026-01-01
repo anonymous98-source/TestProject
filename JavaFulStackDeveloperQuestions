@@ -1,0 +1,45 @@
+For a developer with four years of experience, interview questions will focus on core concepts, practical application, best practices, performance optimization, and system design in both Spring Boot and React. 
+Spring Boot Interview Questions
+Core Concepts and Annotations:
+Explain the internal workings of @SpringBootApplication, @EnableAutoConfiguration, and @ComponentScan.
+What is "convention over configuration," and how does Spring Boot implement it?
+Differentiate between @Component, @Service, @Repository, and @Controller.
+Explain Dependency Injection (DI) and compare constructor injection vs. setter/field injection, including which is preferred and why.
+Data and Persistence:
+What is Spring Data JPA, and how does it simplify database operations compared to traditional JDBC or Hibernate?
+Explain the use of @Transactional and its attributes like propagation and isolation levels.
+How do you handle database migrations (schema updates) in a Spring Boot application using tools like Flyway or Liquibase?
+REST APIs and Exception Handling:
+Describe how to build robust RESTful web services, including handling different HTTP methods and status codes.
+How would you implement global exception handling in a REST API using @ControllerAdvice or @RestControllerAdvice?
+Explain how to configure Cross-Origin Resource Sharing (CORS) for a React frontend to consume your API.
+Security and Operations:
+How do you secure a Spring Boot application using Spring Security? Mention concepts like CSRF protection, stateless authentication (JWT), and OAuth2.
+What are Spring Boot Actuator endpoints, and how are they used for monitoring application health and metrics?
+Explain the use of profiles (@Profile) for managing different configurations (e.g., development, testing, production) and the precedence of properties.
+Advanced Topics/Scenario-Based:
+How would you optimize the performance of a Spring Boot application under high load?
+Describe a scenario where you would use Spring WebFlux (reactive programming) instead of traditional Spring MVC.
+How do you handle circular dependencies between beans? 
+React Interview Questions
+Core Concepts:
+Explain the Virtual DOM and the reconciliation process, and why React is faster than direct DOM manipulation.
+Differentiate between functional and class components, especially in the context of Hooks.
+What are props and state? Explain their differences and immutability.
+Hooks:
+Explain useState and useEffect in detail, including the purpose of the dependency array and how to handle side effects with and without cleanup.
+When would you use useReducer instead of useState for state management?
+Explain the difference between useMemo and useCallback and how they help in performance optimization.
+How do you create and use custom Hooks to share stateful logic between components?
+Advanced Patterns and Architecture:
+What is prop drilling, and what techniques (Context API, Redux) can be used to avoid it?
+Explain Higher-Order Components (HOCs) and Render Props as patterns for code reuse.
+Discuss popular state management solutions (Redux, Zustand, Context API) and when you would choose one over the other.
+Performance and Testing:
+What are some techniques you use to optimize a slow React application (e.g., lazy loading, code splitting, memoization, virtualization)?
+Explain error boundaries and how to implement them to catch errors in the render phase.
+How do you test React components effectively using libraries like Jest and React Testing Library?
+Integration (Spring Boot & React):
+How do you handle user authentication and authorization between the React frontend and Spring Boot backend (e.g., JWT-based authentication flow)?
+Describe how you structure your project to facilitate seamless API calls from the React app to the Spring Boot API, perhaps using Axios.
+How do you deploy a full-stack application with a Spring Boot backend and a React frontend? 
