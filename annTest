@@ -1,37 +1,169 @@
-const handleSubmit = async (e) => {
-    e.preventDefault();
+return (
+    <Box>
+      {loading ? (
+        <Stack
+          alignItems="center"
+          justifyContent="center"
+          sx={CurrencyMasterStyles.loadingStack}
+        >
+          <CircularProgress size={40} />
+        </Stack>
+      ) : (
+        <DataGrid
+          rows={rows}
+          columns={columns}
+          disableRowSelectionOnClick
+          getRowId={(row) => row.currencyCode}
+          pageSizeOptions={[5, 10, 25, 50]}
+          initialState={{
+            pagination: { paginationModel: { pageSize: 10, page: 0 } },
+            sorting: { sortModel: [{ field: "currencyCode", sort: "asc" }] },
+          }}
+          sx={CurrencyMasterStyles.dataGridContainer}
+          localeText={{
+            noRowsLabel: "No Currency Records Found",
+          }}
+          slots={{
+            noRowsOverlay: CustomNoRowsOverlay,
+          }}
+        />
+      )}
 
-    const allErrors = {
-      currencyCode: editingId
-        ? ""
-        : validateField("currencyCode", currencyData.currencyCode),
-      currencyName: validateField("currencyName", currencyData.currencyName),
-      currencyRate: editingId
-        ? ""
-        : validateField("currencyRate", currencyData.currencyRate),
-    };
-    setErrors(allErrors);
+      {/* Floating Create Button */}
+      <Fab
+        onClick={() => {
+          setEditingId(null);
+          setCurrencyData({
+            currencyCode: "",
+            currencyName: "",
+            currencyRate: "",
+          });
+          setErrors({});
+          setOpen(true);
+        }}
+        color="primary"
+        variant="extended"
+        sx={CurrencyMasterStyles.fabButton}
+      >
+        <AddIcon sx={CurrencyMasterStyles.fabIcon} />
+        Create
+      </Fab>
 
-    const valid = Object.values(allErrors).every((v) => !v);
-    if (!valid) {
-      notifyOnce("Please fix validation errors.", "error");
-      return;
-    }
+      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+        <Box component="form" onSubmit={handleSubmit}>
+          <DialogTitle>
+            <Stack
+              direction="row"
+              justifyContent="space-between"
+              alignItems="center"
+              sx={CurrencyMasterStyles.dialogTitleStack}
+            >
+              <Typography variant="h6" color="primary">
+                {editingId ? "Edit Currency" : "Add New Currency"}
+              </Typography>
+              <IconButton onClick={handleClose}>
+                <CloseIcon />
+              </IconButton>
+            </Stack>
+          </DialogTitle>
 
-    const isEditing = !!editingId;
-    if (isEditing && checkDataEquality(currencyData, originalData)) {
-      snackbar("No Changes Detected!", "warning");
-      return;
-    }
+          <Divider />
 
-    if (!isEditing) {
-      const currencyExists = rows.some(
-        (row) =>
-          row.currencyCode.toUpperCase() ===
-          currencyData.currencyCode.toUpperCase()
-      );
-      if (currencyExists) {
-        snackbar("Currency code already exists.", "warning");
-        return;
-      }
-    }
+          <DialogContent>
+            <Grid
+              container
+              spacing={3}
+              sx={CurrencyMasterStyles.dialogContentGrid}
+            >
+              {/* Currency Code */}
+              <Grid size={{ xs: 12 }}>
+                <TextField
+                  fullWidth
+                  required
+                  label="Currency Code"
+                  name="currencyCode"
+                  variant="outlined"
+                  value={currencyData.currencyCode}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  disabled={!!editingId}
+                  error={!!errors.currencyCode}
+                  helperText={
+                    editingId
+                      ? ""
+                      : errors.currencyCode ||
+                        "Must be 3 uppercase letters (e.g.,USD,INR)."
+                  }
+                  inputProps={{
+                    maxLength: 3,
+                    style: { textTransform: "uppercase" },
+                  }}
+                />
+              </Grid>
+
+              {/* Currency Name */}
+              <Grid size={{ xs: 12 }}>
+                <TextField
+                  fullWidth
+                  required
+                  label="Currency Name"
+                  name="currencyName"
+                  variant="outlined"
+                  value={currencyData.currencyName}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  error={!!errors.currencyName}
+                  helperText={
+                    errors.currencyName ||
+                    "Min 4 and Max 30 characters (letters and spaces only)."
+                  }
+                  sx={CurrencyMasterStyles.textField}
+                  inputProps={{ maxLength: 30 }}
+                />
+              </Grid>
+
+              {/* Currency Rate */}
+              <Grid size={{ xs: 12 }}>
+                <TextField
+                  fullWidth
+                  required
+                  name="currencyRate"
+                  label="Currency Rate"
+                  variant="outlined"
+                  value={currencyData.currencyRate}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  error={!!errors.currencyRate}
+                  disabled={!!editingId}
+                  helperText={
+                    editingId
+                      ? ""
+                      : errors.currencyRate ||
+                        "Max 6 digits before decimal, up to 6 after (e.g., 123456.123456)."
+                  }
+                  inputProps={{ maxLength: 13, inputMode: "decimal" }}
+                />
+              </Grid>
+            </Grid>
+          </DialogContent>
+
+          <Divider />
+
+          <DialogActions sx={CurrencyMasterStyles.dialogActions}>
+            <Button onClick={handleClose}>Cancel</Button>
+            <Button
+              type="submit"
+              variant="contained"
+              startIcon={editingId ? <EditIcon /> : <AddIcon />}
+              disabled={
+                !isFormValid() ||
+                (editingId && checkDataEquality(currencyData, originalData))
+              }
+            >
+              {editingId ? "Update" : "Add"}
+            </Button>
+          </DialogActions>
+        </Box>
+      </Dialog>
+    </Box>
+  );
