@@ -1,26 +1,37 @@
-MuiMenu: {
-  styleOverrides: {
-    paper: ({ theme }) => ({
-      backdropFilter: 'none',
-      backgroundColor:
-        theme.palette.mode === 'dark'
-          ? theme.palette.background.paper
-          : '#fff',
-      boxShadow: theme.shadows[8],
-      borderRadius: theme.shape.borderRadius,
-    }),
-  },
-}, 
+const handleSubmit = async (e) => {
+    e.preventDefault();
 
+    const allErrors = {
+      currencyCode: editingId
+        ? ""
+        : validateField("currencyCode", currencyData.currencyCode),
+      currencyName: validateField("currencyName", currencyData.currencyName),
+      currencyRate: editingId
+        ? ""
+        : validateField("currencyRate", currencyData.currencyRate),
+    };
+    setErrors(allErrors);
 
-MuiPopover: {
-  styleOverrides: {
-    paper: ({ theme }) => ({
-      backdropFilter: 'none',
-      backgroundColor:
-        theme.palette.mode === 'dark'
-          ? theme.palette.background.paper
-          : '#fff',
-    }),
-  },
-},
+    const valid = Object.values(allErrors).every((v) => !v);
+    if (!valid) {
+      notifyOnce("Please fix validation errors.", "error");
+      return;
+    }
+
+    const isEditing = !!editingId;
+    if (isEditing && checkDataEquality(currencyData, originalData)) {
+      snackbar("No Changes Detected!", "warning");
+      return;
+    }
+
+    if (!isEditing) {
+      const currencyExists = rows.some(
+        (row) =>
+          row.currencyCode.toUpperCase() ===
+          currencyData.currencyCode.toUpperCase()
+      );
+      if (currencyExists) {
+        snackbar("Currency code already exists.", "warning");
+        return;
+      }
+    }
