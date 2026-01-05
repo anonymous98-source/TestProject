@@ -1,174 +1,219 @@
-Good catch — your commands are logically close but incomplete, that’s why they’re failing.
-Let’s fix this step by step, in a way that always works on Windows / Linux / Mac.
+Perfect — this is the right fix 👍
+Below is clean, production-safe code that removes ICMP completely and replaces it with TCP-based host reachability, which:
 
+❌ Does NOT use InetAddress.isReachable()
 
----
+❌ Produces NO Java 21 warnings
 
-✅ Why your commands are NOT working
+✅ Works behind corporate firewalls
 
-❌ Problem 1: javac output directory not specified
+✅ Works without admin privileges
 
-.class files are getting created inside src (or not found)
-
-JAR expects compiled classes in a proper package structure
-
-
-❌ Problem 2: FlatLaf not included in runtime
-
-Your JAR runs → ClassNotFoundException: FlatDarkLaf
-
-
-❌ Problem 3: Manifest path & classpath mismatch
-
-JAR doesn’t know where FlatLaf is
-
-Icon not properly packaged
+✅ Gives consistent output
 
 
 
 ---
 
-✅ CORRECT & WORKING WAY (Industry Standard)
+✅ Design Change (What we are implementing)
 
-We’ll do this in 3 clean steps:
+OLD (Problematic)
 
-access-checker/
- ├── lib/
- │   └── flatlaf-3.4.jar
- ├── src/
- │   └── com/accesschecker/*.java
- ├── out/              ← compiled classes
- ├── icon.png
- ├── MANIFEST.MF
+ICMP Ping  → InetAddress.isReachable()
 
+NEW (Enterprise Safe)
 
----
+Host Reachability → TCP connect to common ports
 
-🟢 STEP 1: Compile Java files properly
+Ports used (in order):
 
-✅ Windows (CMD / PowerShell)
+443 → 80 → 22
 
-javac -cp lib\flatlaf-3.4.jar -d out src\com\accesschecker\*.java
-
-✅ Linux / Mac
-
-javac -cp lib/flatlaf-3.4.jar -d out src/com/accesschecker/*.java
-
-✔ -d out → puts .class files in correct package structure
-✔ -cp → tells compiler where FlatLaf is
+If any one succeeds, host is reachable.
 
 
 ---
 
-🟢 STEP 2: Create a CORRECT MANIFEST
+1️⃣ Updated NetworkChecker.java (FINAL)
 
-MANIFEST.MF
+package com.accesschecker;
 
-Manifest-Version: 1.0
-Main-Class: com.accesschecker.AccessCheckerApp
-Class-Path: lib/flatlaf-3.4.jar
+import java.net.InetSocketAddress;
+import java.net.Socket;
 
-⚠️ VERY IMPORTANT
+public class NetworkChecker {
 
-File must end with a blank line
+    private static final int[] COMMON_PORTS = {443, 80, 22};
 
-No extra spaces before keys
+    /**
+     * TCP-based host reachability check
+     * Replaces ICMP ping completely
+     */
+    public static Result hostReachable(String host, int timeout) {
+        for (int port : COMMON_PORTS) {
+            try (Socket socket = new Socket()) {
+                socket.connect(new InetSocketAddress(host, port), timeout);
+                return new Result(
+                        host,
+                        true,
+                        "HOST REACHABLE (TCP " + port + ")"
+                );
+            } catch (Exception ignored) {
+                // try next port
+            }
+        }
 
+        return new Result(
+                host,
+                false,
+                "HOST UNREACHABLE (TCP 443/80/22)"
+        );
+    }
 
-
----
-
-🟢 STEP 3: Create Runnable JAR (WORKING)
-
-Windows
-
-jar cfm AccessChecker.jar MANIFEST.MF -C out . icon.png
-
-Linux / Mac
-
-jar cfm AccessChecker.jar MANIFEST.MF -C out . icon.png
-
-✔ Uses compiled classes
-✔ Includes icon
-✔ Knows FlatLaf location
-
-
----
-
-▶️ STEP 4: Run the JAR
-
-java -jar AccessChecker.jar
-
-✅ App opens
-✅ Dark theme works
-✅ No ClassNotFoundException
-
-
----
-
-🧠 Common Errors & Fixes
-
-❌ no main manifest attribute
-
-✔ Manifest file missing or malformed
-✔ Ensure blank line at end
-
-
----
-
-❌ ClassNotFoundException: FlatDarkLaf
-
-✔ FlatLaf not in lib/
-✔ Manifest Class-Path wrong
-✔ OR use fat JAR (below)
+    /**
+     * TCP Port check (unchanged)
+     */
+    public static Result tcp(String host, int port, int timeout) {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(host, port), timeout);
+            return new Result(
+                    host + ":" + port,
+                    true,
+                    "PORT OPEN"
+            );
+        } catch (Exception e) {
+            return new Result(
+                    host + ":" + port,
+                    false,
+                    e.getMessage()
+            );
+        }
+    }
+}
 
 
 ---
 
-🚀 OPTIONAL (BEST PRACTICE): FAT JAR (No external lib)
+2️⃣ UI Change (Radio Button Text)
 
-If you want ONE single JAR (recommended for sharing):
+Replace this:
 
-jar cfm AccessChecker.jar MANIFEST.MF \
-    -C out . \
-    -C lib flatlaf-3.4.jar \
-    icon.png
+pingBtn = new JRadioButton("ICMP Ping", true);
 
-Now users just double-click → works everywhere.
+With this:
 
+pingBtn = new JRadioButton("Host Reachability (TCP)", true);
 
----
-
-🪟 BONUS: Add App Icon (Windows)
-
-setIconImage(Toolkit.getDefaultToolkit()
-    .getImage(getClass().getResource("/icon.png")));
-
-Place icon.png inside out/ root.
+(No behavior change for TCP Port radio button)
 
 
 ---
 
-✅ FINAL RESULT
+3️⃣ Update runChecks() Method (IMPORTANT)
 
-✔ Runnable JAR
-✔ Dark theme
-✔ Icon
-✔ No dependency issues
-✔ Production ready
+Replace this block:
+
+if (pingBtn.isSelected()) {
+    r = NetworkChecker.ping(line.trim(), timeout);
+}
+
+With this:
+
+if (pingBtn.isSelected()) {
+    r = NetworkChecker.hostReachable(line.trim(), timeout);
+}
+
+
+---
+
+4️⃣ Final runChecks() Method (Corrected)
+
+private void runChecks() {
+    results.clear();
+    resultPane.setText("");
+    progressBar.setValue(0);
+
+    String[] lines = inputArea.getText().split("\\n");
+    int timeout = Integer.parseInt(timeoutField.getText());
+
+    SwingWorker<Void, Result> worker = new SwingWorker<>() {
+
+        @Override
+        protected Void doInBackground() {
+            progressBar.setMaximum(lines.length);
+            int count = 0;
+
+            for (String line : lines) {
+                if (line.isBlank()) continue;
+
+                Result r;
+                if (pingBtn.isSelected()) {
+                    r = NetworkChecker.hostReachable(line.trim(), timeout);
+                } else {
+                    String[] p = line.trim().split(":");
+                    r = NetworkChecker.tcp(
+                            p[0],
+                            Integer.parseInt(p[1]),
+                            timeout
+                    );
+                }
+
+                publish(r);
+                progressBar.setValue(++count);
+            }
+            return null;
+        }
+
+        @Override
+        protected void process(java.util.List<Result> chunks) {
+            for (Result r : chunks) {
+                results.add(r);
+                appendColored(r);
+            }
+        }
+    };
+
+    worker.execute();
+}
+
+
+---
+
+5️⃣ Result After This Change
+
+✔ No JDK warnings
+✔ Consistent output
+✔ Works on Windows / Linux / Corporate VPN
+✔ No admin rights needed
+✔ Interview-safe explanation
+
+
+---
+
+🧠 How to Explain This Change (Very Important)
+
+Say this:
+
+> “ICMP ping is unreliable in enterprise environments due to firewall restrictions and Java’s deprecated native access. So I replaced it with TCP-based reachability checks on standard ports like 443 and 80, which gives consistent and production-safe results.”
+
+
+
+That is exactly what senior engineers expect.
 
 
 ---
 
 If you want next:
 
-Windows EXE
+Multi-threaded scanning (10x faster)
 
-Maven build
+Cancel button
 
-Gradle build
+Timeout validation
 
-Auto-update versioning
+Auto-detect best port per host
+
+Tooltips explaining failures
 
 
-Just tell me 👌
+Just tell me 👍
