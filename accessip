@@ -1,0 +1,235 @@
+Got it 👍
+You want a Java Swing desktop application that checks whether a given IP:PORT is reachable / accessible, similar to the UI shown in your image.
+
+Below is a clean, production-ready Swing solution that closely matches your screenshot and real-world usage.
+
+
+---
+
+What this application will do
+
+Take multiple IP:PORT entries (one per line)
+
+Check TCP connectivity (i.e., whether the port is open and reachable)
+
+Show results in the Result panel
+
+Provide Check, Reset, and Copy Result buttons
+
+Use timeouts (so UI doesn’t hang)
+
+Run checks in a background thread (SwingWorker)
+
+
+
+---
+
+Project Structure (Simple & Clean)
+
+access-checker/
+ ├── src/
+ │   └── com/accesschecker/
+ │       ├── AccessCheckerApp.java   (UI)
+ │       └── PortChecker.java        (Networking logic)
+
+
+---
+
+1️⃣ Port Checking Logic (Backend)
+
+PortChecker.java
+
+package com.accesschecker;
+
+import java.net.InetSocketAddress;
+import java.net.Socket;
+
+public class PortChecker {
+
+    private static final int TIMEOUT_MS = 3000;
+
+    public static String check(String host, int port) {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(host, port), TIMEOUT_MS);
+            return "SUCCESS: " + host + ":" + port + " is reachable";
+        } catch (Exception e) {
+            return "FAILED : " + host + ":" + port + " → " + e.getMessage();
+        }
+    }
+}
+
+✔ Uses TCP socket connection
+✔ Works for app servers, DB ports, APIs, etc.
+
+
+---
+
+2️⃣ Swing UI (Main Application)
+
+AccessCheckerApp.java
+
+package com.accesschecker;
+
+import javax.swing.*;
+import java.awt.*;
+import java.awt.datatransfer.StringSelection;
+
+public class AccessCheckerApp extends JFrame {
+
+    private JTextArea inputArea;
+    private JTextArea resultArea;
+
+    public AccessCheckerApp() {
+        setTitle("Access Checker");
+        setSize(800, 450);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        initUI();
+    }
+
+    private void initUI() {
+        setLayout(new BorderLayout(10, 10));
+
+        JLabel titleRight = new JLabel(
+                "<html><div style='text-align:right;'>by Team CRS<br/>Version 1.2</div></html>");
+        add(titleRight, BorderLayout.NORTH);
+
+        JPanel centerPanel = new JPanel(new GridLayout(1, 2, 15, 0));
+
+        // Input panel
+        JPanel inputPanel = new JPanel(new BorderLayout());
+        inputPanel.add(new JLabel("Enter IP:PORT"), BorderLayout.NORTH);
+        inputArea = new JTextArea();
+        inputPanel.add(new JScrollPane(inputArea), BorderLayout.CENTER);
+
+        // Result panel
+        JPanel resultPanel = new JPanel(new BorderLayout());
+        resultPanel.add(new JLabel("Result"), BorderLayout.NORTH);
+        resultArea = new JTextArea();
+        resultArea.setEditable(false);
+        resultPanel.add(new JScrollPane(resultArea), BorderLayout.CENTER);
+
+        centerPanel.add(inputPanel);
+        centerPanel.add(resultPanel);
+
+        add(centerPanel, BorderLayout.CENTER);
+
+        // Buttons
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 10));
+
+        JButton checkBtn = new JButton("Check");
+        JButton resetBtn = new JButton("Reset");
+        JButton copyBtn = new JButton("Copy Result");
+
+        checkBtn.addActionListener(e -> performCheck());
+        resetBtn.addActionListener(e -> {
+            inputArea.setText("");
+            resultArea.setText("");
+        });
+        copyBtn.addActionListener(e -> copyResult());
+
+        buttonPanel.add(checkBtn);
+        buttonPanel.add(resetBtn);
+        buttonPanel.add(copyBtn);
+
+        add(buttonPanel, BorderLayout.SOUTH);
+    }
+
+    private void performCheck() {
+        resultArea.setText("");
+        String[] lines = inputArea.getText().split("\\n");
+
+        SwingWorker<Void, String> worker = new SwingWorker<>() {
+            @Override
+            protected Void doInBackground() {
+                for (String line : lines) {
+                    if (line.trim().isEmpty()) continue;
+
+                    try {
+                        String[] parts = line.trim().split(":");
+                        String host = parts[0];
+                        int port = Integer.parseInt(parts[1]);
+
+                        String result = PortChecker.check(host, port);
+                        publish(result);
+                    } catch (Exception ex) {
+                        publish("INVALID ENTRY: " + line);
+                    }
+                }
+                return null;
+            }
+
+            @Override
+            protected void process(java.util.List<String> chunks) {
+                for (String msg : chunks) {
+                    resultArea.append(msg + "\n");
+                }
+            }
+        };
+
+        worker.execute();
+    }
+
+    private void copyResult() {
+        StringSelection selection = new StringSelection(resultArea.getText());
+        Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
+        JOptionPane.showMessageDialog(this, "Result copied to clipboard");
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> new AccessCheckerApp().setVisible(true));
+    }
+}
+
+
+---
+
+3️⃣ Input Format (Exactly Like Real Tools)
+
+192.168.1.10:8080
+google.com:443
+localhost:3306
+10.10.10.20:22
+
+
+---
+
+4️⃣ Sample Output
+
+SUCCESS: google.com:443 is reachable
+FAILED : localhost:3306 → Connection refused
+FAILED : 10.10.10.20:22 → Connection timed out
+
+
+---
+
+5️⃣ Enhancements You Can Add (Next Level)
+
+Since you’re a Java Full Stack developer, you might like these upgrades:
+
+✅ Color-coded results (green/red)
+✅ Progress bar
+✅ Export result to CSV
+✅ ICMP Ping + TCP check toggle
+✅ Configurable timeout
+✅ Dark theme (FlatLaf)
+✅ Runnable JAR with icon
+
+
+---
+
+If you want:
+
+Exact UI match with your screenshot
+
+Runnable JAR build steps
+
+Dark theme
+
+Multi-threaded faster scanning
+
+JavaFX version instead of Swing
+
+
+Tell me what you want next, and I’ll extend this for you 🚀
