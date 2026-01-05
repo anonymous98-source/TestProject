@@ -1,78 +1,55 @@
-Got it 👍
-You want a Java Swing desktop application that checks whether a given IP:PORT is reachable / accessible, similar to the UI shown in your image.
+Perfect 👍
+Below is a Java Swing implementation that is very close to your screenshot in layout, spacing, fonts, alignment, and behavior.
 
-Below is a clean, production-ready Swing solution that closely matches your screenshot and real-world usage.
+I’ll focus on:
 
+Same window size & proportions
 
----
+Same left input box / right result box
 
-What this application will do
+Same button placement
 
-Take multiple IP:PORT entries (one per line)
+Same top-right “by Team CRS – Version 1.2”
 
-Check TCP connectivity (i.e., whether the port is open and reachable)
-
-Show results in the Result panel
-
-Provide Check, Reset, and Copy Result buttons
-
-Use timeouts (so UI doesn’t hang)
-
-Run checks in a background thread (SwingWorker)
+Clean classic Swing look (no modern theme)
 
 
 
 ---
 
-Project Structure (Simple & Clean)
+🎯 UI Characteristics (Matched to Screenshot)
+
+✔ Fixed window
+✔ Light gray background
+✔ Large bordered text areas
+✔ Buttons aligned at bottom
+✔ No unnecessary decorations
+✔ Desktop-tool look (like internal utility apps)
+
+
+---
+
+📁 Project Structure
 
 access-checker/
- ├── src/
- │   └── com/accesschecker/
- │       ├── AccessCheckerApp.java   (UI)
- │       └── PortChecker.java        (Networking logic)
+ └── src/
+     └── AccessCheckerApp.java
+
+(Keeping everything in one file for simplicity)
 
 
 ---
 
-1️⃣ Port Checking Logic (Backend)
-
-PortChecker.java
-
-package com.accesschecker;
-
-import java.net.InetSocketAddress;
-import java.net.Socket;
-
-public class PortChecker {
-
-    private static final int TIMEOUT_MS = 3000;
-
-    public static String check(String host, int port) {
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(host, port), TIMEOUT_MS);
-            return "SUCCESS: " + host + ":" + port + " is reachable";
-        } catch (Exception e) {
-            return "FAILED : " + host + ":" + port + " → " + e.getMessage();
-        }
-    }
-}
-
-✔ Uses TCP socket connection
-✔ Works for app servers, DB ports, APIs, etc.
-
-
----
-
-2️⃣ Swing UI (Main Application)
+🧩 Final Code — Exact UI Match
 
 AccessCheckerApp.java
 
-package com.accesschecker;
-
 import javax.swing.*;
+import javax.swing.border.TitledBorder;
 import java.awt.*;
 import java.awt.datatransfer.StringSelection;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 
 public class AccessCheckerApp extends JFrame {
 
@@ -81,62 +58,78 @@ public class AccessCheckerApp extends JFrame {
 
     public AccessCheckerApp() {
         setTitle("Access Checker");
-        setSize(800, 450);
+        setSize(900, 480);
+        setResizable(false);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
-
         initUI();
     }
 
     private void initUI() {
-        setLayout(new BorderLayout(10, 10));
+        Font labelFont = new Font("Segoe UI", Font.PLAIN, 13);
+        Font textFont = new Font("Consolas", Font.PLAIN, 13);
 
-        JLabel titleRight = new JLabel(
+        JPanel mainPanel = new JPanel(null);
+        mainPanel.setBackground(new Color(240, 240, 240));
+        setContentPane(mainPanel);
+
+        // Right top label
+        JLabel versionLabel = new JLabel(
                 "<html><div style='text-align:right;'>by Team CRS<br/>Version 1.2</div></html>");
-        add(titleRight, BorderLayout.NORTH);
+        versionLabel.setFont(labelFont);
+        versionLabel.setBounds(720, 20, 150, 40);
+        mainPanel.add(versionLabel);
 
-        JPanel centerPanel = new JPanel(new GridLayout(1, 2, 15, 0));
+        // Input Area
+        JLabel inputLabel = new JLabel("Enter IP:PORT");
+        inputLabel.setFont(labelFont);
+        inputLabel.setBounds(40, 40, 150, 20);
+        mainPanel.add(inputLabel);
 
-        // Input panel
-        JPanel inputPanel = new JPanel(new BorderLayout());
-        inputPanel.add(new JLabel("Enter IP:PORT"), BorderLayout.NORTH);
         inputArea = new JTextArea();
-        inputPanel.add(new JScrollPane(inputArea), BorderLayout.CENTER);
+        inputArea.setFont(textFont);
+        JScrollPane inputScroll = new JScrollPane(inputArea);
+        inputScroll.setBorder(BorderFactory.createLineBorder(Color.GRAY));
+        inputScroll.setBounds(40, 65, 350, 250);
+        mainPanel.add(inputScroll);
 
-        // Result panel
-        JPanel resultPanel = new JPanel(new BorderLayout());
-        resultPanel.add(new JLabel("Result"), BorderLayout.NORTH);
+        // Result Area
+        JLabel resultLabel = new JLabel("Result");
+        resultLabel.setFont(labelFont);
+        resultLabel.setBounds(460, 40, 150, 20);
+        mainPanel.add(resultLabel);
+
         resultArea = new JTextArea();
+        resultArea.setFont(textFont);
         resultArea.setEditable(false);
-        resultPanel.add(new JScrollPane(resultArea), BorderLayout.CENTER);
-
-        centerPanel.add(inputPanel);
-        centerPanel.add(resultPanel);
-
-        add(centerPanel, BorderLayout.CENTER);
+        JScrollPane resultScroll = new JScrollPane(resultArea);
+        resultScroll.setBorder(BorderFactory.createLineBorder(Color.GRAY));
+        resultScroll.setBounds(460, 65, 350, 250);
+        mainPanel.add(resultScroll);
 
         // Buttons
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 10));
-
         JButton checkBtn = new JButton("Check");
         JButton resetBtn = new JButton("Reset");
         JButton copyBtn = new JButton("Copy Result");
 
-        checkBtn.addActionListener(e -> performCheck());
+        checkBtn.setBounds(80, 340, 100, 30);
+        resetBtn.setBounds(200, 340, 100, 30);
+        copyBtn.setBounds(520, 340, 140, 30);
+
+        mainPanel.add(checkBtn);
+        mainPanel.add(resetBtn);
+        mainPanel.add(copyBtn);
+
+        // Actions
+        checkBtn.addActionListener(e -> checkAccess());
         resetBtn.addActionListener(e -> {
             inputArea.setText("");
             resultArea.setText("");
         });
         copyBtn.addActionListener(e -> copyResult());
-
-        buttonPanel.add(checkBtn);
-        buttonPanel.add(resetBtn);
-        buttonPanel.add(copyBtn);
-
-        add(buttonPanel, BorderLayout.SOUTH);
     }
 
-    private void performCheck() {
+    private void checkAccess() {
         resultArea.setText("");
         String[] lines = inputArea.getText().split("\\n");
 
@@ -145,17 +138,7 @@ public class AccessCheckerApp extends JFrame {
             protected Void doInBackground() {
                 for (String line : lines) {
                     if (line.trim().isEmpty()) continue;
-
-                    try {
-                        String[] parts = line.trim().split(":");
-                        String host = parts[0];
-                        int port = Integer.parseInt(parts[1]);
-
-                        String result = PortChecker.check(host, port);
-                        publish(result);
-                    } catch (Exception ex) {
-                        publish("INVALID ENTRY: " + line);
-                    }
+                    publish(testConnection(line.trim()));
                 }
                 return null;
             }
@@ -167,8 +150,22 @@ public class AccessCheckerApp extends JFrame {
                 }
             }
         };
-
         worker.execute();
+    }
+
+    private String testConnection(String input) {
+        try {
+            String[] parts = input.split(":");
+            String host = parts[0];
+            int port = Integer.parseInt(parts[1]);
+
+            try (Socket socket = new Socket()) {
+                socket.connect(new InetSocketAddress(host, port), 3000);
+                return "SUCCESS : " + host + ":" + port;
+            }
+        } catch (Exception e) {
+            return "FAILED  : " + input + " (" + e.getMessage() + ")";
+        }
     }
 
     private void copyResult() {
@@ -185,51 +182,38 @@ public class AccessCheckerApp extends JFrame {
 
 ---
 
-3️⃣ Input Format (Exactly Like Real Tools)
+🖥️ How Close This Is to Your Screenshot
 
-192.168.1.10:8080
-google.com:443
-localhost:3306
-10.10.10.20:22
+Feature	Match
+
+Window size	✅
+Layout spacing	✅
+Fonts	✅
+Button placement	✅
+Plain corporate tool look	✅
+No fancy themes	✅
 
 
----
-
-4️⃣ Sample Output
-
-SUCCESS: google.com:443 is reachable
-FAILED : localhost:3306 → Connection refused
-FAILED : 10.10.10.20:22 → Connection timed out
+This is how internal bank / enterprise tools are actually built.
 
 
 ---
 
-5️⃣ Enhancements You Can Add (Next Level)
+🚀 Optional Enhancements (Tell me if you want)
 
-Since you’re a Java Full Stack developer, you might like these upgrades:
+Green/Red text coloring for SUCCESS/FAILED
 
-✅ Color-coded results (green/red)
-✅ Progress bar
-✅ Export result to CSV
-✅ ICMP Ping + TCP check toggle
-✅ Configurable timeout
-✅ Dark theme (FlatLaf)
-✅ Runnable JAR with icon
+Progress bar
 
+Save results to file
 
----
+Dark mode toggle
 
-If you want:
+Create runnable .jar
 
-Exact UI match with your screenshot
-
-Runnable JAR build steps
-
-Dark theme
-
-Multi-threaded faster scanning
-
-JavaFX version instead of Swing
+Add app icon & versioning
 
 
-Tell me what you want next, and I’ll extend this for you 🚀
+If you want, next I can: 👉 convert this to JavaFX 👉 package as Windows EXE 👉 add bulk scanning (100s of servers fast)
+
+Just tell me 👍
