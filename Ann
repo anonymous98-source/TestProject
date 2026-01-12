@@ -1,37 +1,40 @@
-@GetMapping(path = "/processes", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-	public SseEmitter getProcessData() throws JsonProcessingException {
-		return processStatusService.getProcessDataSSE();
-	}
+@Configuration
+@EnableWebSecurity
+@Import({RedisConfig.class, JwtUtil.class, CommonSecurityConfig.class}) // Import logic from JAR
+public class SecurityConfig {
 
-@Override
-	public SseEmitter getProcessDataSSE() throws JsonProcessingException {
+    @Autowired
+    private StringRedisTemplate redisTemplate;
 
-		SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
-		processStatusEmitters.add(emitter);
-		emitter.onCompletion(() -> {
-			processStatusEmitters.remove(emitter);
-			emitter.complete();
-		});
-		emitter.onError((e) -> {
-			processStatusEmitters.remove(emitter);
-			emitter.completeWithError(e);
-		});
-		emitter.onTimeout(() -> {
-			processStatusEmitters.remove(emitter);
-			emitter.complete();
-		});
-		sendProcessStatusUpdates();
-		return emitter;
-	}
+    @Autowired
+    private JwtUtil jwtUtil;
 
-private final CopyOnWriteArrayList<SseEmitter> processStatusEmitters = new CopyOnWriteArrayList<>();
+    @Autowired
+    private CommonSecurityConfig commonSecurityConfig; // Wire in the CORS config
 
-https://10.0.19.203:1000/PS/api/processes
-Request Method
-GET
-Status Code
-403 Forbidden
-Remote Address
-10.0.19.203:1000
-Referrer Policy
-strict-origin-when-cross-origin
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+                // 1. Disable CSRF (Stateless API)
+                .csrf(csrf -> csrf.disable())
+
+                // 2. Apply Centralized CORS Policy
+                .cors(cors -> cors.configurationSource(commonSecurityConfig.corsConfigurationSource()))
+
+                // 3. Stateless Session (No JSESSIONID)
+                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
+                // 4. Authorization Rules
+                .authorizeHttpRequests(authz -> authz
+                        // Public Endpoints
+                        .requestMatchers("/actuator/**", "/api/auth/**", "/error").permitAll()
+                        // All other endpoints require Authentication (and RBAC filter check)
+                        .anyRequest().authenticated()
+                )
+
+                // 5. Add the "Distributed Gateway" Filter
+                .addFilterBefore(new ContextRbacFilter(redisTemplate, jwtUtil), UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
+}
