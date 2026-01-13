@@ -1,33 +1,5 @@
-Request URL
-https://10.0.19.203:1000/PS/api/process/processes
-Request Method
-GET
-Status Code
-403 Forbidden
-Remote Address
-10.0.19.203:1000
-Referrer Policy
-strict-origin-when-cross-origin
-cache-control
-no-cache, no-store, max-age=0, must-revalidate
-content-length
-0
-date
-Tue, 13 Jan 2026 06:57:11 GMT
-expires
-0
-pragma
-no-cache
-vary
-Origin, Access-Control-Request-Method, Access-Control-Request-Headers
-x-content-type-options
-nosniff
-x-frame-options
-DENY
-x-xss-protection
-0
 :authority
-10.0.19.203:1000
+localhost:1000
 :method
 GET
 :path
@@ -35,19 +7,19 @@ GET
 :scheme
 https
 accept
-text/event-stream, text/event-stream
+text/event-stream
 accept-encoding
 gzip, deflate, br, zstd
 accept-language
 en-GB,en-US;q=0.9,en;q=0.8
-authorization
-Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiIzMzMzMzMzIiwicm9sZSI6MTEsInJvbGVOYW1lIjoiRjEvQk9HICIsImZpcnN0TmFtZSI6IlJlaGFtYW4iLCJsYXN0TmFtZSI6IkZSVCIsInBob25lTnVtYmVyIjoiNzYxMDg1NDk5NCIsImVtYWlsIjoic2JpdXNlcjIzQHNiaS5jby5pbiIsImJyYW5jaCI6MTIzNDUsInN1YiI6IjMzMzMzMzMiLCJqdGkiOiJiMjdlMzMyMi03ZWU5LTQ4ZTUtOTFkYS0wZDExNmZhNjVkNDQiLCJpYXQiOjE3NjgyODc0MjYsImV4cCI6MTc2ODI4ODMyNn0.n2vs7is-jEv92DGY89RCaGdpRX2umzmpCTGl1QZ4nI4
+cache-control
+no-cache
 cookie
-refresh_token=eyJhbGciOiJIUzI1NiJ9.eyJ0eXBlIjoicmVmcmVzaCIsInN1YiI6IjMzMzMzMzMiLCJqdGkiOiIwODRiYzdhNi01OTljLTRhOGItOGUxNy1mZWRkM2I3MDM5OTgiLCJpYXQiOjE3NjgyODc0MjYsImV4cCI6MTc2ODMzMDYyNn0.Dp2Yk3FF_il8l-SvSFT0fAGJxWlgDrV4iSiNJKrV0qw
+refresh_token=eyJhbGciOiJIUzI1NiJ9.eyJ0eXBlIjoicmVmcmVzaCIsInN1YiI6IjMzMzMzMzMiLCJqdGkiOiI0YWEzMzQ2Zi1iM2JiLTQxYWMtODQ0Yi0yZmUyYjA4MTBhNWMiLCJpYXQiOjE3NjgyOTg1ODUsImV4cCI6MTc2ODM0MTc4NX0.IB34NPFEAiP4JtK3tqcwBXsCUgtE2l9YqibBfBv3jXM
 priority
 u=1, i
 referer
-https://10.0.19.203:1000/process-status
+https://localhost:1000/process-status
 sec-ch-ua
 "Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"
 sec-ch-ua-mobile
