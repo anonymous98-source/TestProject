@@ -1,40 +1,222 @@
-@Configuration
-@EnableWebSecurity
-@Import({RedisConfig.class, JwtUtil.class, CommonSecurityConfig.class}) // Import logic from JAR
-public class SecurityConfig {
+ */
+@Slf4j
+@RequiredArgsConstructor
+public class ContextRbacFilter extends OncePerRequestFilter {
 
-    @Autowired
-    private StringRedisTemplate redisTemplate;
+    private static final String REDIS_USER_PREFIX = "USR:";
+    private static final String REDIS_RBAC_PREFIX = "RBAC::PERMISSIONS::";
 
-    @Autowired
-    private JwtUtil jwtUtil;
+    private static final Set<String> WHITELIST = Set.of(
+            "/api/auth/**", "/actuator/**", "/error", "/swagger-ui/**", "/v3/api-docs/**", "/api/login",
+            "/api/auth/login", "/api/auth/logout", "/api/auth/check-user"
+    );
 
-    @Autowired
-    private CommonSecurityConfig commonSecurityConfig; // Wire in the CORS config
+    private final StringRedisTemplate redisTemplate;
+    private final JwtUtil jwtUtil;
+    private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http
-                // 1. Disable CSRF (Stateless API)
-                .csrf(csrf -> csrf.disable())
+    @Override
+    protected void doFilterInternal(
+            @NonNull HttpServletRequest request,
+            @NonNull HttpServletResponse response,
+            @NonNull FilterChain filterChain
+    ) throws ServletException, IOException {
 
-                // 2. Apply Centralized CORS Policy
-                .cors(cors -> cors.configurationSource(commonSecurityConfig.corsConfigurationSource()))
+        String uri = request.getRequestURI();
 
-                // 3. Stateless Session (No JSESSIONID)
-                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        // 1. SKIP WHITELIST
+        for (String pattern : WHITELIST) {
+            if (pathMatcher.match(pattern, uri)) {
+                filterChain.doFilter(request, response);
+                return;
+            }
+        }
 
-                // 4. Authorization Rules
-                .authorizeHttpRequests(authz -> authz
-                        // Public Endpoints
-                        .requestMatchers("/actuator/**", "/api/auth/**", "/error").permitAll()
-                        // All other endpoints require Authentication (and RBAC filter check)
-                        .anyRequest().authenticated()
-                )
+        // 2. VALIDATE TOKEN
+        String token = request.getHeader("Authorization");
 
-                // 5. Add the "Distributed Gateway" Filter
-                .addFilterBefore(new ContextRbacFilter(redisTemplate, jwtUtil), UsernamePasswordAuthenticationFilter.class);
+        if (token != null) {
+            try {
+                // A. STANDARD VALIDATION (Signature + Expiry)
+                if (!jwtUtil.isTokenValid(token)) {
+                    throw new JwtException("Invalid Token Signature");
+                }
 
-        return http.build();
+                // If valid, extract info
+                String userId = jwtUtil.getUserIdFromToken(token);
+                String incomingJti = jwtUtil.extractClaim(removeBearer(token), Claims::getId);
+                int roleIdInt = jwtUtil.getUserRoleFromToken(token);
+
+                // B. ACTIVE SESSION CHECK
+                if (!checkRedisSession(response, userId, incomingJti)) {
+                    return; // Error sent
+                }
+
+                // C. RBAC / CONTEXT SETUP
+                setSecurityContext(userId, roleIdInt);
+
+                if (!checkRbac(request, response, String.valueOf(roleIdInt), userId)) {
+                    return;
+                }
+
+            } catch (ExpiredJwtException e) {
+                // -----------------------------------------------------------------
+                // HANDLE EXPIRED TOKEN: Distinguish between "Time out" vs "Concurrent Login"
+                // -----------------------------------------------------------------
+                try {
+                    Claims claims = e.getClaims();
+                    String userId = claims.getSubject();
+                    String incomingJti = claims.getId();
+
+                    // CHECK 1: Missing JTI ---
+                    if (incomingJti == null) {
+                        log.error("Expired Token missing JTI for user {}", userId);
+                        sendError(response, HttpServletResponse.SC_UNAUTHORIZED, "INVALID_TOKEN", "Token missing JTI");
+                        return;
+                    }
+
+                    String activeJti = redisTemplate.opsForValue().get(REDIS_USER_PREFIX + userId);
+
+                    // CASE 1: Session totally gone from Redis (User idle > 24h)
+                    if (activeJti == null) {
+                        log.warn("Session expired in Redis (found during token expiry check) for user {}", userId);
+                        sendError(response, HttpServletResponse.SC_UNAUTHORIZED, "SESSION_EXPIRED", "Session timed out.");
+                        return;
+                    }
+
+                    // CASE 2: Concurrent Login (Redis has newer JTI)
+                    if (!activeJti.equals(incomingJti)) {
+                        log.warn("Concurrent Login Detected on Expired Token. User: {}", userId);
+                        sendError(response, HttpServletResponse.SC_UNAUTHORIZED, "CONCURRENT_LOGIN", "Logged in on another device.");
+                        return;
+                    }
+
+                    // CASE 3: Normal Expiry (Redis matches) -> Allow Frontend to Refresh
+                } catch (Exception ex) {
+                    log.error("Error checking concurrency on expired token", ex);
+                }
+
+                // Default behavior: Tell frontend token is expired so it can call /refresh-token
+                sendError(response, HttpServletResponse.SC_UNAUTHORIZED, "TOKEN_EXPIRED", "JWT has expired.");
+                return;
+
+            } catch (Exception e) {
+                log.error("Auth Error: {}", e.getMessage());
+                sendError(response, HttpServletResponse.SC_UNAUTHORIZED, "AUTH_ERROR", "Authentication failed.");
+                return;
+            }
+        } else {
+            sendError(response, HttpServletResponse.SC_UNAUTHORIZED, "MISSING_TOKEN", "Authorization header missing.");
+            return;
+        }
+
+        filterChain.doFilter(request, response);
+    }
+
+    private boolean checkRedisSession(HttpServletResponse response, String userId, String incomingJti) throws IOException {
+        if (incomingJti == null) {
+            sendError(response, HttpServletResponse.SC_UNAUTHORIZED, "INVALID_TOKEN", "Token missing JTI");
+            return false;
+        }
+        try {
+            String activeJti = redisTemplate.opsForValue().get(REDIS_USER_PREFIX + userId);
+            if (activeJti == null) {
+                sendError(response, HttpServletResponse.SC_UNAUTHORIZED, "SESSION_EXPIRED", "Session timed out.");
+                return false;
+            }
+            if (!incomingJti.equals(activeJti)) {
+                sendError(response, HttpServletResponse.SC_UNAUTHORIZED, "CONCURRENT_LOGIN", "Logged in on another device.");
+                return false;
+            }
+        } catch (RedisConnectionFailureException e) {
+            sendError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "SYSTEM_ERROR", "Auth Service Unavailable");
+            return false;
+        }
+        return true;
+    }
+
+    private void setSecurityContext(String userId, int roleId) {
+        if (SecurityContextHolder.getContext().getAuthentication() == null) {
+            UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                    userId, null, List.of(new SimpleGrantedAuthority("ROLE_" + roleId))
+            );
+            SecurityContextHolder.getContext().setAuthentication(authToken);
+        }
+    }
+
+    /**
+     * Checks if the user's role has permission to access the requested Method + URL + Context.
+     */
+    private boolean checkRbac(HttpServletRequest request, HttpServletResponse response, String roleId, String userId) throws IOException {
+
+        String uri = request.getRequestURI();
+        String method = request.getMethod().toUpperCase();
+
+        // DETERMINE CONTEXT (Header)
+        String contextHeader = request.getHeader("X-Request-Type");
+
+        // If header is missing, treat as "*" (Global Context)
+        String requestContext = (contextHeader != null && !contextHeader.trim().isEmpty()) ? contextHeader : "*";
+
+        // REDIS AUTHORIZATION CHECK
+        String redisKey = REDIS_RBAC_PREFIX + roleId;
+
+        // Fetch permissions set from Redis
+        // Format: "METHOD:URL_PATTERN|CONTEXT" -> e.g., "POST:/user/create|USER_MANAGEMENT"
+        Set<String> permissions = redisTemplate.opsForSet().members(redisKey);
+
+        boolean isAuthorized = false;
+
+        if (permissions != null) {
+            for (String perm : permissions) {
+                // Format: "METHOD:URL_PATTERN|CONTEXT"
+                String[] parts = perm.split("\\|");
+                if (parts.length < 2) continue;
+
+                String methodAndUrl = parts[0];
+                String allowedContext = parts[1];
+
+                // --- A. CONTEXT CHECK ---
+                // 1. Exact Match: Header "SEGMENT_CODE" matches Permission "SEGMENT_CODE"
+                // 2. Wildcard Match: Permission has "*" (e.g. Reports), allows any header (or no header)
+                if (!allowedContext.equals(requestContext) && !allowedContext.equals("*")) {
+                    continue;
+                }
+
+                // --- B. URL & METHOD CHECK ---
+                String[] muParts = methodAndUrl.split(":", 2);
+                if (muParts.length < 2) continue;
+
+                String allowedMethod = muParts[0];
+                String allowedUrlPattern = muParts[1];
+
+                // Method Match AND URL Pattern Match
+                if (allowedMethod.equals(method) && pathMatcher.match(allowedUrlPattern, uri)) {
+                    isAuthorized = true;
+                    break;
+                }
+
+            }
+        }
+
+        if (!isAuthorized) {
+            log.warn("RBAC Deny \uD83D\uDEAB: User {} (Role {}) -> {} {} (Context: {})", userId, roleId, method, uri, requestContext);
+            sendError(response, HttpServletResponse.SC_FORBIDDEN, "ACCESS_DENIED", "Insufficient Permissions for this resource.");
+            return false;
+        }
+        return true;
+    }
+
+    private void sendError(HttpServletResponse response, int status, String error, String message) throws IOException {
+        response.setStatus(status);
+        response.setContentType("application/json");
+        response.getWriter().write(String.format("{\"status\": %d, \"error\": \"%s\", \"message\": \"%s\"}", status, error, message));
+    }
+
+    private String removeBearer(String token) {
+        if (token != null && token.startsWith("Bearer ")) {
+            return token.substring(7);
+        }
+        return token;
     }
 }
