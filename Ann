@@ -1,1 +1,54 @@
-2026-01-14T18:23:43.162+05:30  INFO 16108 --- [ProcessStatusService] [nio-3000-exec-3] c.f.p.service.ProcessStatusServiceImpl   : processStatus row =[org.springframework.data.jpa.repository.query.AbstractJpaQuery$TupleConverter$TupleBackedMap@720d4dd0, org.springframework.data.jpa.repository.query.AbstractJpaQuery$TupleConverter$TupleBackedMap@728b4332, org.springframework.data.jpa.repository.query.AbstractJpaQuery$TupleConverter$TupleBackedMap@43355d97, org.springframework.data.jpa.repository.query.AbstractJpaQuery$TupleConverter$TupleBackedMap@a590dc9, org.springframework.data.jpa.repository.query.AbstractJpaQuery$TupleConverter$TupleBackedMap@1222b29f, org.springframework.data.jpa.repository.query.AbstractJpaQuery$TupleConverter$TupleBackedMap@3a98e13a, org.springframework.data.jpa.repository.query.AbstractJpaQuery$TupleConverter$TupleBackedMap@5328ca1b, org.springframework.data.jpa.repository.query.AbstractJpaQuery$TupleConverter$TupleBackedMap@115da2f2]
+private List<ProcessDTO> getProcessData() {
+
+    List<Map<String, Object>> processStatus = processStatusRepository.getData();
+
+    List<Map<String, Object>> modifiableResults = processStatus.stream()
+            .map(HashMap::new)
+            .collect(Collectors.toList());
+
+    // Group dynamically by PROCESS_TYPE
+    Map<String, List<Map<String, Object>>> groupedByType =
+            modifiableResults.stream()
+                    .collect(Collectors.groupingBy(
+                            m -> ((String)m.get("PROCESS_TYPE")).toUpperCase()
+                    ));
+
+    List<ProcessDTO> finalProcessedData = new ArrayList<>();
+
+    for (Map.Entry<String, List<Map<String, Object>>> entry : groupedByType.entrySet()) {
+
+        String type = entry.getKey();
+        List<Map<String, Object>> items = entry.getValue();
+
+        List<Map<String, Object>> stageDetails = new ArrayList<>();
+
+        for (Map<String, Object> eachObj : items) {
+            String stageId = String.valueOf(eachObj.get("PROCESS_STAGE"));
+
+            eachObj.remove("id");
+            eachObj.remove("processId");
+            eachObj.remove("type");
+
+            Optional<ProcessStages> existingStageData = processStagesRepository.findById(Long.parseLong(stageId));
+            if (existingStageData.isPresent()) {
+                ProcessStages stageData = existingStageData.get();
+
+                StageDTO stageDTO = new StageDTO();
+                stageDTO.setTitle(stageData.getTitle());
+                stageDTO.setIcon(stageData.getIcon());
+
+                eachObj.put("stage", stageDTO);
+
+                stageDetails.add(eachObj);
+            }
+        }
+
+        ProcessDTO dto = new ProcessDTO();
+        dto.setType(type);
+        dto.setStageDetails(stageDetails);
+
+        finalProcessedData.add(dto);
+    }
+
+    return finalProcessedData;
+}
