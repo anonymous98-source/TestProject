@@ -1,36 +1,204 @@
-:authority
-localhost:1000
-:method
-GET
-:path
-/PS/api/process/processes
-:scheme
-https
-accept
-text/event-stream
-accept-encoding
-gzip, deflate, br, zstd
-accept-language
-en-GB,en-US;q=0.9,en;q=0.8
-cache-control
-no-cache
-cookie
-refresh_token=eyJhbGciOiJIUzI1NiJ9.eyJ0eXBlIjoicmVmcmVzaCIsInN1YiI6IjMzMzMzMzMiLCJqdGkiOiI0YWEzMzQ2Zi1iM2JiLTQxYWMtODQ0Yi0yZmUyYjA4MTBhNWMiLCJpYXQiOjE3NjgyOTg1ODUsImV4cCI6MTc2ODM0MTc4NX0.IB34NPFEAiP4JtK3tqcwBXsCUgtE2l9YqibBfBv3jXM
-priority
-u=1, i
-referer
-https://localhost:1000/process-status
-sec-ch-ua
-"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"
-sec-ch-ua-mobile
-?0
-sec-ch-ua-platform
-"Windows"
-sec-fetch-dest
-empty
-sec-fetch-mode
-cors
-sec-fetch-site
-same-origin
-user-agent
-Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36
+package com.fincore.process_status_service.service;
+
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.Collectors;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fincore.process_status_service.ResponseVO;
+import com.fincore.process_status_service.dto.InsertDTO;
+import com.fincore.process_status_service.dto.ProcessDTO;
+import com.fincore.process_status_service.dto.StageDTO;
+import com.fincore.process_status_service.dto.UpdateDTO;
+import com.fincore.process_status_service.model.ProcessStages;
+import com.fincore.process_status_service.model.ProcessStatus;
+import com.fincore.process_status_service.repository.ProcessStagesRepository;
+import com.fincore.process_status_service.repository.ProcessStatusRepository;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+@RequiredArgsConstructor
+@Service("ProcessStatusService")
+public class ProcessStatusServiceImpl implements ProcessStatusService {
+
+	private final ProcessStatusRepository processStatusRepository;
+	private final ProcessStagesRepository processStagesRepository;
+
+	private final CopyOnWriteArrayList<SseEmitter> processStatusEmitters = new CopyOnWriteArrayList<>();
+
+	@Override
+	public ResponseEntity<ResponseVO<ProcessStatus>> insert(InsertDTO insertDTO) {
+
+		ResponseVO<ProcessStatus> responseVo = new ResponseVO<>();
+
+		ProcessStatus processStatus = new ProcessStatus();
+
+		processStatus.setType(insertDTO.getProcessType());
+		processStatus.setProcessStage(insertDTO.getProcessStage());
+		processStatus.setStartTimeStamp(System.currentTimeMillis());
+		processStatus.setStatus(0);
+		processStatus.setTriggeredBy(insertDTO.getTriggeredBy());
+
+		processStatusRepository.save(processStatus);
+
+		responseVo.setMessage("Data inserted successfully");
+		responseVo.setStatus(HttpStatus.valueOf(HttpStatus.OK.value()));
+		responseVo.setData(processStatus);
+		responseVo.setLocalDatetime(LocalDateTime.now());
+
+		sendProcessStatusUpdates();
+
+		return new ResponseEntity<>(responseVo, responseVo.getStatus());
+	}
+
+	@Override
+	public ResponseEntity<ResponseVO<ProcessStatus>> update(UpdateDTO updateDTO) {
+		ResponseVO<ProcessStatus> responseVo = new ResponseVO<>();
+		Long id = updateDTO.getId();
+
+		Optional<ProcessStatus> existingData = processStatusRepository.findById(id);
+		ProcessStatus existingEntity = new ProcessStatus();
+		ProcessStatus savedEntity = new ProcessStatus();
+		if (existingData.isPresent()) {
+			existingEntity = existingData.get();
+			existingEntity.setEndTimeStamp(System.currentTimeMillis());
+			existingEntity.setStatus(updateDTO.getStatus());
+			existingEntity.setRemarks(updateDTO.getRemarks());
+			savedEntity = processStatusRepository.save(existingEntity);
+		} else {
+			throw new IllegalArgumentException();
+		}
+		responseVo.setMessage("Data Updated Successfully");
+		responseVo.setStatus(HttpStatus.valueOf(HttpStatus.OK.value()));
+		responseVo.setData(savedEntity);
+		responseVo.setLocalDatetime(LocalDateTime.now());
+
+		sendProcessStatusUpdates();
+
+		return new ResponseEntity<>(responseVo, responseVo.getStatus());
+	}
+
+	@Override
+	public SseEmitter getProcessDataSSE() throws JsonProcessingException {
+
+		log.info("Checking data enter point");
+		SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
+		processStatusEmitters.add(emitter);
+		emitter.onCompletion(() -> {
+			processStatusEmitters.remove(emitter);
+			emitter.complete();
+		});
+		emitter.onError((e) -> {
+			processStatusEmitters.remove(emitter);
+			emitter.completeWithError(e);
+		});
+		emitter.onTimeout(() -> {
+			processStatusEmitters.remove(emitter);
+			emitter.complete();
+		});
+		sendProcessStatusUpdates();
+		return emitter;
+	}
+
+	private List<ProcessDTO> getProcessData() {
+
+		List<Map<String, Object>> processStatus = processStatusRepository.getData();
+		List<Map<String, Object>> modifiableResults = processStatus.stream().map(HashMap::new)
+				.collect(Collectors.toList());
+
+		List<Map<String, Object>> stageDetailsGlifs = new ArrayList<>();
+		List<Map<String, Object>> stageDetailsBancs = new ArrayList<>();
+
+		for (Map<String, Object> eachObj : modifiableResults) {
+			String type = (String) eachObj.get("PROCESS_TYPE");
+			if (type.equalsIgnoreCase("BANCS")) {
+				String stage = String.valueOf(eachObj.get("PROCESS_STAGE"));
+
+				eachObj.remove("id");
+				eachObj.remove("processId");
+				eachObj.remove("type");
+
+				Optional<ProcessStages> existingStageData = processStagesRepository.findById(Long.parseLong(stage));
+				if (existingStageData.isPresent()) {
+					ProcessStages stageData = existingStageData.get();
+					StageDTO stageDTO = new StageDTO();
+					stageDTO.setTitle(stageData.getTitle());
+					stageDTO.setIcon(stageData.getIcon());
+
+					eachObj.put("stage", stageDTO);
+
+					stageDetailsBancs.add(eachObj);
+				}
+			} else if (type.equalsIgnoreCase("GLIFS")) {
+
+				String stage = String.valueOf(eachObj.get("PROCESS_STAGE"));
+
+				eachObj.remove("id");
+				eachObj.remove("processId");
+				eachObj.remove("type");
+
+				Optional<ProcessStages> existingStageData = processStagesRepository.findById(Long.parseLong(stage));
+				if (existingStageData.isPresent()) {
+					ProcessStages stageData = existingStageData.get();
+
+					StageDTO stageDTO = new StageDTO();
+					stageDTO.setTitle(stageData.getTitle());
+					stageDTO.setIcon(stageData.getIcon());
+
+					eachObj.put("stage", stageDTO);
+
+					stageDetailsGlifs.add(eachObj);
+				}
+			}
+		}
+
+		ProcessDTO processDTO1 = new ProcessDTO();
+		processDTO1.setType("BANCS");
+		processDTO1.setStageDetails(stageDetailsBancs);
+
+		ProcessDTO processDTO2 = new ProcessDTO();
+		processDTO2.setType("GLIFS");
+		processDTO2.setStageDetails(stageDetailsGlifs);
+
+		List<ProcessDTO> finalProcessedData = new ArrayList<>();
+
+		finalProcessedData.add(processDTO1);
+		finalProcessedData.add(processDTO2);
+
+		return finalProcessedData;
+	}
+
+	private void sendProcessStatusUpdates() {
+
+		Iterator<SseEmitter> emitters = processStatusEmitters.iterator();
+		List<ProcessDTO> data = getProcessData();
+		while (emitters.hasNext()) {
+
+			SseEmitter emitter = emitters.next();
+			try {
+
+				if (emitter != null) {
+
+					emitter.send(SseEmitter.event().data(data).build());
+				}
+			} catch (IOException e) {
+				e.printStackTrace();
+				emitter.completeWithError(e);
+			}
+		}
+	}
+}
