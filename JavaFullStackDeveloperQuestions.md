@@ -501,3 +501,25 @@ Use reverse proxy for API calls
 
 ---
 
+
+1. Differentiate between Volatile and Transient Variable in Java.
+      2. Differentiate between the Vector and ArrayList collections in Java.
+      3. How is Collection different from Collections in Java?
+      4. What do you understand by the ... in the below method parameters?
+      5. Can you write a code for representing thread-safe singleton patterns in Java?
+      6. What is the importance of the hashCode() and equals() contract?
+      7. How is the classpath variable different from the path variables?
+      8. What is the result of the below code and Why?
+      9. How would you help a colleague with lesser Java experience who has trouble in serializing a class?
+      10. What is the best possible way to call the wait() method - by using the if construct or the loop construct?
+      11. Can we use HashMap in a multithreaded environment?
+      12. What is the result of the below code?
+      13. What is the result of the below Java code?
+      14. What will happen if you run 1.0/0.0?
+      15. Is it possible to override a method to throw RuntimeException from throwing NullPointerException in the parent class?
+      16. Is there any difference in defining or creating a String by using String literal and by using the new() operator?
+      17. What is the output of the below code?
+      18. What is the result of the below program?
+      19. What is the output of the below code and why?
+      20. Is it necessary to declare all immutable objects as final?
+      21. What do you know about Factory Design Pattern in Java?
