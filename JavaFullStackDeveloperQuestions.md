@@ -501,10 +501,7 @@ Use reverse proxy for API calls
 
 ---
 
-Here are clear, interview-ready answers to all 21 questions:
 
-
----
 
 1. Volatile vs Transient
 
@@ -799,11 +796,6 @@ class ShapeFactory {
 
 ---
 
-Below is a Capgemini-style Microservices + Spring Boot mock interview tailored for a Java Full-Stack / Backend profile (3–6 yrs).
-Answers are crisp, practical, and scenario-driven—exactly what interviewers expect.
-
-
----
 
 🔹 ROUND 1 – Core Microservices (Easy → Medium)
 
