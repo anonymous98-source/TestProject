@@ -411,11 +411,11 @@ Solved using Context API or state management libraries.
 
 Answer:
 
-Redux	Context
+Redux	            Context
 
-Global state	Simple state
-Middleware support	No middleware
-Better debugging	Lightweight
+Global state	    Simple state <br/>
+Middleware support	No middleware<br/>
+Better debugging	Lightweight<br/>
 
 
 
