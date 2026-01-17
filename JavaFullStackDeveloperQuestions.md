@@ -501,25 +501,641 @@ Use reverse proxy for API calls
 
 ---
 
+Here are clear, interview-ready answers to all 21 questions:
 
-1. Differentiate between Volatile and Transient Variable in Java.
-      2. Differentiate between the Vector and ArrayList collections in Java.
-      3. How is Collection different from Collections in Java?
-      4. What do you understand by the ... in the below method parameters?
-      5. Can you write a code for representing thread-safe singleton patterns in Java?
-      6. What is the importance of the hashCode() and equals() contract?
-      7. How is the classpath variable different from the path variables?
-      8. What is the result of the below code and Why?
-      9. How would you help a colleague with lesser Java experience who has trouble in serializing a class?
-      10. What is the best possible way to call the wait() method - by using the if construct or the loop construct?
-      11. Can we use HashMap in a multithreaded environment?
-      12. What is the result of the below code?
-      13. What is the result of the below Java code?
-      14. What will happen if you run 1.0/0.0?
-      15. Is it possible to override a method to throw RuntimeException from throwing NullPointerException in the parent class?
-      16. Is there any difference in defining or creating a String by using String literal and by using the new() operator?
-      17. What is the output of the below code?
-      18. What is the result of the below program?
-      19. What is the output of the below code and why?
-      20. Is it necessary to declare all immutable objects as final?
-      21. What do you know about Factory Design Pattern in Java?
+
+---
+
+1. Volatile vs Transient
+
+volatile: Ensures visibility of changes to a variable across threads (used in multithreading).
+
+transient: Prevents a variable from being serialized.
+
+
+
+---
+
+2. Vector vs ArrayList
+
+Vector is synchronized (thread-safe) → slower.
+
+ArrayList is not synchronized → faster.
+
+Vector is legacy; ArrayList is preferred.
+
+
+
+---
+
+3. Collection vs Collections
+
+Collection: Interface (List, Set, Queue extend it).
+
+Collections: Utility class with static methods (sort, reverse, synchronize).
+
+
+
+---
+
+4. ... in method parameters
+
+Varargs (variable-length arguments).
+
+
+void test(int... nums)
+
+Allows passing 0 or more arguments.
+
+
+---
+
+5. Thread-safe Singleton (Best Practice)
+
+class Singleton {
+    private Singleton() {}
+
+    private static class Holder {
+        private static final Singleton INSTANCE = new Singleton();
+    }
+
+    public static Singleton getInstance() {
+        return Holder.INSTANCE;
+    }
+}
+
+
+---
+
+6. Importance of hashCode() & equals()
+
+Used by HashMap, HashSet.
+
+Contract:
+
+If equals() is true → hashCode() must be same.
+
+Same hashCode ≠ equals necessarily.
+
+
+
+
+---
+
+7. classpath vs path
+
+PATH: OS-level → locates executables (java, javac).
+
+CLASSPATH: JVM-level → locates .class files & libraries.
+
+
+
+---
+
+8. Result of code and why
+
+👉 Code not provided
+Result depends on:
+
+Static vs instance
+
+Overloading vs overriding
+
+Autoboxing
+
+Exception handling
+
+
+
+---
+
+9. Helping a colleague with Serialization issues
+
+Ensure class implements Serializable
+
+Mark non-serializable fields as transient
+
+Handle serialVersionUID
+
+Avoid serializing resources (DB connections, streams)
+
+
+
+---
+
+10. wait(): if or loop?
+
+✅ Always use loop
+
+while(conditionNotMet) {
+    wait();
+}
+
+Prevents spurious wakeups.
+
+
+---
+
+11. HashMap in multithreading
+
+❌ Not thread-safe. ✅ Use:
+
+Collections.synchronizedMap()
+
+ConcurrentHashMap (best choice)
+
+
+
+---
+
+12. Result of code
+
+👉 Code missing
+Common interview traps:
+
+Integer caching
+
+String pool
+
+Static binding
+
+Try-catch-finally
+
+
+
+---
+
+13. Result of Java code
+
+👉 Code missing
+Outcome depends on:
+
+Order of execution
+
+Exception handling
+
+Static initialization blocks
+
+
+
+---
+
+14. Result of 1.0 / 0.0
+
+✅ Infinity
+
+System.out.println(1.0 / 0.0); // Infinity
+
+(No exception for floating-point division)
+
+
+---
+
+15. Can child throw RuntimeException if parent throws NPE?
+
+❌ No
+
+NullPointerException is already a RuntimeException.
+
+You cannot broaden unchecked exceptions in overriding.
+
+
+
+---
+
+16. String literal vs new()
+
+String s1 = "Java";
+String s2 = new String("Java");
+
+Literal → String Pool
+
+new → Heap (different object)
+
+Literals save memory
+
+
+
+---
+
+17. Output of code
+
+👉 Code missing
+Likely based on:
+
+String immutability
+
+== vs equals
+
+Autoboxing
+
+
+
+---
+
+18. Result of program
+
+👉 Code missing
+Depends on:
+
+Thread behavior
+
+Exception flow
+
+Inheritance rules
+
+
+
+---
+
+19. Output and why
+
+👉 Code missing
+Interviewers usually test:
+
+Operator precedence
+
+Post/pre increment
+
+Method hiding vs overriding
+
+
+
+---
+
+20. Should all immutable objects be final?
+
+❌ Not mandatory
+But best practice:
+
+Class should be final
+
+Fields should be final
+
+No setters
+
+Defensive copies
+
+
+
+---
+
+21. Factory Design Pattern
+
+Creates objects without exposing instantiation logic
+
+Promotes loose coupling
+
+
+interface Shape { }
+class Circle implements Shape { }
+
+class ShapeFactory {
+    static Shape getShape(String type) {
+        return new Circle();
+    }
+}
+
+
+---
+
+Below is a Capgemini-style Microservices + Spring Boot mock interview tailored for a Java Full-Stack / Backend profile (3–6 yrs).
+Answers are crisp, practical, and scenario-driven—exactly what interviewers expect.
+
+
+---
+
+🔹 ROUND 1 – Core Microservices (Easy → Medium)
+
+1. What is a microservice? Why not monolith?
+
+Answer:
+A microservice is an independently deployable service focused on a single business capability.
+It improves scalability, fault isolation, and faster deployments compared to monolithic architecture.
+
+
+---
+
+2. How does Spring Boot help in microservices?
+
+Answer:
+Spring Boot provides:
+
+Embedded server (Tomcat)
+
+Auto-configuration
+
+Production-ready features (Actuator)
+
+Easy integration with Spring Cloud components
+
+
+
+---
+
+3. How do microservices communicate?
+
+Answer:
+
+Synchronous: REST (HTTP)
+
+Asynchronous: Kafka / RabbitMQ
+Asynchronous communication is preferred for better resilience.
+
+
+
+---
+
+4. What is service discovery?
+
+Answer:
+Service discovery allows microservices to dynamically locate each other without hard-coded URLs.
+Example: Eureka Server.
+
+
+---
+
+5. Difference between REST and Feign Client
+
+Answer:
+Feign Client provides a declarative REST client, reducing boilerplate code compared to RestTemplate.
+
+
+---
+
+🔹 ROUND 2 – Spring Cloud & Architecture (Medium)
+
+6. What is an API Gateway?
+
+Answer:
+An API Gateway acts as a single entry point that handles:
+
+Authentication
+
+Routing
+
+Rate limiting
+
+Load balancing
+
+
+Example: Spring Cloud Gateway
+
+
+---
+
+7. How do you handle configuration across microservices?
+
+Answer:
+Using Spring Cloud Config Server, configurations are centralized and version-controlled using Git.
+
+
+---
+
+8. How do you secure microservices?
+
+Answer:
+
+OAuth2 / JWT
+
+API Gateway authentication
+
+Role-based authorization
+
+HTTPS
+
+
+
+---
+
+9. What is Circuit Breaker?
+
+Answer:
+Circuit Breaker prevents cascading failures when a dependent service is down.
+Spring uses Resilience4j.
+
+
+---
+
+10. Difference between Load Balancer & API Gateway
+
+Answer:
+
+Load Balancer distributes traffic.
+
+API Gateway manages cross-cutting concerns like security and routing.
+
+
+
+---
+
+🔹 ROUND 3 – Data, Transactions & Resilience (Medium → Hard)
+
+11. Can multiple microservices share a database?
+
+Answer:
+No. Each microservice must have its own database to maintain loose coupling.
+
+
+---
+
+12. How do you manage transactions across microservices?
+
+Answer:
+Using Saga Pattern:
+
+Choreography (event-based)
+
+Orchestration (central coordinator)
+
+
+
+---
+
+13. How do you handle failures in microservices?
+
+Answer:
+
+Circuit Breaker
+
+Retry
+
+Timeout
+
+Fallback mechanisms
+
+
+
+---
+
+14. Difference between @Transactional in monolith vs microservices
+
+Answer:
+@Transactional works within a single service/database.
+Distributed transactions are handled via Saga, not traditional ACID.
+
+
+---
+
+15. How do you handle versioning in microservices APIs?
+
+Answer:
+
+URL versioning (/v1/orders)
+
+Header-based versioning
+
+Backward compatibility is preferred
+
+
+
+---
+
+🔹 ROUND 4 – Spring Boot Deep Dive (Hard)
+
+16. Difference between RestTemplate and WebClient
+
+Answer:
+
+RestTemplate is blocking (deprecated)
+
+WebClient is non-blocking and reactive
+
+
+
+---
+
+17. How does Spring Boot auto-configuration work?
+
+Answer:
+Spring Boot uses:
+
+@EnableAutoConfiguration
+
+spring.factories
+
+Conditional annotations (@ConditionalOnClass)
+
+
+
+---
+
+18. What are Actuator endpoints?
+
+Answer:
+They expose application health and metrics:
+
+/health
+
+/metrics
+
+/info
+
+
+
+---
+
+19. How do you handle logging and tracing?
+
+Answer:
+
+Centralized logging (ELK Stack)
+
+Distributed tracing using Sleuth + Zipkin
+
+
+
+---
+
+20. What happens when one microservice is slow?
+
+Answer:
+It can block dependent services.
+Handled using:
+
+Timeouts
+
+Circuit breakers
+
+Asynchronous messaging
+
+
+
+---
+
+🔹 ROUND 5 – Real-Time Capgemini Scenario Questions
+
+21. Payment service is down. Order service should still work. How?
+
+Answer:
+Use:
+
+Circuit breaker
+
+Message queue
+
+Eventual consistency
+
+
+
+---
+
+22. How do you deploy microservices?
+
+Answer:
+
+Docker containers
+
+Kubernetes
+
+CI/CD pipelines (Jenkins/GitHub Actions)
+
+
+
+---
+
+23. How do you monitor microservices in production?
+
+Answer:
+
+Actuator
+
+Prometheus + Grafana
+
+Centralized logging
+
+
+
+---
+
+24. How do you scale microservices?
+
+Answer:
+Horizontally scale specific services using containers and load balancers.
+
+
+---
+
+25. When would you NOT use microservices?
+
+Answer:
+
+Small applications
+
+Tight deadlines
+
+Limited DevOps maturity
+
+
+
+---
+
+🔥 Capgemini Final Interview Tip
+
+> Focus on real project usage, not definitions.
+Use keywords: Resilience, Scalability, Fault Isolation, Loose Coupling.
+
+
+
+
+---
