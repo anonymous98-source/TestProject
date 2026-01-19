@@ -1,20 +1,10 @@
-onChange={(e) => {
-  let raw = e.target.value.replace(/\D/g, "");
-  if (raw.length > 4) raw = raw.slice(0, 4);
-  setTempYearInput(raw);
+console.log(
+  "selectedYear =", selectedYear, typeof selectedYear,
+  "minYear =", minYear, typeof minYear,
+  "maxYear =", maxYear, typeof maxYear
+); 
 
-  if (raw.length < 4) {
-    setSelectedYear(null);
-    return;
-  }
-
-  const y = Number(raw);
-
-  if (y >= minYear && y <= maxYear) {
-    setSelectedYear(y);
-  } else {
-    setSelectedYear(null);
-  }
-
-  setPickerOpen(true);
-}} 
+console.log(
+  "minDate =", minYear ? dayjs(`${minYear}-01-01`) : null,
+  "maxDate =", maxYear ? dayjs(`${maxYear}-12-31`) : null
+);
