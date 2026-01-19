@@ -1,3 +1,12 @@
+import com.formdev.flatlaf.FlatDarkLaf;
+import com.formdev.flatlaf.intellijthemes.FlatDraculaIJTheme;
+
+import javax.swing.*;
+import javax.swing.border.EmptyBorder;
+import java.awt.*;
+import java.awt.datatransfer.StringSelection;
+import java.io.File;
+
 public class FileHashGenerator extends JFrame {
 
     private JTextField fileField;
@@ -5,6 +14,21 @@ public class FileHashGenerator extends JFrame {
     private JTextArea resultArea;
     private JProgressBar progressBar;
     private File selectedFile;
+
+    /* =========================
+       LOOK & FEEL INITIALIZER
+       ========================= */
+    static {
+        try {
+            FlatDraculaIJTheme.setup();   // Dracula Theme
+            UIManager.put("Component.arc", 12);
+            UIManager.put("Button.arc", 12);
+            UIManager.put("TextComponent.arc", 10);
+            UIManager.put("ProgressBar.arc", 10);
+        } catch (Exception e) {
+            System.err.println("Failed to initialize FlatLaf");
+        }
+    }
 
     public FileHashGenerator() {
         setTitle("File Hash Generator");
@@ -20,6 +44,7 @@ public class FileHashGenerator extends JFrame {
         root.setBorder(new EmptyBorder(15, 15, 15, 15));
         setContentPane(root);
 
+        /* ===== FILE PANEL ===== */
         JPanel filePanel = new JPanel(new BorderLayout(10, 10));
         fileField = new JTextField();
         fileField.setEditable(false);
@@ -29,9 +54,9 @@ public class FileHashGenerator extends JFrame {
 
         filePanel.add(fileField, BorderLayout.CENTER);
         filePanel.add(browseBtn, BorderLayout.EAST);
-
         root.add(filePanel, BorderLayout.NORTH);
 
+        /* ===== CENTER PANEL ===== */
         JPanel centerPanel = new JPanel();
         centerPanel.setLayout(new BoxLayout(centerPanel, BoxLayout.Y_AXIS));
         centerPanel.setBorder(new EmptyBorder(10, 0, 10, 0));
@@ -53,6 +78,7 @@ public class FileHashGenerator extends JFrame {
         resultArea.setEditable(false);
         resultArea.setLineWrap(true);
         resultArea.setWrapStyleWord(true);
+        resultArea.setFont(new Font("JetBrains Mono", Font.PLAIN, 13));
 
         JScrollPane resultScroll = new JScrollPane(resultArea);
         resultScroll.setBorder(
@@ -68,6 +94,7 @@ public class FileHashGenerator extends JFrame {
 
         root.add(centerPanel, BorderLayout.CENTER);
 
+        /* ===== BOTTOM PANEL ===== */
         JPanel bottomPanel = new JPanel(new BorderLayout(10, 10));
 
         JButton copyBtn = new JButton("Copy to Clipboard");
@@ -112,8 +139,6 @@ public class FileHashGenerator extends JFrame {
             @Override
             protected void done() {
                 try {
-                    // System.out.println("Selected Algo :: " + algoBox.getSelectedItem());
-                    System.out.println("Generated Hash :: " + get());
                     resultArea.setText(algoBox.getSelectedItem() + " : " + get());
                 } catch (Exception e) {
                     JOptionPane.showMessageDialog(
@@ -142,5 +167,12 @@ public class FileHashGenerator extends JFrame {
                             null
                     );
         }
+    }
+
+    /* ===== MAIN METHOD ===== */
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            new FileHashGenerator().setVisible(true);
+        });
     }
 }
