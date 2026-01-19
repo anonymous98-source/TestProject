@@ -1,6 +1,10 @@
 package com.ved.accessChecker;
 
+import com.formdev.flatlaf.FlatDarkLaf;
+import com.formdev.flatlaf.FlatLightLaf;
+import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.intellijthemes.FlatDraculaIJTheme;
+import com.formdev.flatlaf.util.SystemInfo;
 
 import javax.swing.*;
 import javax.swing.text.*;
@@ -9,8 +13,42 @@ import java.io.FileWriter;
 import java.net.MalformedURLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.prefs.Preferences;
 
 public class AccessCheckerApp extends JFrame {
+
+    /* ================= THEME SUPPORT ================= */
+
+    private static final Preferences PREFS =
+            Preferences.userNodeForPackage(AccessCheckerApp.class);
+
+    private static final String PREF_THEME = "ui.theme";
+
+    private enum Theme {
+        SYSTEM, LIGHT, DARK, DRACULA
+    }
+
+    static {
+        try {
+            String theme = PREFS.get(PREF_THEME, Theme.SYSTEM.name());
+
+            switch (Theme.valueOf(theme)) {
+                case LIGHT -> FlatLightLaf.setup();
+                case DARK -> FlatDarkLaf.setup();
+                case DRACULA -> FlatDraculaIJTheme.setup();
+                case SYSTEM -> {
+                    if (SystemInfo.isDarkMode())
+                        FlatDarkLaf.setup();
+                    else
+                        FlatLightLaf.setup();
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Theme init failed");
+        }
+    }
+
+    /* ================= UI COMPONENTS ================= */
 
     private JTextArea inputArea;
     private JTextPane resultPane;
@@ -20,33 +58,52 @@ public class AccessCheckerApp extends JFrame {
 
     private final List<Result> results = new ArrayList<>();
 
+    /* ================= CONSTRUCTOR ================= */
+
     public AccessCheckerApp() {
-        FlatDraculaIJTheme.setup();
         setTitle("Access Checker");
         setSize(960, 540);
         setResizable(false);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
-        Image appIcon = Toolkit.getDefaultToolkit().getImage(getClass().getResource("/icon.png"));
+
+        Image appIcon = Toolkit.getDefaultToolkit()
+                .getImage(getClass().getResource("/icon.png"));
         setIconImage(appIcon);
+
         try {
             if (Taskbar.isTaskbarSupported()) {
                 Taskbar.getTaskbar().setIconImage(appIcon);
             }
-        } catch (Exception ignored) {
-        }
+        } catch (Exception ignored) {}
+
         initUI();
     }
+
+    /* ================= UI ================= */
 
     private void initUI() {
         JPanel panel = new JPanel(null);
         setContentPane(panel);
 
+        /* ---- HEADER ---- */
         JLabel header = new JLabel(
                 "<html><div style='text-align:right;'> © rugved.dev <br/>Version 1.0</div></html>");
-        header.setBounds(835, 10, 180, 40);
+        header.setBounds(820, 10, 130, 40);
         panel.add(header);
 
+        /* ---- THEME SELECTOR ---- */
+        JComboBox<Theme> themeSelector = new JComboBox<>(Theme.values());
+        themeSelector.setSelectedItem(
+                Theme.valueOf(PREFS.get(PREF_THEME, Theme.SYSTEM.name()))
+        );
+        themeSelector.setBounds(680, 15, 130, 26);
+        themeSelector.addActionListener(e ->
+                switchTheme((Theme) themeSelector.getSelectedItem())
+        );
+        panel.add(themeSelector);
+
+        /* ---- INPUT ---- */
         JLabel inputLabel = new JLabel("Enter HOST or HOST:PORT");
         inputLabel.setBounds(30, 40, 400, 20);
         panel.add(inputLabel);
@@ -56,6 +113,7 @@ public class AccessCheckerApp extends JFrame {
         inputScroll.setBounds(30, 65, 380, 260);
         panel.add(inputScroll);
 
+        /* ---- RESULT ---- */
         JLabel resultLabel = new JLabel("Result");
         resultLabel.setBounds(460, 40, 200, 20);
         panel.add(resultLabel);
@@ -66,6 +124,7 @@ public class AccessCheckerApp extends JFrame {
         resultScroll.setBounds(460, 65, 450, 260);
         panel.add(resultScroll);
 
+        /* ---- OPTIONS ---- */
         hostBtn = new JRadioButton("Host Reachability (HTTP)", true);
         tcpBtn = new JRadioButton("TCP Port Check");
 
@@ -87,10 +146,10 @@ public class AccessCheckerApp extends JFrame {
         timeoutField.setBounds(560, 340, 80, 25);
         panel.add(timeoutField);
 
+        /* ---- BUTTONS ---- */
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 0));
-        buttonPanel.setBounds(0, 380, 960, 40); // full width, next line
+        buttonPanel.setBounds(0, 380, 960, 40);
         buttonPanel.setOpaque(false);
-
 
         JButton checkBtn = new JButton("Check");
         JButton exportBtn = new JButton("Export CSV");
@@ -98,35 +157,61 @@ public class AccessCheckerApp extends JFrame {
         JButton resetBtn = new JButton("Reset");
 
         Dimension btnSize = new Dimension(120, 32);
-        checkBtn.setPreferredSize(btnSize);
-        exportBtn.setPreferredSize(btnSize);
-        copyBtn.setPreferredSize(btnSize);
-        resetBtn.setPreferredSize(btnSize);
-
-        Font btnFont = new Font("Segoe UI", Font.PLAIN, 13);
-        checkBtn.setFont(btnFont);
-        exportBtn.setFont(btnFont);
-        copyBtn.setFont(btnFont);
-        resetBtn.setFont(btnFont);
+        for (JButton b : new JButton[]{checkBtn, exportBtn, copyBtn, resetBtn}) {
+            b.setPreferredSize(btnSize);
+        }
 
         buttonPanel.add(checkBtn);
         buttonPanel.add(exportBtn);
         buttonPanel.add(copyBtn);
         buttonPanel.add(resetBtn);
-
         panel.add(buttonPanel);
 
+        /* ---- PROGRESS ---- */
         progressBar = new JProgressBar(0, 100);
         progressBar.setBounds(30, 430, 880, 22);
         progressBar.setStringPainted(true);
-        progressBar.setValue(0);
         progressBar.setString("Ready");
         panel.add(progressBar);
 
         checkBtn.addActionListener(e -> runChecks());
         exportBtn.addActionListener(e -> exportCSV());
         resetBtn.addActionListener(e -> resetAll());
+        copyBtn.addActionListener(e ->
+                Toolkit.getDefaultToolkit().getSystemClipboard()
+                        .setContents(
+                                new java.awt.datatransfer.StringSelection(
+                                        resultPane.getText()), null)
+        );
     }
+
+    /* ================= THEME SWITCHER ================= */
+
+    private void switchTheme(Theme theme) {
+        try {
+            PREFS.put(PREF_THEME, theme.name());
+
+            switch (theme) {
+                case LIGHT -> FlatLightLaf.setup();
+                case DARK -> FlatDarkLaf.setup();
+                case DRACULA -> FlatDraculaIJTheme.setup();
+                case SYSTEM -> {
+                    if (SystemInfo.isDarkMode())
+                        FlatDarkLaf.setup();
+                    else
+                        FlatLightLaf.setup();
+                }
+            }
+
+            FlatLaf.updateUI();
+            SwingUtilities.updateComponentTreeUI(this);
+
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "Theme switch failed");
+        }
+    }
+
+    /* ================= LOGIC (UNCHANGED) ================= */
 
     private void runChecks() {
         results.clear();
@@ -140,36 +225,27 @@ public class AccessCheckerApp extends JFrame {
         progressBar.setString("Checking access...");
 
         SwingWorker<Void, Result> worker = new SwingWorker<>() {
-
             @Override
             protected Void doInBackground() throws MalformedURLException {
                 int processed = 0;
-
                 for (String line : lines) {
                     if (line.isBlank()) continue;
 
                     Result r;
-
                     if (hostBtn.isSelected()) {
                         String host = line.trim();
-                        if (host.contains(":")) {
+                        if (host.contains(":"))
                             host = host.substring(0, host.indexOf(":"));
-                        }
                         r = NetworkChecker.hostReachable(host, timeout);
                     } else {
                         String[] p = line.trim().split(":");
-                        if (p.length != 2) {
+                        if (p.length != 2)
                             r = new Result(line.trim(), false,
                                     "INVALID FORMAT (use host:port)");
-                        } else {
-                            r = NetworkChecker.tcp(
-                                    p[0],
-                                    Integer.parseInt(p[1]),
-                                    timeout
-                            );
-                        }
+                        else
+                            r = NetworkChecker.tcp(p[0],
+                                    Integer.parseInt(p[1]), timeout);
                     }
-
                     publish(r);
                     processed++;
                     setProgress((int) ((processed * 100.0) / lines.length));
@@ -211,13 +287,9 @@ public class AccessCheckerApp extends JFrame {
             StyleConstants.setForeground(style,
                     r.success() ? new Color(0, 220, 140) : Color.RED);
 
-            doc.insertString(
-                    doc.getLength(),
-                    r.target() + " ? " + r.message() + "\n",
-                    style
-            );
-        } catch (Exception ignored) {
-        }
+            doc.insertString(doc.getLength(),
+                    r.target() + " ? " + r.message() + "\n", style);
+        } catch (Exception ignored) {}
     }
 
     private void exportCSV() {
