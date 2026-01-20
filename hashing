@@ -1,190 +1,377 @@
-Perfect 👍 — this is a clean UX improvement and easy to add without breaking anything.
+package com.ved.accessChecker;
 
-Below is a drop-in enhancement to your current FileHashGenerator:
-
-
----
-
-✅ What will change
-
-1️⃣ Generate Hash button
-
-❌ Old: replaces previous result
-
-✅ New: appends each generated hash
-
-Each entry includes:
-
-Algorithm
-
-File name
-
-Hash value
-
-Separator line
+import com.formdev.flatlaf.FlatDarkLaf;
+import com.formdev.flatlaf.FlatLightLaf;
+import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.intellijthemes.FlatDraculaIJTheme;
 
 
+import javax.swing.*;
+import javax.swing.text.*;
+import java.awt.*;
+import java.io.FileWriter;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.prefs.Preferences;
 
-2️⃣ Reset button (NEW)
+public class AccessCheckerApp extends JFrame {
 
-Clears:
-
-Result area
-
-Progress bar
-
-Selected file
-
-File text field
-
-
-Restores app to initial state
+    static boolean isDark = UIManager.getLookAndFeel().getName().toLowerCase().contains("dark");
 
 
+    private enum Theme {SYSTEM, LIGHT, DARK, DRACULA}
 
----
+    private static final Preferences PREFS =
+            Preferences.userNodeForPackage(AccessCheckerApp.class);
 
-🔧 Minimal, Safe Changes (Recommended)
+    private static final String PREF_THEME = "ui.theme";
 
-✅ 1. Add Reset Button (UI)
+    static {
+        try {
+            Theme theme = Theme.valueOf(
+                    PREFS.get(PREF_THEME, Theme.SYSTEM.name())
+            );
 
-Inside initUI() → Footer section, add:
+            switch (theme) {
+                case LIGHT -> FlatLightLaf.setup();
+                case DARK -> FlatDarkLaf.setup();
+                case DRACULA -> FlatDraculaIJTheme.setup();
+                case SYSTEM -> {
+                    if (isDark)
+                        FlatDarkLaf.setup();
+                    else
+                        FlatLightLaf.setup();
+                }
+            }
 
-JButton resetBtn = new JButton("Reset");
-resetBtn.setPreferredSize(btnSize);
-resetBtn.addActionListener(e -> resetAll());
+            UIManager.put("defaultFont",
+                    new Font("Segoe UI", Font.PLAIN, 13));
 
-Add it to left panel before Theme selector:
-
-left.add(copyBtn);
-left.add(resetBtn);
-left.add(new JLabel("Theme:"));
-left.add(themeBox);
+        } catch (Exception ignored) {
+        }
+    }
 
 
----
+    private JTextArea inputArea;
+    private JTextPane resultPane;
+    private JTextField timeoutField;
+    private JProgressBar progressBar;
+    private JRadioButton hostBtn, tcpBtn;
 
-✅ 2. Modify generateHash() to APPEND, not replace
+    private final List<Result> results = new ArrayList<>();
 
-❌ OLD (replace)
 
-resultArea.setText(algoBox.getSelectedItem() + " : " + get());
+    public AccessCheckerApp() {
+        setTitle("Access Checker");
+        setSize(980, 600);
+        setLocationRelativeTo(null);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        Image appIcon = Toolkit.getDefaultToolkit().getImage(getClass().getResource("/icon.png"));
+        setIconImage(appIcon);
+        setResizable(false
+        );
+        try {
+            if (Taskbar.isTaskbarSupported()) {
+                Taskbar.getTaskbar().setIconImage(appIcon);
+            }
+        } catch (Exception ignored) {
+        }
+        initUI();
+    }
 
-✅ NEW (append with formatting)
 
-@Override
-protected void done() {
-    try {
-        String hash = get();
-        String algo = algoBox.getSelectedItem().toString();
-        String fileName = selectedFile.getName();
+    private void initUI() {
+        setLayout(new BorderLayout());
+        add(createHeader(), BorderLayout.NORTH);
+        add(createCenter(), BorderLayout.CENTER);
+        add(createFooter(), BorderLayout.SOUTH);
+    }
 
-        resultArea.append(
-                "Algorithm : " + algo + "\n" +
-                "File      : " + fileName + "\n" +
-                "Hash      : " + hash + "\n" +
-                "----------------------------------------\n"
+
+    private JComponent createHeader() {
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBorder(BorderFactory.createEmptyBorder(12, 16, 12, 16));
+
+        JLabel title = new JLabel("Access Checker");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
+
+        JComboBox<Theme> themeBox = new JComboBox<>(Theme.values());
+        themeBox.setSelectedItem(
+                Theme.valueOf(PREFS.get(PREF_THEME, Theme.SYSTEM.name()))
+        );
+        themeBox.setPreferredSize(new Dimension(150, 28));
+        themeBox.addActionListener(e ->
+                switchTheme((Theme) themeBox.getSelectedItem())
         );
 
-        progressBar.setString("Completed");
+        header.add(title, BorderLayout.WEST);
+        header.add(themeBox, BorderLayout.EAST);
+        return header;
+    }
 
-    } catch (Exception e) {
-        progressBar.setString("Failed");
+
+    private JComponent createCenter() {
+        JPanel center = new JPanel(new GridBagLayout());
+        center.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(8, 8, 8, 8);
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.weighty = 1;
+
+        Font mono = new Font("JetBrains Mono", Font.PLAIN, 13);
+
+        gbc.gridx = 0;
+        gbc.weightx = 0.45;
+
+        inputArea = new JTextArea();
+        inputArea.setFont(mono);
+        center.add(new JScrollPane(inputArea), gbc);
+
+        gbc.gridx = 1;
+        gbc.weightx = 0.55;
+
+        resultPane = new JTextPane();
+        resultPane.setEditable(false);
+        resultPane.setFont(mono);
+        center.add(new JScrollPane(resultPane), gbc);
+
+        return center;
+    }
+
+
+    private JComponent createFooter() {
+        JPanel footer = new JPanel(new BorderLayout());
+        footer.setBorder(BorderFactory.createEmptyBorder(8, 16, 12, 16));
+
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
+
+        hostBtn = new JRadioButton("Host (HTTP)", true);
+        tcpBtn = new JRadioButton("TCP Port");
+
+        ButtonGroup bg = new ButtonGroup();
+        bg.add(hostBtn);
+        bg.add(tcpBtn);
+
+        left.add(hostBtn);
+        left.add(tcpBtn);
+        left.add(new JLabel("Timeout (ms):"));
+
+        timeoutField = new JTextField("3000", 6);
+        left.add(timeoutField);
+
+        JButton checkBtn = new JButton("Check");
+        JButton exportBtn = new JButton("Export CSV");
+        JButton resetBtn = new JButton("Reset");
+
+        left.add(checkBtn);
+        left.add(exportBtn);
+        left.add(resetBtn);
+
+        progressBar = new JProgressBar();
+        progressBar.setPreferredSize(new Dimension(220, 18));
+        progressBar.setStringPainted(true);
+        progressBar.setString("Ready");
+
+        footer.add(left, BorderLayout.WEST);
+        footer.add(progressBar, BorderLayout.EAST);
+
+        checkBtn.addActionListener(e -> runChecks());
+        exportBtn.addActionListener(e -> exportCSV());
+        resetBtn.addActionListener(e -> resetAll());
+
+        return footer;
+    }
+
+
+    private Integer validateTimeout() {
+        try {
+            int t = Integer.parseInt(timeoutField.getText().trim());
+            if (t <= 0 || t > 60000)
+                throw new NumberFormatException();
+            return t;
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Timeout must be a number between 1 and 60000 ms",
+                    "Invalid Timeout",
+                    JOptionPane.WARNING_MESSAGE
+            );
+            timeoutField.requestFocus();
+            return null;
+        }
+    }
+
+    private List<String> validateInput() {
+        List<String> valid = new ArrayList<>();
+        String text = inputArea.getText();
+
+        if (text == null || text.trim().isEmpty()) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Please enter at least one HOST or HOST:PORT",
+                    "No Input",
+                    JOptionPane.WARNING_MESSAGE
+            );
+            return valid;
+        }
+
+        for (String line : text.split("\\n")) {
+            String v = line.trim();
+            if (!v.isEmpty()) valid.add(v);
+        }
+
+        if (valid.isEmpty()) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "No valid entries found",
+                    "Invalid Input",
+                    JOptionPane.WARNING_MESSAGE
+            );
+        }
+        return valid;
+    }
+
+
+    private void runChecks() {
+        results.clear();
+        resultPane.setText("");
+
+        Integer timeout = validateTimeout();
+        if (timeout == null) return;
+
+        List<String> targets = validateInput();
+        if (targets.isEmpty()) return;
+
+        progressBar.setIndeterminate(true);
+        progressBar.setString("Checking...");
+
+        SwingWorker<Void, Result> worker = new SwingWorker<>() {
+
+            @Override
+            protected Void doInBackground() {
+                for (String line : targets) {
+                    try {
+                        Result r;
+                        if (hostBtn.isSelected()) {
+                            String host = line.split(":")[0];
+                            r = NetworkChecker.hostReachable(host, timeout);
+                        } else {
+                            String[] p = line.split(":");
+                            if (p.length != 2)
+                                r = new Result(line, false, "INVALID FORMAT");
+                            else {
+                                int port = Integer.parseInt(p[1]);
+                                if (port < 1 || port > 65535)
+                                    throw new NumberFormatException();
+                                r = NetworkChecker.tcp(p[0], port, timeout);
+                            }
+                        }
+                        publish(r);
+                    } catch (Exception ex) {
+                        publish(new Result(line, false, ex.getMessage()));
+                    }
+                }
+                return null;
+            }
+
+            @Override
+            protected void process(List<Result> chunks) {
+                progressBar.setIndeterminate(false);
+                for (Result r : chunks) {
+                    results.add(r);
+                    appendColored(r);
+                }
+            }
+
+            @Override
+            protected void done() {
+                progressBar.setValue(100);
+                progressBar.setString("Completed");
+            }
+        };
+
+        worker.execute();
+    }
+
+    private void appendColored(Result r) {
+        try {
+            StyledDocument doc = resultPane.getStyledDocument();
+            Style s = resultPane.addStyle("s", null);
+            StyleConstants.setForeground(
+                    s,
+                    r.success()
+                            ? new Color(80, 250, 123)
+                            : new Color(255, 85, 85)
+            );
+            doc.insertString(
+                    doc.getLength(),
+                    r.target() + " ? " + r.message() + "\n",
+                    s
+            );
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void exportCSV() {
+        if (results.isEmpty()) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "No data to export",
+                    "Export",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+            return;
+        }
+        try (FileWriter fw = new FileWriter("access_result.csv")) {
+            fw.write("Target,Status,Message\n");
+            for (Result r : results) {
+                fw.write(r.target() + "," +
+                        (r.success() ? "SUCCESS" : "FAILED") + "," +
+                        r.message() + "\n");
+            }
+            JOptionPane.showMessageDialog(this, "CSV exported");
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, e.getMessage());
+        }
+    }
+
+    private void resetAll() {
+        inputArea.setText("");
+        resultPane.setText("");
+        results.clear();
+        progressBar.setValue(0);
+        progressBar.setString("Ready");
         JOptionPane.showMessageDialog(
-                FileHashGenerator.this,
-                e.getMessage(),
-                "Hash Error",
-                JOptionPane.ERROR_MESSAGE
+                this,
+                "Data Reset Complete! Let's get you started",
+                "Reset",
+                JOptionPane.INFORMATION_MESSAGE
         );
     }
+
+    private void switchTheme(Theme theme) {
+        try {
+            PREFS.put(PREF_THEME, theme.name());
+            switch (theme) {
+                case LIGHT -> FlatLightLaf.setup();
+                case DARK -> FlatDarkLaf.setup();
+                case DRACULA -> FlatDraculaIJTheme.setup();
+                case SYSTEM -> {
+                    if (isDark)
+                        FlatDarkLaf.setup();
+                    else
+                        FlatLightLaf.setup();
+                }
+            }
+            FlatLaf.updateUI();
+            SwingUtilities.updateComponentTreeUI(this);
+        } catch (Exception ignored) {
+        }
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() ->
+                new AccessCheckerApp().setVisible(true));
+    }
 }
-
-⚠️ Important:
-Do NOT clear resultArea at the start anymore.
-
-So REMOVE this line from generateHash():
-
-resultArea.setText(""); // ❌ REMOVE
-
-
----
-
-✅ 3. Improve Progress Bar State
-
-At start of generateHash():
-
-progressBar.setValue(0);
-progressBar.setString("Processing...");
-
-
----
-
-✅ 4. Add resetAll() Method (NEW)
-
-private void resetAll() {
-    selectedFile = null;
-    fileField.setText("");
-    resultArea.setText("");
-    progressBar.setValue(0);
-    progressBar.setString("Ready");
-}
-
-This resets the app to exactly how it was on startup.
-
-
----
-
-🧠 UX Result
-
-After clicking Generate Hash multiple times:
-
-Algorithm : SHA-256
-File      : test.pdf
-Hash      : 9A7F...
-
-----------------------------------------
-Algorithm : MD5
-File      : test.pdf
-Hash      : 1BC3...
-
-----------------------------------------
-Algorithm : SHA-512
-File      : test.pdf
-Hash      : A88D...
-----------------------------------------
-
-After clicking Reset
-
-✔ File cleared
-✔ Result cleared
-✔ Progress reset
-✔ App ready again
-
-
----
-
-✅ Why this approach is correct
-
-✔ No threading issues
-✔ No UI freezes
-✔ No data loss
-✔ Scales for many hashes
-✔ Professional CLI-like output
-
-
----
-
-🚀 Optional Enhancements (if you want next)
-
-📋 Copy single hash line on click
-
-📁 Generate hashes for multiple files
-
-💾 Auto-save results to .txt
-
-📊 Switch result area to table view
-
-🔍 Verify hash against checksum
-
-
-Just say 👍 and I’ll add it cleanly.
