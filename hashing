@@ -5,6 +5,7 @@ import com.formdev.flatlaf.FlatLightLaf;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.intellijthemes.FlatDraculaIJTheme;
+import com.formdev.flatlaf.util.SystemInfo;
 import com.kpmg.filehash.constants.HashAlgorithm;
 import com.kpmg.filehash.service.HashService;
 
@@ -18,28 +19,27 @@ import java.util.prefs.Preferences;
 
 public class FileHashGenerator extends JFrame {
 
+    /* ================= THEME ================= */
+
+    private enum Theme { SYSTEM, LIGHT, DARK, DRACULA }
+
     private static final Preferences PREFS =
             Preferences.userNodeForPackage(FileHashGenerator.class);
 
     private static final String PREF_THEME = "ui.theme";
 
-    static boolean isDark = UIManager.getLookAndFeel().getName().toLowerCase().contains("dark");
-
-    private enum Theme {
-        SYSTEM, LIGHT, DARK, DRACULA
-    }
-
-
     static {
         try {
-            String theme = PREFS.get(PREF_THEME, Theme.SYSTEM.name());
+            Theme theme = Theme.valueOf(
+                    PREFS.get(PREF_THEME, Theme.SYSTEM.name())
+            );
 
-            switch (Theme.valueOf(theme)) {
+            switch (theme) {
                 case LIGHT -> FlatLightLaf.setup();
                 case DARK -> FlatDarkLaf.setup();
                 case DRACULA -> FlatDraculaIJTheme.setup();
                 case SYSTEM -> {
-                    if (isDark)
+                    if (SystemInfo.isDarkMode())
                         FlatDarkLaf.setup();
                     else
                         FlatLightLaf.setup();
@@ -47,18 +47,19 @@ public class FileHashGenerator extends JFrame {
             }
 
             UIManager.put("TitlePane.useWindowDecorations", true);
-            UIManager.put("TitlePane.height", 42);
-            UIManager.put("TitlePane.height", 42);
             UIManager.put("Component.arc", 12);
             UIManager.put("Button.arc", 12);
             UIManager.put("TextComponent.arc", 10);
             UIManager.put("ProgressBar.arc", 10);
+            UIManager.put("defaultFont",
+                    new Font("Segoe UI", Font.PLAIN, 13));
 
         } catch (Exception e) {
             System.err.println("Failed to initialize Look & Feel");
         }
     }
 
+    /* ================= UI FIELDS ================= */
 
     private JTextField fileField;
     private JComboBox<HashAlgorithm> algoBox;
@@ -66,84 +67,84 @@ public class FileHashGenerator extends JFrame {
     private JProgressBar progressBar;
     private File selectedFile;
 
+    /* ================= CONSTRUCTOR ================= */
 
     public FileHashGenerator() {
         setTitle("File Hash Generator");
         setSize(960, 540);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setupTitleBar();
         setResizable(false);
-        Image appIcon = Toolkit.getDefaultToolkit().getImage(getClass().getResource("/slack.png"));
-        setIconImage(appIcon);
-        try {
-            if (Taskbar.isTaskbarSupported()) {
-                Taskbar.getTaskbar().setIconImage(appIcon);
-            }
-        } catch (Exception ignored) {
-        }
+
+        Image icon = Toolkit.getDefaultToolkit()
+                .getImage(getClass().getResource("/slack.png"));
+        setIconImage(icon);
+
+        setupTitleBar();
         initUI();
     }
 
+    /* ================= TITLE BAR ================= */
 
     private void setupTitleBar() {
         getRootPane().putClientProperty(
                 FlatClientProperties.TITLE_BAR_BACKGROUND,
                 new Color[]{
-                        new Color(98, 0, 234),   // Gradient start
-                        new Color(55, 0, 179)    // Gradient end
+                        new Color(98, 0, 234),
+                        new Color(55, 0, 179)
                 }
         );
-
         getRootPane().putClientProperty(
                 FlatClientProperties.TITLE_BAR_FOREGROUND,
                 Color.WHITE
         );
-
-
     }
 
+    /* ================= UI ================= */
 
     private void initUI() {
-        JPanel root = new JPanel(new BorderLayout(15, 15));
-        root.setBorder(new EmptyBorder(15, 15, 15, 15));
+        JPanel root = new JPanel(new BorderLayout(16, 16));
+        root.setBorder(new EmptyBorder(16, 16, 16, 16));
         setContentPane(root);
-        Dimension staticDimension = new Dimension(120, 32);
 
+        Dimension btnSize = new Dimension(140, 32);
 
-        JPanel filePanel = new JPanel(new BorderLayout(10, 10));
-        filePanel.setPreferredSize(staticDimension);
+        /* ---------- FILE PANEL ---------- */
+
+        JPanel filePanel = new JPanel(new BorderLayout(10, 0));
         fileField = new JTextField();
         fileField.setEditable(false);
 
         JButton browseBtn = new JButton("Browse");
-        browseBtn.setPreferredSize(staticDimension);
+        browseBtn.setPreferredSize(btnSize);
         browseBtn.addActionListener(e -> chooseFile());
 
         filePanel.add(fileField, BorderLayout.CENTER);
         filePanel.add(browseBtn, BorderLayout.EAST);
+
         root.add(filePanel, BorderLayout.NORTH);
 
+        /* ---------- CENTER ---------- */
 
-        JPanel centerPanel = new JPanel();
-        centerPanel.setLayout(new BoxLayout(centerPanel, BoxLayout.Y_AXIS));
+        JPanel center = new JPanel();
+        center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
 
-        JPanel algoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 5));
+        JPanel algoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
         algoBox = new JComboBox<>(HashAlgorithm.values());
-        algoBox.setPreferredSize(staticDimension);
+        algoBox.setPreferredSize(btnSize);
 
         JButton generateBtn = new JButton("Generate Hash");
-        generateBtn.setPreferredSize(staticDimension);
+        generateBtn.setPreferredSize(btnSize);
         generateBtn.addActionListener(e -> generateHash());
 
         algoPanel.add(new JLabel("Algorithm:"));
         algoPanel.add(algoBox);
         algoPanel.add(generateBtn);
 
-        centerPanel.add(algoPanel);
-        centerPanel.add(Box.createVerticalStrut(10));
+        center.add(algoPanel);
+        center.add(Box.createVerticalStrut(12));
 
-        resultArea = new JTextArea(4, 40);
+        resultArea = new JTextArea(5, 40);
         resultArea.setEditable(false);
         resultArea.setLineWrap(true);
         resultArea.setWrapStyleWord(true);
@@ -154,69 +155,49 @@ public class FileHashGenerator extends JFrame {
                 BorderFactory.createTitledBorder("Result Hash")
         );
 
-        centerPanel.add(resultScroll);
-        centerPanel.add(Box.createVerticalStrut(15));
+        center.add(resultScroll);
+        center.add(Box.createVerticalStrut(12));
 
         progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
-        centerPanel.add(progressBar);
+        progressBar.setString("Ready");
 
-        root.add(centerPanel, BorderLayout.CENTER);
+        center.add(progressBar);
 
+        root.add(center, BorderLayout.CENTER);
 
-        JPanel bottomPanel = new JPanel(new BorderLayout(10, 10));
+        /* ---------- FOOTER ---------- */
 
-        JButton copyBtn = new JButton("Copy to Clipboard");
-        copyBtn.setPreferredSize(staticDimension);
+        JPanel footer = new JPanel(new BorderLayout(10, 0));
+
+        JButton copyBtn = new JButton("Copy");
+        copyBtn.setPreferredSize(btnSize);
         copyBtn.addActionListener(e -> copyHash());
 
-        JComboBox<Theme> themeSelector = new JComboBox<>(Theme.values());
-        themeSelector.setPreferredSize(staticDimension);
-        themeSelector.setSelectedItem(
+        JComboBox<Theme> themeBox = new JComboBox<>(Theme.values());
+        themeBox.setPreferredSize(btnSize);
+        themeBox.setSelectedItem(
                 Theme.valueOf(PREFS.get(PREF_THEME, Theme.SYSTEM.name()))
         );
-        themeSelector.addActionListener(e ->
-                switchTheme((Theme) themeSelector.getSelectedItem())
+        themeBox.addActionListener(e ->
+                switchTheme((Theme) themeBox.getSelectedItem())
         );
 
-        JPanel leftPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
-        leftPanel.add(copyBtn);
-        leftPanel.add(new JLabel("Theme:"));
-        leftPanel.add(themeSelector);
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        left.add(copyBtn);
+        left.add(new JLabel("Theme:"));
+        left.add(themeBox);
 
-        JLabel footer = new JLabel("© rugved.dev");
-        footer.setForeground(Color.GRAY);
+        JLabel footerLabel = new JLabel("© rugved.dev");
+        footerLabel.setForeground(Color.GRAY);
 
-        bottomPanel.add(leftPanel, BorderLayout.WEST);
-        bottomPanel.add(footer, BorderLayout.EAST);
+        footer.add(left, BorderLayout.WEST);
+        footer.add(footerLabel, BorderLayout.EAST);
 
-        root.add(bottomPanel, BorderLayout.SOUTH);
+        root.add(footer, BorderLayout.SOUTH);
     }
 
-    private void switchTheme(Theme theme) {
-        try {
-            PREFS.put(PREF_THEME, theme.name());
-
-            switch (theme) {
-                case LIGHT -> FlatLightLaf.setup();
-                case DARK -> FlatDarkLaf.setup();
-                case DRACULA -> FlatDraculaIJTheme.setup();
-                case SYSTEM -> {
-                    if (isDark)
-                        FlatDarkLaf.setup();
-                    else
-                        FlatLightLaf.setup();
-                }
-            }
-
-            FlatLaf.updateUI();
-            SwingUtilities.updateComponentTreeUI(this);
-
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "Theme switch failed");
-        }
-    }
-
+    /* ================= ACTIONS ================= */
 
     private void chooseFile() {
         JFileChooser chooser = new JFileChooser();
@@ -228,19 +209,26 @@ public class FileHashGenerator extends JFrame {
 
     private void generateHash() {
         if (selectedFile == null) {
-            JOptionPane.showMessageDialog(this, "Please select a file.");
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Please select a file first.",
+                    "No File Selected",
+                    JOptionPane.WARNING_MESSAGE
+            );
             return;
         }
 
         resultArea.setText("");
         progressBar.setValue(0);
+        progressBar.setString("Processing...");
 
         SwingWorker<String, Integer> worker = new SwingWorker<>() {
             @Override
             protected String doInBackground() throws Exception {
                 return HashService.generateHash(
                         selectedFile,
-                        ((HashAlgorithm) Objects.requireNonNull(algoBox.getSelectedItem())).getAlgorithm(),
+                        Objects.requireNonNull(
+                                algoBox.getSelectedItem()).getAlgorithm(),
                         this::setProgress
                 );
             }
@@ -248,11 +236,17 @@ public class FileHashGenerator extends JFrame {
             @Override
             protected void done() {
                 try {
-                    resultArea.setText(algoBox.getSelectedItem() + " : " + get());
+                    resultArea.setText(
+                            algoBox.getSelectedItem() + " : " + get()
+                    );
+                    progressBar.setString("Completed");
                 } catch (Exception e) {
+                    progressBar.setString("Failed");
                     JOptionPane.showMessageDialog(
                             FileHashGenerator.this,
-                            "Error: " + e.getMessage()
+                            e.getMessage(),
+                            "Hash Generation Error",
+                            JOptionPane.ERROR_MESSAGE
                     );
                 }
             }
@@ -268,16 +262,52 @@ public class FileHashGenerator extends JFrame {
     }
 
     private void copyHash() {
-        if (!resultArea.getText().isEmpty()) {
-            Toolkit.getDefaultToolkit()
-                    .getSystemClipboard()
-                    .setContents(
-                            new StringSelection(resultArea.getText()),
-                            null
-                    );
+        if (resultArea.getText().isEmpty()) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Nothing to copy.",
+                    "Copy",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+            return;
         }
+
+        Toolkit.getDefaultToolkit()
+                .getSystemClipboard()
+                .setContents(
+                        new StringSelection(resultArea.getText()),
+                        null
+                );
     }
 
+    private void switchTheme(Theme theme) {
+        try {
+            PREFS.put(PREF_THEME, theme.name());
+
+            switch (theme) {
+                case LIGHT -> FlatLightLaf.setup();
+                case DARK -> FlatDarkLaf.setup();
+                case DRACULA -> FlatDraculaIJTheme.setup();
+                case SYSTEM -> {
+                    if (SystemInfo.isDarkMode())
+                        FlatDarkLaf.setup();
+                    else
+                        FlatLightLaf.setup();
+                }
+            }
+
+            FlatLaf.updateUI();
+            SwingUtilities.updateComponentTreeUI(this);
+
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Theme switch failed",
+                    "Theme",
+                    JOptionPane.ERROR_MESSAGE
+            );
+        }
+    }
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() ->
