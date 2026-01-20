@@ -1,492 +1,287 @@
-Great ask 👍 — this is exactly what makes the app feel production-grade.
-
-Below I’ve extended the rewritten class to add robust validation, warnings, and exception handling, while keeping it a drop-in replacement.
-
-I’ll show:
-
-1. What warnings are handled
-
-
-2. UX behavior (what user sees)
-
-
-3. Full updated code (copy-paste ready)
-
-
-
-
----
-
-✅ Warnings & Validations Added
-
-🔴 Input validation
-
-❌ No input provided
-
-❌ Only blank lines / spaces
-
-❌ Invalid host
-
-❌ Invalid host:port format
-
-❌ Port not numeric
-
-❌ Port out of range (1–65535)
-
-
-🔴 Timeout validation
-
-❌ Empty timeout
-
-❌ Non-numeric timeout
-
-❌ Timeout ≤ 0
-
-❌ Timeout too large (guardrail)
-
-
-🔴 Runtime safety
-
-❌ Network errors
-
-❌ Malformed URLs
-
-❌ Unexpected exceptions
-
-❌ Prevent UI freeze
-
-❌ Graceful error messages
-
-
-🔴 UX improvements
-
-Warning dialog before execution
-
-Inline error messages in result panel
-
-Progress bar reset on failure
-
-No silent failures
-
-
-
----
-
-🧠 UX Rules Implemented
-
-Situation	Behavior
-
-No IP entered	⚠️ Warning dialog
-Invalid format	⚠️ Shown in result
-Bad timeout	⚠️ Focus timeout field
-Partial failures	✅ Continue others
-Exception	❌ Clear message
-Empty result	ℹ️ “No valid targets found”
-
-
-
----
-
-✅ FULL UPDATED CLASS (WITH VALIDATION & WARNINGS)
-
-> Drop-in replacement for your last version
-No business logic removed — only hardened
-
-
-
-package com.ved.accessChecker;
+package com.kpmg.filehash.ui;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.intellijthemes.FlatDraculaIJTheme;
-import com.formdev.flatlaf.util.SystemInfo;
+import com.kpmg.filehash.constants.HashAlgorithm;
+import com.kpmg.filehash.service.HashService;
 
 import javax.swing.*;
-import javax.swing.text.*;
+import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.io.FileWriter;
-import java.net.MalformedURLException;
-import java.util.ArrayList;
-import java.util.List;
+import java.awt.datatransfer.StringSelection;
+import java.io.File;
+import java.util.Objects;
 import java.util.prefs.Preferences;
 
-public class AccessCheckerApp extends JFrame {
-
-    /* ================= THEME ================= */
-
-    private enum Theme { SYSTEM, LIGHT, DARK, DRACULA }
+public class FileHashGenerator extends JFrame {
 
     private static final Preferences PREFS =
-            Preferences.userNodeForPackage(AccessCheckerApp.class);
+            Preferences.userNodeForPackage(FileHashGenerator.class);
 
     private static final String PREF_THEME = "ui.theme";
 
+    static boolean isDark = UIManager.getLookAndFeel().getName().toLowerCase().contains("dark");
+
+    private enum Theme {
+        SYSTEM, LIGHT, DARK, DRACULA
+    }
+
+
     static {
         try {
-            Theme theme = Theme.valueOf(
-                    PREFS.get(PREF_THEME, Theme.SYSTEM.name())
-            );
+            String theme = PREFS.get(PREF_THEME, Theme.SYSTEM.name());
 
-            switch (theme) {
+            switch (Theme.valueOf(theme)) {
                 case LIGHT -> FlatLightLaf.setup();
                 case DARK -> FlatDarkLaf.setup();
                 case DRACULA -> FlatDraculaIJTheme.setup();
                 case SYSTEM -> {
-                    if (SystemInfo.isDarkMode())
+                    if (isDark)
                         FlatDarkLaf.setup();
                     else
                         FlatLightLaf.setup();
                 }
             }
 
-            UIManager.put("defaultFont",
-                    new Font("Segoe UI", Font.PLAIN, 13));
+            UIManager.put("TitlePane.useWindowDecorations", true);
+            UIManager.put("TitlePane.height", 42);
+            UIManager.put("TitlePane.height", 42);
+            UIManager.put("Component.arc", 12);
+            UIManager.put("Button.arc", 12);
+            UIManager.put("TextComponent.arc", 10);
+            UIManager.put("ProgressBar.arc", 10);
 
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            System.err.println("Failed to initialize Look & Feel");
+        }
     }
 
-    /* ================= UI FIELDS ================= */
 
-    private JTextArea inputArea;
-    private JTextPane resultPane;
-    private JTextField timeoutField;
+    private JTextField fileField;
+    private JComboBox<HashAlgorithm> algoBox;
+    private JTextArea resultArea;
     private JProgressBar progressBar;
-    private JRadioButton hostBtn, tcpBtn;
+    private File selectedFile;
 
-    private final List<Result> results = new ArrayList<>();
 
-    /* ================= CONSTRUCTOR ================= */
-
-    public AccessCheckerApp() {
-        setTitle("Access Checker");
-        setSize(980, 600);
+    public FileHashGenerator() {
+        setTitle("File Hash Generator");
+        setSize(960, 540);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-
+        setupTitleBar();
+        setResizable(false);
+        Image appIcon = Toolkit.getDefaultToolkit().getImage(getClass().getResource("/slack.png"));
+        setIconImage(appIcon);
+        try {
+            if (Taskbar.isTaskbarSupported()) {
+                Taskbar.getTaskbar().setIconImage(appIcon);
+            }
+        } catch (Exception ignored) {
+        }
         initUI();
     }
 
-    /* ================= UI ================= */
+
+    private void setupTitleBar() {
+        getRootPane().putClientProperty(
+                FlatClientProperties.TITLE_BAR_BACKGROUND,
+                new Color[]{
+                        new Color(98, 0, 234),   // Gradient start
+                        new Color(55, 0, 179)    // Gradient end
+                }
+        );
+
+        getRootPane().putClientProperty(
+                FlatClientProperties.TITLE_BAR_FOREGROUND,
+                Color.WHITE
+        );
+
+
+    }
+
 
     private void initUI() {
-        setLayout(new BorderLayout());
-        add(createHeader(), BorderLayout.NORTH);
-        add(createCenter(), BorderLayout.CENTER);
-        add(createFooter(), BorderLayout.SOUTH);
-    }
+        JPanel root = new JPanel(new BorderLayout(15, 15));
+        root.setBorder(new EmptyBorder(15, 15, 15, 15));
+        setContentPane(root);
+        Dimension staticDimension = new Dimension(120, 32);
 
-    /* ---------- HEADER ---------- */
 
-    private JComponent createHeader() {
-        JPanel header = new JPanel(new BorderLayout());
-        header.setBorder(BorderFactory.createEmptyBorder(12, 16, 12, 16));
+        JPanel filePanel = new JPanel(new BorderLayout(10, 10));
+        filePanel.setPreferredSize(staticDimension);
+        fileField = new JTextField();
+        fileField.setEditable(false);
 
-        JLabel title = new JLabel("Access Checker");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
+        JButton browseBtn = new JButton("Browse");
+        browseBtn.setPreferredSize(staticDimension);
+        browseBtn.addActionListener(e -> chooseFile());
 
-        JComboBox<Theme> themeBox = new JComboBox<>(Theme.values());
-        themeBox.setSelectedItem(
+        filePanel.add(fileField, BorderLayout.CENTER);
+        filePanel.add(browseBtn, BorderLayout.EAST);
+        root.add(filePanel, BorderLayout.NORTH);
+
+
+        JPanel centerPanel = new JPanel();
+        centerPanel.setLayout(new BoxLayout(centerPanel, BoxLayout.Y_AXIS));
+
+        JPanel algoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 5));
+        algoBox = new JComboBox<>(HashAlgorithm.values());
+        algoBox.setPreferredSize(staticDimension);
+
+        JButton generateBtn = new JButton("Generate Hash");
+        generateBtn.setPreferredSize(staticDimension);
+        generateBtn.addActionListener(e -> generateHash());
+
+        algoPanel.add(new JLabel("Algorithm:"));
+        algoPanel.add(algoBox);
+        algoPanel.add(generateBtn);
+
+        centerPanel.add(algoPanel);
+        centerPanel.add(Box.createVerticalStrut(10));
+
+        resultArea = new JTextArea(4, 40);
+        resultArea.setEditable(false);
+        resultArea.setLineWrap(true);
+        resultArea.setWrapStyleWord(true);
+        resultArea.setFont(new Font("JetBrains Mono", Font.PLAIN, 13));
+
+        JScrollPane resultScroll = new JScrollPane(resultArea);
+        resultScroll.setBorder(
+                BorderFactory.createTitledBorder("Result Hash")
+        );
+
+        centerPanel.add(resultScroll);
+        centerPanel.add(Box.createVerticalStrut(15));
+
+        progressBar = new JProgressBar(0, 100);
+        progressBar.setStringPainted(true);
+        centerPanel.add(progressBar);
+
+        root.add(centerPanel, BorderLayout.CENTER);
+
+
+        JPanel bottomPanel = new JPanel(new BorderLayout(10, 10));
+
+        JButton copyBtn = new JButton("Copy to Clipboard");
+        copyBtn.setPreferredSize(staticDimension);
+        copyBtn.addActionListener(e -> copyHash());
+
+        JComboBox<Theme> themeSelector = new JComboBox<>(Theme.values());
+        themeSelector.setPreferredSize(staticDimension);
+        themeSelector.setSelectedItem(
                 Theme.valueOf(PREFS.get(PREF_THEME, Theme.SYSTEM.name()))
         );
-        themeBox.setPreferredSize(new Dimension(150, 28));
-        themeBox.addActionListener(e ->
-                switchTheme((Theme) themeBox.getSelectedItem())
+        themeSelector.addActionListener(e ->
+                switchTheme((Theme) themeSelector.getSelectedItem())
         );
 
-        header.add(title, BorderLayout.WEST);
-        header.add(themeBox, BorderLayout.EAST);
-        return header;
-    }
+        JPanel leftPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        leftPanel.add(copyBtn);
+        leftPanel.add(new JLabel("Theme:"));
+        leftPanel.add(themeSelector);
 
-    /* ---------- CENTER ---------- */
+        JLabel footer = new JLabel("© rugved.dev");
+        footer.setForeground(Color.GRAY);
 
-    private JComponent createCenter() {
-        JPanel center = new JPanel(new GridBagLayout());
-        center.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
+        bottomPanel.add(leftPanel, BorderLayout.WEST);
+        bottomPanel.add(footer, BorderLayout.EAST);
 
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(8, 8, 8, 8);
-        gbc.fill = GridBagConstraints.BOTH;
-        gbc.weighty = 1;
-
-        Font mono = new Font("JetBrains Mono", Font.PLAIN, 13);
-
-        gbc.gridx = 0;
-        gbc.weightx = 0.45;
-
-        inputArea = new JTextArea();
-        inputArea.setFont(mono);
-        center.add(new JScrollPane(inputArea), gbc);
-
-        gbc.gridx = 1;
-        gbc.weightx = 0.55;
-
-        resultPane = new JTextPane();
-        resultPane.setEditable(false);
-        resultPane.setFont(mono);
-        center.add(new JScrollPane(resultPane), gbc);
-
-        return center;
-    }
-
-    /* ---------- FOOTER ---------- */
-
-    private JComponent createFooter() {
-        JPanel footer = new JPanel(new BorderLayout());
-        footer.setBorder(BorderFactory.createEmptyBorder(8, 16, 12, 16));
-
-        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
-
-        hostBtn = new JRadioButton("Host (HTTP)", true);
-        tcpBtn = new JRadioButton("TCP Port");
-
-        ButtonGroup bg = new ButtonGroup();
-        bg.add(hostBtn);
-        bg.add(tcpBtn);
-
-        left.add(hostBtn);
-        left.add(tcpBtn);
-        left.add(new JLabel("Timeout (ms):"));
-
-        timeoutField = new JTextField("3000", 6);
-        left.add(timeoutField);
-
-        JButton checkBtn = new JButton("Check");
-        JButton exportBtn = new JButton("Export CSV");
-        JButton resetBtn = new JButton("Reset");
-
-        left.add(checkBtn);
-        left.add(exportBtn);
-        left.add(resetBtn);
-
-        progressBar = new JProgressBar();
-        progressBar.setPreferredSize(new Dimension(220, 18));
-        progressBar.setStringPainted(true);
-        progressBar.setString("Ready");
-
-        footer.add(left, BorderLayout.WEST);
-        footer.add(progressBar, BorderLayout.EAST);
-
-        checkBtn.addActionListener(e -> runChecks());
-        exportBtn.addActionListener(e -> exportCSV());
-        resetBtn.addActionListener(e -> resetAll());
-
-        return footer;
-    }
-
-    /* ================= VALIDATION ================= */
-
-    private Integer validateTimeout() {
-        try {
-            int t = Integer.parseInt(timeoutField.getText().trim());
-            if (t <= 0 || t > 60000)
-                throw new NumberFormatException();
-            return t;
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Timeout must be a number between 1 and 60000 ms",
-                    "Invalid Timeout",
-                    JOptionPane.WARNING_MESSAGE
-            );
-            timeoutField.requestFocus();
-            return null;
-        }
-    }
-
-    private List<String> validateInput() {
-        List<String> valid = new ArrayList<>();
-        String text = inputArea.getText();
-
-        if (text == null || text.trim().isEmpty()) {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Please enter at least one HOST or HOST:PORT",
-                    "No Input",
-                    JOptionPane.WARNING_MESSAGE
-            );
-            return valid;
-        }
-
-        for (String line : text.split("\\n")) {
-            String v = line.trim();
-            if (!v.isEmpty()) valid.add(v);
-        }
-
-        if (valid.isEmpty()) {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "No valid entries found",
-                    "Invalid Input",
-                    JOptionPane.WARNING_MESSAGE
-            );
-        }
-        return valid;
-    }
-
-    /* ================= BUSINESS LOGIC ================= */
-
-    private void runChecks() {
-        results.clear();
-        resultPane.setText("");
-
-        Integer timeout = validateTimeout();
-        if (timeout == null) return;
-
-        List<String> targets = validateInput();
-        if (targets.isEmpty()) return;
-
-        progressBar.setIndeterminate(true);
-        progressBar.setString("Checking...");
-
-        SwingWorker<Void, Result> worker = new SwingWorker<>() {
-
-            @Override
-            protected Void doInBackground() {
-                for (String line : targets) {
-                    try {
-                        Result r;
-                        if (hostBtn.isSelected()) {
-                            String host = line.split(":")[0];
-                            r = NetworkChecker.hostReachable(host, timeout);
-                        } else {
-                            String[] p = line.split(":");
-                            if (p.length != 2)
-                                r = new Result(line, false, "INVALID FORMAT");
-                            else {
-                                int port = Integer.parseInt(p[1]);
-                                if (port < 1 || port > 65535)
-                                    throw new NumberFormatException();
-                                r = NetworkChecker.tcp(p[0], port, timeout);
-                            }
-                        }
-                        publish(r);
-                    } catch (Exception ex) {
-                        publish(new Result(line, false, ex.getMessage()));
-                    }
-                }
-                return null;
-            }
-
-            @Override
-            protected void process(List<Result> chunks) {
-                progressBar.setIndeterminate(false);
-                for (Result r : chunks) {
-                    results.add(r);
-                    appendColored(r);
-                }
-            }
-
-            @Override
-            protected void done() {
-                progressBar.setValue(100);
-                progressBar.setString("Completed");
-            }
-        };
-
-        worker.execute();
-    }
-
-    private void appendColored(Result r) {
-        try {
-            StyledDocument doc = resultPane.getStyledDocument();
-            Style s = resultPane.addStyle("s", null);
-            StyleConstants.setForeground(
-                    s,
-                    r.success()
-                            ? new Color(80, 250, 123)
-                            : new Color(255, 85, 85)
-            );
-            doc.insertString(
-                    doc.getLength(),
-                    r.target() + " ? " + r.message() + "\n",
-                    s
-            );
-        } catch (Exception ignored) {}
-    }
-
-    private void exportCSV() {
-        if (results.isEmpty()) {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "No data to export",
-                    "Export",
-                    JOptionPane.INFORMATION_MESSAGE
-            );
-            return;
-        }
-        try (FileWriter fw = new FileWriter("access_result.csv")) {
-            fw.write("Target,Status,Message\n");
-            for (Result r : results) {
-                fw.write(r.target() + "," +
-                        (r.success() ? "SUCCESS" : "FAILED") + "," +
-                        r.message() + "\n");
-            }
-            JOptionPane.showMessageDialog(this, "CSV exported");
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, e.getMessage());
-        }
-    }
-
-    private void resetAll() {
-        inputArea.setText("");
-        resultPane.setText("");
-        results.clear();
-        progressBar.setValue(0);
-        progressBar.setString("Ready");
+        root.add(bottomPanel, BorderLayout.SOUTH);
     }
 
     private void switchTheme(Theme theme) {
         try {
             PREFS.put(PREF_THEME, theme.name());
+
             switch (theme) {
                 case LIGHT -> FlatLightLaf.setup();
                 case DARK -> FlatDarkLaf.setup();
                 case DRACULA -> FlatDraculaIJTheme.setup();
                 case SYSTEM -> {
-                    if (SystemInfo.isDarkMode())
+                    if (isDark)
                         FlatDarkLaf.setup();
                     else
                         FlatLightLaf.setup();
                 }
             }
+
             FlatLaf.updateUI();
             SwingUtilities.updateComponentTreeUI(this);
-        } catch (Exception ignored) {}
+
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "Theme switch failed");
+        }
     }
+
+
+    private void chooseFile() {
+        JFileChooser chooser = new JFileChooser();
+        if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+            selectedFile = chooser.getSelectedFile();
+            fileField.setText(selectedFile.getAbsolutePath());
+        }
+    }
+
+    private void generateHash() {
+        if (selectedFile == null) {
+            JOptionPane.showMessageDialog(this, "Please select a file.");
+            return;
+        }
+
+        resultArea.setText("");
+        progressBar.setValue(0);
+
+        SwingWorker<String, Integer> worker = new SwingWorker<>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                return HashService.generateHash(
+                        selectedFile,
+                        ((HashAlgorithm) Objects.requireNonNull(algoBox.getSelectedItem())).getAlgorithm(),
+                        this::setProgress
+                );
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    resultArea.setText(algoBox.getSelectedItem() + " : " + get());
+                } catch (Exception e) {
+                    JOptionPane.showMessageDialog(
+                            FileHashGenerator.this,
+                            "Error: " + e.getMessage()
+                    );
+                }
+            }
+        };
+
+        worker.addPropertyChangeListener(evt -> {
+            if ("progress".equals(evt.getPropertyName())) {
+                progressBar.setValue((Integer) evt.getNewValue());
+            }
+        });
+
+        worker.execute();
+    }
+
+    private void copyHash() {
+        if (!resultArea.getText().isEmpty()) {
+            Toolkit.getDefaultToolkit()
+                    .getSystemClipboard()
+                    .setContents(
+                            new StringSelection(resultArea.getText()),
+                            null
+                    );
+        }
+    }
+
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() ->
-                new AccessCheckerApp().setVisible(true));
+                new FileHashGenerator().setVisible(true)
+        );
     }
 }
-
-
----
-
-✅ What You Now Have
-
-✔ Safe input handling
-✔ Clear warnings
-✔ No silent failures
-✔ Professional UX
-✔ Production-ready Swing app
-
-
----
-
-Want next?
-
-🧪 Unit tests for validators
-
-📊 Replace text pane with sortable table
-
-⌨️ Keyboard shortcuts
-
-💾 Persist last inputs
-
-📦 One-click EXE/JAR build
-
-
-Just say 👍
