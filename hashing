@@ -19,9 +19,9 @@ import java.util.prefs.Preferences;
 
 public class FileHashGenerator extends JFrame {
 
-    /* ================= THEME ================= */
+    static boolean isDark = UIManager.getLookAndFeel().getName().toLowerCase().contains("dark");
 
-    private enum Theme { SYSTEM, LIGHT, DARK, DRACULA }
+    private enum Theme {SYSTEM, LIGHT, DARK, DRACULA}
 
     private static final Preferences PREFS =
             Preferences.userNodeForPackage(FileHashGenerator.class);
@@ -39,7 +39,7 @@ public class FileHashGenerator extends JFrame {
                 case DARK -> FlatDarkLaf.setup();
                 case DRACULA -> FlatDraculaIJTheme.setup();
                 case SYSTEM -> {
-                    if (SystemInfo.isDarkMode())
+                    if (isDark)
                         FlatDarkLaf.setup();
                     else
                         FlatLightLaf.setup();
@@ -59,7 +59,6 @@ public class FileHashGenerator extends JFrame {
         }
     }
 
-    /* ================= UI FIELDS ================= */
 
     private JTextField fileField;
     private JComboBox<HashAlgorithm> algoBox;
@@ -67,7 +66,6 @@ public class FileHashGenerator extends JFrame {
     private JProgressBar progressBar;
     private File selectedFile;
 
-    /* ================= CONSTRUCTOR ================= */
 
     public FileHashGenerator() {
         setTitle("File Hash Generator");
@@ -84,7 +82,6 @@ public class FileHashGenerator extends JFrame {
         initUI();
     }
 
-    /* ================= TITLE BAR ================= */
 
     private void setupTitleBar() {
         getRootPane().putClientProperty(
@@ -100,7 +97,6 @@ public class FileHashGenerator extends JFrame {
         );
     }
 
-    /* ================= UI ================= */
 
     private void initUI() {
         JPanel root = new JPanel(new BorderLayout(16, 16));
@@ -109,7 +105,6 @@ public class FileHashGenerator extends JFrame {
 
         Dimension btnSize = new Dimension(140, 32);
 
-        /* ---------- FILE PANEL ---------- */
 
         JPanel filePanel = new JPanel(new BorderLayout(10, 0));
         fileField = new JTextField();
@@ -124,7 +119,6 @@ public class FileHashGenerator extends JFrame {
 
         root.add(filePanel, BorderLayout.NORTH);
 
-        /* ---------- CENTER ---------- */
 
         JPanel center = new JPanel();
         center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
@@ -166,7 +160,6 @@ public class FileHashGenerator extends JFrame {
 
         root.add(center, BorderLayout.CENTER);
 
-        /* ---------- FOOTER ---------- */
 
         JPanel footer = new JPanel(new BorderLayout(10, 0));
 
@@ -197,7 +190,6 @@ public class FileHashGenerator extends JFrame {
         root.add(footer, BorderLayout.SOUTH);
     }
 
-    /* ================= ACTIONS ================= */
 
     private void chooseFile() {
         JFileChooser chooser = new JFileChooser();
@@ -227,8 +219,7 @@ public class FileHashGenerator extends JFrame {
             protected String doInBackground() throws Exception {
                 return HashService.generateHash(
                         selectedFile,
-                        Objects.requireNonNull(
-                                algoBox.getSelectedItem()).getAlgorithm(),
+                        ((HashAlgorithm) Objects.requireNonNull(algoBox.getSelectedItem())).getAlgorithm(),
                         this::setProgress
                 );
             }
@@ -289,7 +280,7 @@ public class FileHashGenerator extends JFrame {
                 case DARK -> FlatDarkLaf.setup();
                 case DRACULA -> FlatDraculaIJTheme.setup();
                 case SYSTEM -> {
-                    if (SystemInfo.isDarkMode())
+                    if (isDark)
                         FlatDarkLaf.setup();
                     else
                         FlatLightLaf.setup();
