@@ -1,0 +1,138 @@
+If it’s a 10 GB file, the key is: don’t load it fully into memory — stream it in chunks (buffered I/O). Java is actually very good at this if you use streams or NIO channels.
+
+Here are the best practical ways depending on what you mean by “one location to another”.
+
+
+---
+
+✅ 1. Local file → local file (stream copy)
+
+Classic stream way (safe & simple)
+
+import java.io.*;
+
+public class LargeFileCopy {
+    public static void main(String[] args) throws Exception {
+        File source = new File("D:/bigfile.dat");
+        File dest = new File("E:/bigfile_copy.dat");
+
+        try (InputStream in = new BufferedInputStream(new FileInputStream(source));
+             OutputStream out = new BufferedOutputStream(new FileOutputStream(dest))) {
+
+            byte[] buffer = new byte[1024 * 1024]; // 1 MB buffer
+            int bytesRead;
+
+            while ((bytesRead = in.read(buffer)) != -1) {
+                out.write(buffer, 0, bytesRead);
+            }
+        }
+
+        System.out.println("Copy complete");
+    }
+}
+
+➡ Uses constant memory
+➡ Works fine for 10GB+ files
+
+
+---
+
+✅ 2. Faster way (NIO zero-copy)
+
+Best for very large files:
+
+import java.nio.channels.FileChannel;
+import java.nio.file.*;
+
+public class LargeFileCopyNIO {
+    public static void main(String[] args) throws Exception {
+        Path source = Paths.get("D:/bigfile.dat");
+        Path dest = Paths.get("E:/bigfile_copy.dat");
+
+        try (FileChannel in = FileChannel.open(source, StandardOpenOption.READ);
+             FileChannel out = FileChannel.open(dest,
+                     StandardOpenOption.CREATE,
+                     StandardOpenOption.WRITE,
+                     StandardOpenOption.TRUNCATE_EXISTING)) {
+
+            long size = in.size();
+            long position = 0;
+
+            while (position < size) {
+                position += in.transferTo(position, 1024L * 1024L * 1024L, out);
+            }
+        }
+
+        System.out.println("Copy done");
+    }
+}
+
+➡ Uses OS-level zero-copy
+➡ Fastest and memory efficient
+➡ Ideal for multi-GB files
+
+
+---
+
+✅ 3. Stream file over network (server → client)
+
+Server
+
+ServerSocket server = new ServerSocket(9000);
+Socket socket = server.accept();
+
+try (FileInputStream fis = new FileInputStream("bigfile.dat");
+     BufferedOutputStream out = new BufferedOutputStream(socket.getOutputStream())) {
+
+    byte[] buffer = new byte[1024 * 1024];
+    int n;
+    while ((n = fis.read(buffer)) != -1) {
+        out.write(buffer, 0, n);
+    }
+}
+
+Client
+
+Socket socket = new Socket("server-ip", 9000);
+
+try (BufferedInputStream in = new BufferedInputStream(socket.getInputStream());
+     FileOutputStream fos = new FileOutputStream("received.dat")) {
+
+    byte[] buffer = new byte[1024 * 1024];
+    int n;
+    while ((n = in.read(buffer)) != -1) {
+        fos.write(buffer, 0, n);
+    }
+}
+
+➡ Streams without loading whole file
+➡ Works for huge files
+➡ TCP reliable
+
+
+---
+
+⚠️ Important tips for 10GB files
+
+✔ Use buffer size 1MB–8MB
+✔ Never use byte[] = new byte[(int)file.length()]
+✔ Use long for file sizes
+✔ Show progress (optional)
+
+long total = 0;
+total += bytesRead;
+System.out.println("Copied " + (total / (1024*1024)) + " MB");
+
+
+---
+
+🔍 I need to know your case
+
+When you say “one location to another”, which one is it?
+
+1️⃣ Same machine (folder → folder)?
+2️⃣ Different servers (over network)?
+3️⃣ Upload to REST API / cloud (S3, FTP, etc)?
+4️⃣ From DB → file?
+
+Tell me which one you mean, and I’ll give you a production-ready solution for that case (with retries, progress bar, and resume support if you want 😎).
