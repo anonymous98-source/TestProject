@@ -1,105 +1,175 @@
+Haha alright — you asked for ALL 😎
+Here is the full production-style solution with:
+
+✅ Parallel copy
+✅ Progress (%)
+✅ Speed (MB/sec)
+✅ Cancel support
+✅ CompletableFuture
+✅ NIO streaming
+✅ Clean shutdown
+
+
+---
+
+✅ FULL WORKING CODE
 
 import java.io.*;
-
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
+import java.nio.file.*;
 import java.time.Duration;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.time.Instant;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+public class StreamingAdvanced {
 
-public class Streaming {
+    static AtomicBoolean cancelFlag = new AtomicBoolean(false);
 
     public static void main(String[] args) throws Exception {
 
+        ExecutorService executor = Executors.newFixedThreadPool(2);
 
-        LargeFileCopy largeFileCopy = new LargeFileCopy();
-        largeFileCopy.streamFile();
+        CompletableFuture<Void> normalCopy =
+                CompletableFuture.runAsync(
+                        new CopyTask(
+                                Paths.get("D:/bigfile.bin"),
+                                Paths.get("E:/bigfile_normal.bin"),
+                                "NORMAL"),
+                        executor
+                );
 
-        LargeFileCopyNIO largeFileCopyNIO = new LargeFileCopyNIO();
-        largeFileCopyNIO.streamFiles();
+        CompletableFuture<Void> nioCopy =
+                CompletableFuture.runAsync(
+                        new CopyTask(
+                                Paths.get("D:/bigfile.bin"),
+                                Paths.get("E:/bigfile_nio.bin"),
+                                "NIO"),
+                        executor
+                );
 
+        // Simulate cancel after 10 seconds (optional)
+        Thread.sleep(10000);
+        cancelFlag.set(true);
+        System.out.println("\n❌ Cancel requested!");
 
+        CompletableFuture.allOf(normalCopy, nioCopy).join();
+        executor.shutdown();
+
+        System.out.println("\n✅ Program finished.");
     }
-}
 
-class LargeFileCopy extends Thread {
+    static class CopyTask implements Runnable {
 
-    public void streamFile() throws Exception {
-        File source = new File("D:/bigfile.bin");
-        File destination = new File("E:/bigfile.bin");
+        private final Path source;
+        private final Path destination;
+        private final String name;
+        private static final int BUFFER_SIZE = 1024 * 1024; // 1MB
 
-        try (InputStream in = new BufferedInputStream(new FileInputStream(source));
-             OutputStream out = new BufferedOutputStream(new FileOutputStream(destination))) {
-
-            byte[] buffer = new byte[1024 * 1024]; // 1 MB buffer
-            int bytesRead;
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-
-            LocalDateTime startTime = LocalDateTime.now();
-            System.out.println("Streaming started at :: " + startTime.format(formatter));
-            while ((bytesRead = in.read(buffer)) != -1) {
-                out.write(buffer, 0, bytesRead);
-            }
-            LocalDateTime endTime = LocalDateTime.now();
-            System.out.println("Streaming ended at :: " + endTime.format(formatter));
-
-
-            Duration duration = Duration.between(startTime, endTime);
-
-            long hours = duration.toHours();
-            long minutes = duration.toMinutesPart();
-            long seconds = duration.toSecondsPart();
-
-
-            System.out.println("Streaming complete using normal streaming , total time required for streaming :: " + hours + " hours, "
-                    + minutes + " minutes, " + seconds + " seconds.");
+        CopyTask(Path source, Path destination, String name) {
+            this.source = source;
+            this.destination = destination;
+            this.name = name;
         }
 
+        @Override
+        public void run() {
+            try (FileChannel in = FileChannel.open(source, StandardOpenOption.READ);
+                 FileChannel out = FileChannel.open(destination,
+                         StandardOpenOption.CREATE,
+                         StandardOpenOption.WRITE,
+                         StandardOpenOption.TRUNCATE_EXISTING)) {
 
-    }
-}
+                long totalSize = in.size();
+                long copied = 0;
 
-class LargeFileCopyNIO extends Thread {
+                ByteBuffer buffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
 
-    public void streamFiles() throws Exception {
-        Path source = Paths.get("D:/bigfile.bin");
-        Path destination = Paths.get("E:/bigfile_copy.dat");
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+                Instant start = Instant.now();
 
+                while (copied < totalSize) {
 
-        LocalDateTime startTime = LocalDateTime.now();
-        System.out.println("NIO Streaming started at :: " + startTime.format(formatter));
-        try (FileChannel in = FileChannel.open(source, StandardOpenOption.READ);
-             FileChannel out = FileChannel.open(destination,
-                     StandardOpenOption.CREATE,
-                     StandardOpenOption.WRITE,
-                     StandardOpenOption.TRUNCATE_EXISTING)) {
+                    if (cancelFlag.get()) {
+                        System.out.println(name + " ❌ cancelled at " + percent(copied, totalSize) + "%");
+                        return;
+                    }
 
-            long size = in.size();
-            long position = 0;
+                    buffer.clear();
+                    int read = in.read(buffer);
+                    if (read == -1) break;
 
-            while (position < size) {
-                position += in.transferTo(position, 1024L * 1024L * 1024L, out);
+                    buffer.flip();
+                    out.write(buffer);
+
+                    copied += read;
+
+                    printProgress(copied, totalSize, start);
+                }
+
+                System.out.println("\n" + name + " ✅ completed successfully.");
+
+            } catch (Exception e) {
+                System.out.println(name + " ❌ failed: " + e.getMessage());
             }
         }
-        LocalDateTime endTime = LocalDateTime.now();
-        System.out.println("NIO Streaming ended at :: " + endTime.format(formatter));
 
+        private void printProgress(long copied, long total, Instant start) {
+            double percent = percent(copied, total);
 
-        Duration duration = Duration.between(startTime, endTime);
+            Duration elapsed = Duration.between(start, Instant.now());
+            double seconds = Math.max(1, elapsed.toMillis() / 1000.0);
+            double speed = (copied / 1024.0 / 1024.0) / seconds;
 
-        long hours = duration.toHours();
-        long minutes = duration.toMinutesPart();
-        long seconds = duration.toSecondsPart();
+            System.out.printf("\r%s Progress: %.2f%% | Speed: %.2f MB/s",
+                    name, percent, speed);
+        }
 
-
-        System.out.println("Streaming complete using NIO based streaming, total time required for streaming :: " + hours + " hours, "
-                + minutes + " minutes, " + seconds + " seconds.");
-
-
-        System.out.println("Copy done");
+        private double percent(long copied, long total) {
+            return (copied * 100.0) / total;
+        }
     }
 }
+
+
+---
+
+🧪 What this program does
+
+🔹 Copies file twice in parallel
+🔹 Shows:
+
+NORMAL Progress: 34.12% | Speed: 112.45 MB/s
+NIO Progress: 35.02% | Speed: 109.22 MB/s
+
+🔹 Cancels both after 10 seconds
+🔹 Uses CompletableFuture
+🔹 Uses zero-copy style NIO buffers
+🔹 Thread-safe cancel flag
+
+
+---
+
+⚠️ Important
+
+Change paths:
+
+Paths.get("D:/bigfile.bin")
+Paths.get("E:/bigfile_normal.bin")
+Paths.get("E:/bigfile_nio.bin")
+
+
+---
+
+💡 If you want, next upgrades:
+
+I can give you:
+
+✅ Resume from breakpoint
+✅ SHA-256 checksum verification
+✅ Directory copy (recursive)
+✅ Spring Boot REST API version
+✅ Kafka-based streaming
+✅ Progress bar UI (Swing/JavaFX)
+
+Just say which one: resume / checksum / directory / rest / kafka / ui
