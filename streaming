@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class StreamingProgressReplace {
+public class StreamingProgressReplaceFixed {
 
     static AtomicLong normalCopied = new AtomicLong(0);
     static AtomicLong nioCopied = new AtomicLong(0);
@@ -29,28 +29,29 @@ public class StreamingProgressReplace {
                 executor
         );
 
-        // Print two empty lines first
-        System.out.println();
-        System.out.println();
+        // Print exactly 2 lines ONCE
+        System.out.println("NORMAL : 0.00% | 0.00 MB/s");
+        System.out.println("NIO    : 0.00% | 0.00 MB/s");
 
         Instant start = Instant.now();
 
         while (!f1.isDone() || !f2.isDone()) {
+
+            // Move cursor UP 2 lines
+            System.out.print("\033[2A");
+
             printProgress("NORMAL", normalCopied.get(), start);
             printProgress("NIO   ", nioCopied.get(), start);
-
-            // Move cursor up 2 lines
-            System.out.print("\033[2A");
 
             Thread.sleep(1000);
         }
 
-        // Final print without moving cursor up
+        // Final update (no cursor move)
+        System.out.print("\033[2A");
         printProgress("NORMAL", normalCopied.get(), start);
         printProgress("NIO   ", nioCopied.get(), start);
 
         executor.shutdown();
-        System.out.println("✅ Done.");
     }
 
     static void printProgress(String name, long copied, Instant start) {
@@ -62,7 +63,8 @@ public class StreamingProgressReplace {
         double speed = (copied / 1024.0 / 1024.0) / seconds;
 
         // Clear line + print
-        System.out.printf("\033[2K%s : %6.2f%% | %6.2f MB/s%n", name, percent, speed);
+        System.out.printf("\033[2K%s : %6.2f%% | %6.2f MB/s%n",
+                name, percent, speed);
     }
 
     static class CopyTask implements Runnable {
