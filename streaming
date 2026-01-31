@@ -1,76 +1,81 @@
-Haha alright — you asked for ALL 😎
-Here is the full production-style solution with:
-
-✅ Parallel copy
-✅ Progress (%)
-✅ Speed (MB/sec)
-✅ Cancel support
-✅ CompletableFuture
-✅ NIO streaming
-✅ Clean shutdown
-
-
----
-
-✅ FULL WORKING CODE
-
-import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.*;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
-public class StreamingAdvanced {
+public class StreamingProgressReplace {
 
-    static AtomicBoolean cancelFlag = new AtomicBoolean(false);
+    static AtomicLong normalCopied = new AtomicLong(0);
+    static AtomicLong nioCopied = new AtomicLong(0);
+    static long totalSize;
 
     public static void main(String[] args) throws Exception {
 
+        Path source = Paths.get("D:/bigfile.bin");
+        totalSize = Files.size(source);
+
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
-        CompletableFuture<Void> normalCopy =
-                CompletableFuture.runAsync(
-                        new CopyTask(
-                                Paths.get("D:/bigfile.bin"),
-                                Paths.get("E:/bigfile_normal.bin"),
-                                "NORMAL"),
-                        executor
-                );
+        CompletableFuture<Void> f1 = CompletableFuture.runAsync(
+                new CopyTask(source, Paths.get("E:/bigfile_normal.bin"), normalCopied),
+                executor
+        );
 
-        CompletableFuture<Void> nioCopy =
-                CompletableFuture.runAsync(
-                        new CopyTask(
-                                Paths.get("D:/bigfile.bin"),
-                                Paths.get("E:/bigfile_nio.bin"),
-                                "NIO"),
-                        executor
-                );
+        CompletableFuture<Void> f2 = CompletableFuture.runAsync(
+                new CopyTask(source, Paths.get("E:/bigfile_nio.bin"), nioCopied),
+                executor
+        );
 
-        // Simulate cancel after 10 seconds (optional)
-        Thread.sleep(10000);
-        cancelFlag.set(true);
-        System.out.println("\n❌ Cancel requested!");
+        // Print two empty lines first
+        System.out.println();
+        System.out.println();
 
-        CompletableFuture.allOf(normalCopy, nioCopy).join();
+        Instant start = Instant.now();
+
+        while (!f1.isDone() || !f2.isDone()) {
+            printProgress("NORMAL", normalCopied.get(), start);
+            printProgress("NIO   ", nioCopied.get(), start);
+
+            // Move cursor up 2 lines
+            System.out.print("\033[2A");
+
+            Thread.sleep(1000);
+        }
+
+        // Final print without moving cursor up
+        printProgress("NORMAL", normalCopied.get(), start);
+        printProgress("NIO   ", nioCopied.get(), start);
+
         executor.shutdown();
+        System.out.println("✅ Done.");
+    }
 
-        System.out.println("\n✅ Program finished.");
+    static void printProgress(String name, long copied, Instant start) {
+        double percent = (copied * 100.0) / totalSize;
+
+        Duration elapsed = Duration.between(start, Instant.now());
+        double seconds = Math.max(1, elapsed.toMillis() / 1000.0);
+
+        double speed = (copied / 1024.0 / 1024.0) / seconds;
+
+        // Clear line + print
+        System.out.printf("\033[2K%s : %6.2f%% | %6.2f MB/s%n", name, percent, speed);
     }
 
     static class CopyTask implements Runnable {
 
         private final Path source;
         private final Path destination;
-        private final String name;
-        private static final int BUFFER_SIZE = 1024 * 1024; // 1MB
+        private final AtomicLong progress;
+        private static final int BUFFER_SIZE = 1024 * 1024;
 
-        CopyTask(Path source, Path destination, String name) {
+        CopyTask(Path source, Path destination, AtomicLong progress) {
             this.source = source;
             this.destination = destination;
-            this.name = name;
+            this.progress = progress;
         }
 
         @Override
@@ -81,95 +86,19 @@ public class StreamingAdvanced {
                          StandardOpenOption.WRITE,
                          StandardOpenOption.TRUNCATE_EXISTING)) {
 
-                long totalSize = in.size();
-                long copied = 0;
-
                 ByteBuffer buffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
+                int read;
 
-                Instant start = Instant.now();
-
-                while (copied < totalSize) {
-
-                    if (cancelFlag.get()) {
-                        System.out.println(name + " ❌ cancelled at " + percent(copied, totalSize) + "%");
-                        return;
-                    }
-
-                    buffer.clear();
-                    int read = in.read(buffer);
-                    if (read == -1) break;
-
+                while ((read = in.read(buffer)) != -1) {
                     buffer.flip();
                     out.write(buffer);
-
-                    copied += read;
-
-                    printProgress(copied, totalSize, start);
+                    buffer.clear();
+                    progress.addAndGet(read);
                 }
 
-                System.out.println("\n" + name + " ✅ completed successfully.");
-
             } catch (Exception e) {
-                System.out.println(name + " ❌ failed: " + e.getMessage());
+                e.printStackTrace();
             }
-        }
-
-        private void printProgress(long copied, long total, Instant start) {
-            double percent = percent(copied, total);
-
-            Duration elapsed = Duration.between(start, Instant.now());
-            double seconds = Math.max(1, elapsed.toMillis() / 1000.0);
-            double speed = (copied / 1024.0 / 1024.0) / seconds;
-
-            System.out.printf("\r%s Progress: %.2f%% | Speed: %.2f MB/s",
-                    name, percent, speed);
-        }
-
-        private double percent(long copied, long total) {
-            return (copied * 100.0) / total;
         }
     }
 }
-
-
----
-
-🧪 What this program does
-
-🔹 Copies file twice in parallel
-🔹 Shows:
-
-NORMAL Progress: 34.12% | Speed: 112.45 MB/s
-NIO Progress: 35.02% | Speed: 109.22 MB/s
-
-🔹 Cancels both after 10 seconds
-🔹 Uses CompletableFuture
-🔹 Uses zero-copy style NIO buffers
-🔹 Thread-safe cancel flag
-
-
----
-
-⚠️ Important
-
-Change paths:
-
-Paths.get("D:/bigfile.bin")
-Paths.get("E:/bigfile_normal.bin")
-Paths.get("E:/bigfile_nio.bin")
-
-
----
-
-💡 If you want, next upgrades:
-
-I can give you:
-
-✅ Resume from breakpoint
-✅ SHA-256 checksum verification
-✅ Directory copy (recursive)
-✅ Spring Boot REST API version
-✅ Kafka-based streaming
-✅ Progress bar UI (Swing/JavaFX)
-
-Just say which one: resume / checksum / directory / rest / kafka / ui
