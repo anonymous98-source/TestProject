@@ -1,10 +1,3 @@
-Got it 👍
-You’re upgrading an existing Angular 13 app to Angular 21, and your mental model is React 18, not Angular. That’s actually a good place to start—I'll map concepts to React wherever possible and keep things practical.
-
-⚠️ One important reality check first
-Angular 13 → Angular 21 is a BIG jump (8 major versions).
-You should NOT jump directly. Angular is very strict about version-by-version migrations.
-
 
 ---
 
@@ -31,20 +24,23 @@ Step 0: Angular basics (React → Angular mental mapping)
 
 Before touching code, align concepts.
 
-React	Angular
+ ____________________________________________________________________________
+|                       |                                                    |
+| React					            |	Angular                                            |
+ ____________________________________________________________________________
+| Component				         |	Component                                          |
+| JSX					              |	HTML templates                                     |
+| Props					            |	@Input()                                           |
+| Callbacks				         |	@Output() + EventEmitter                           |
+| State (useState)		    |	Component class properties                         |
+| useEffect				         |	Lifecycle hooks (ngOnInit, ngOnDestroy)            |
+| Context / Redux		     |	Services + Dependency Injection                    |
+| Fetch / Axios			      |	HttpClient                                         |
+| React Router			       |	Angular Router                                     |
+|____________________________________________________________________________|
 
-Component	Component
-JSX	HTML templates
-Props	@Input()
-Callbacks	@Output() + EventEmitter
-State (useState)	Component class properties
-useEffect	Lifecycle hooks (ngOnInit, ngOnDestroy)
-Context / Redux	Services + Dependency Injection
-Fetch / Axios	HttpClient
-React Router	Angular Router
 
-
-👉 Angular is class-based + opinionated, unlike React’s flexible approach.
+Angular is class-based + opinionated, unlike React’s flexible approach.
 
 
 ---
@@ -66,9 +62,7 @@ Angular 21 needs:
 
 Node 20+
 
-
-📌 Do not upgrade Node all at once.
-We’ll upgrade Node gradually.
+upgrade Node gradually.
 
 
 ---
@@ -79,9 +73,6 @@ Before upgrades:
 
 git status
 git commit -am "Before Angular upgrade"
-
-If something breaks, you’ll thank yourself 😄
-
 
 ---
 
@@ -102,8 +93,6 @@ run app
 commit
 
 move to next version
-
-
 
 ---
 
@@ -128,7 +117,6 @@ Deprecated APIs warnings
 
 ng serve
 
-
 ---
 
 Step 5: Angular 14 → 15 (Important)
@@ -152,7 +140,7 @@ NgModule still works
 new standalone options suggested
 
 
-👉 Accept default migrations.
+Accept default migrations.
 
 
 ---
@@ -161,10 +149,12 @@ Step 6: Angular 16 (Signals introduced)
 
 Angular 16 adds Signals (very React-like).
 
-React	Angular
-
-useState	signal()
-useEffect	effect()
+ ____________________
+|React	   | Angular |
+|__________|_________|
+|useState  | signal()|
+|useEffect | effect()|
+|__________|_________|
 
 
 Example:
@@ -179,7 +169,7 @@ Upgrade:
 
 ng update @angular/core@16 @angular/cli@16
 
-⚠️ You don’t need to refactor to signals now. Angular supports old patterns.
+You don’t need to refactor to signals now. Angular supports old patterns.
 
 
 ---
