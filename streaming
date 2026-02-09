@@ -1,185 +1,170 @@
-Got it — this is a very common Apache POI gotcha, and you’re not alone 👍
-Let’s fix it cleanly and make it work 100%.
+package com.fundsmanager.ui;
 
+import com.fundsmanager.model.Category;
+import com.fundsmanager.model.FundAllocation;
+import com.fundsmanager.service.FundCalculationService;
+import com.fundsmanager.util.DefaultCategories;
+import com.fundsmanager.util.ThemeUtil;
 
----
+import javax.swing.*;
+import java.awt.*;
+import java.util.List;
 
-❌ Problem Symptom (what you’re seeing)
+public class MainFrame extends JFrame {
 
-Something like:
+    private JTextField incomeField;
 
-Workbook cannot be resolved
+    private CategoryTableModel categoryTableModel;
+    private ReportTableModel reportTableModel;
 
-or Class Workbook not found
+    private PieChartPanel pieChartPanel;
 
-or code compiles red even though POI dependency is added
+    private final FundCalculationService service = new FundCalculationService();
 
+    public MainFrame() {
+        setTitle("Funds Management Dashboard");
+        setSize(1150, 700);
+        setLocationRelativeTo(null);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setLayout(new BorderLayout(10, 10));
 
-
----
-
-✅ Root Cause (important)
-
-Workbook does NOT come from poi-ooxml alone at compile time if:
-
-❌ Wrong import
-
-❌ Dependency not refreshed
-
-❌ Old POI jars conflicting
-
-❌ IDE cached build path
-
-
-
----
-
-✅ Correct Imports (MOST IMPORTANT)
-
-Your ExportService.java MUST have these imports:
-
-import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-
-❌ DO NOT import:
-
-import java.awt.Workbook;   // ❌ WRONG
-
-
----
-
-✅ Correct Excel Export Code (WORKING)
-
-Replace your Excel method fully with this:
-
-public void exportToExcel(List<FundAllocation> data, File file) throws Exception {
-
-    Workbook workbook = new XSSFWorkbook(); // ✅ This WILL work
-    Sheet sheet = workbook.createSheet("Funds Report");
-
-    Row header = sheet.createRow(0);
-    header.createCell(0).setCellValue("Category");
-    header.createCell(1).setCellValue("Percentage");
-    header.createCell(2).setCellValue("Amount");
-
-    int rowNum = 1;
-    for (FundAllocation fa : data) {
-        Row row = sheet.createRow(rowNum++);
-        row.createCell(0).setCellValue(fa.getCategory());
-        row.createCell(1).setCellValue(fa.getPercentage());
-        row.createCell(2).setCellValue(fa.getAmount());
+        add(createHeader(), BorderLayout.NORTH);
+        add(createMainContent(), BorderLayout.CENTER);
     }
 
-    sheet.autoSizeColumn(0);
-    sheet.autoSizeColumn(1);
-    sheet.autoSizeColumn(2);
+    // ================= HEADER =================
 
-    try (FileOutputStream fos = new FileOutputStream(file)) {
-        workbook.write(fos);
+    private JPanel createHeader() {
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBorder(BorderFactory.createEmptyBorder(12, 16, 12, 16));
+
+        JLabel title = new JLabel("Funds Management Dashboard");
+        title.setFont(new Font("Segoe UI", Font.BOLD, 24));
+
+        JPanel rightControls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+
+        incomeField = new JTextField(10);
+        incomeField.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+
+        JButton generateBtn = new JButton("Generate Report");
+        JButton themeBtn = new JButton("🌙 Dark Mode");
+
+        generateBtn.addActionListener(e -> generateReport());
+        themeBtn.addActionListener(e -> ThemeUtil.toggleTheme(this));
+
+        rightControls.add(new JLabel("Monthly Income:"));
+        rightControls.add(incomeField);
+        rightControls.add(generateBtn);
+        rightControls.add(themeBtn);
+
+        header.add(title, BorderLayout.WEST);
+        header.add(rightControls, BorderLayout.EAST);
+
+        return header;
     }
 
-    workbook.close();
+    // ================= MAIN CONTENT =================
+
+    private JSplitPane createMainContent() {
+
+        // ---------- LEFT : CATEGORY MANAGEMENT ----------
+
+        categoryTableModel = new CategoryTableModel(DefaultCategories.load());
+        JTable categoryTable = new JTable(categoryTableModel);
+        categoryTable.setRowHeight(28);
+
+        JScrollPane categoryScroll = new JScrollPane(categoryTable);
+        categoryScroll.setBorder(BorderFactory.createTitledBorder("Categories"));
+
+        JButton addCategoryBtn = new JButton("+ Add Category");
+        addCategoryBtn.addActionListener(e -> addCategory());
+
+        JPanel leftPanel = new JPanel(new BorderLayout(8, 8));
+        leftPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        leftPanel.add(categoryScroll, BorderLayout.CENTER);
+        leftPanel.add(addCategoryBtn, BorderLayout.SOUTH);
+
+        // ---------- RIGHT : REPORT + CHART ----------
+
+        pieChartPanel = new PieChartPanel();
+
+        reportTableModel = new ReportTableModel();
+        JTable reportTable = new JTable(reportTableModel);
+        reportTable.setRowHeight(28);
+
+        JScrollPane reportScroll = new JScrollPane(reportTable);
+        reportScroll.setBorder(BorderFactory.createTitledBorder("Tabular Report"));
+
+        JSplitPane verticalSplit = new JSplitPane(
+                JSplitPane.VERTICAL_SPLIT,
+                pieChartPanel,
+                reportScroll
+        );
+        verticalSplit.setDividerLocation(320);
+        verticalSplit.setResizeWeight(0.45);
+
+        JPanel rightPanel = new JPanel(new BorderLayout());
+        rightPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        rightPanel.add(verticalSplit, BorderLayout.CENTER);
+
+        // ---------- MAIN SPLIT ----------
+
+        JSplitPane mainSplit = new JSplitPane(
+                JSplitPane.HORIZONTAL_SPLIT,
+                leftPanel,
+                rightPanel
+        );
+        mainSplit.setDividerLocation(420);
+        mainSplit.setResizeWeight(0.35);
+
+        return mainSplit;
+    }
+
+    // ================= ACTIONS =================
+
+    private void addCategory() {
+        AddCategoryDialog dialog = new AddCategoryDialog(this);
+        dialog.setVisible(true);
+
+        Category category = dialog.getCategory();
+        if (category != null) {
+            categoryTableModel.getCategories().add(category);
+            categoryTableModel.fireTableDataChanged();
+        }
+    }
+
+    private void generateReport() {
+
+        double income;
+        try {
+            income = Double.parseDouble(incomeField.getText());
+            if (income <= 0) throw new NumberFormatException();
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Please enter a valid monthly income",
+                    "Invalid Input",
+                    JOptionPane.WARNING_MESSAGE
+            );
+            return;
+        }
+
+        List<Category> categories = categoryTableModel.getCategories();
+
+        if (!service.validatePercentage(categories)) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Total category percentage must be exactly 100%",
+                    "Validation Error",
+                    JOptionPane.ERROR_MESSAGE
+            );
+            return;
+        }
+
+        List<FundAllocation> allocations =
+                service.calculate(income, categories);
+
+        reportTableModel.setData(allocations);
+        pieChartPanel.updateChart(allocations);
+    }
 }
-
-
----
-
-✅ Maven Dependencies (Must Match Exactly)
-
-<dependency>
-  <groupId>org.apache.poi</groupId>
-  <artifactId>poi</artifactId>
-  <version>5.2.5</version>
-</dependency>
-
-<dependency>
-  <groupId>org.apache.poi</groupId>
-  <artifactId>poi-ooxml</artifactId>
-  <version>5.2.5</version>
-</dependency>
-
-⚠️ You need BOTH
-poi-ooxml depends on poi, but IDEs sometimes fail without explicit poi.
-
-
----
-
-✅ If You’re NOT Using Maven (Jar setup)
-
-You must have ALL these jars in classpath:
-
-poi-5.2.5.jar
-poi-ooxml-5.2.5.jar
-poi-ooxml-lite-5.2.5.jar
-xmlbeans-5.1.1.jar
-commons-compress-1.25.0.jar
-commons-collections4-4.4.jar
-commons-io-2.15.1.jar
-
-Missing any one → Workbook issues.
-
-
----
-
-🔧 IDE Fixes (DO THIS ONCE)
-
-IntelliJ IDEA
-
-1. Maven tab → Reload All Maven Projects
-
-
-2. File → Invalidate Caches / Restart
-
-
-3. Rebuild project
-
-
-
-Eclipse
-
-1. Right click project → Maven → Update Project
-
-
-2. Project → Clean
-
-
-
-
----
-
-🧠 Quick Self-Check (2 seconds)
-
-Hover over Workbook:
-
-✅ Package should be: org.apache.poi.ss.usermodel.Workbook
-
-❌ If anything else → wrong import
-
-
-
----
-
-✅ Final Verdict
-
-✔ Your code logic is correct
-✔ Issue is import / dependency, not design
-✔ Above code works in production
-✔ Excel export will now run perfectly
-
-
----
-
-If you want, next I can:
-
-Add currency formatting (₹)
-
-Add total row
-
-Style Excel header (bold, background)
-
-Export both Excel + PDF in one click
-
-
-Just say the word 👌
