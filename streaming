@@ -1,455 +1,416 @@
-Perfect — this is a structural enhancement, not just UI polish.
-We’ll do it properly, with clean domain modeling and minimal but correct class changes.
+Perfect 👍
+Below is a single, complete, copy-paste-ready MainFrame.java that works with the grouping (Expenses vs Savings) design we finalized.
+
+This version:
+
+✅ Uses Category-level table (editable)
+✅ Generates Category allocation table
+✅ Generates Group summary table (Expenses / Savings)
+✅ Updates Pie chart based on GROUP totals
+✅ Works with locked categories, auto-balance, undo/redo, reset
+✅ No Excel / PDF
+✅ No Maven assumptions
 
 
 ---
 
-🎯 REQUIREMENT CLARIFIED
+✅ MainFrame.java (FINAL – GROUPING ENABLED)
 
-You want:
-
-Groups
-
-EXPENSES
-
-Necessary Expenses
-
-EMIs
-
-Miscellaneous
-
-(any user-added expense category)
-
-
-SAVINGS / INVESTMENTS
-
-Emergency Fund
-
-Health Emergency
-
-Savings
-
-Investments
-
-(any user-added saving category)
-
-
-
-Outputs
-
-1. Category-level table (already exists)
-
-
-2. Group-level summary table:
-
-Group        | Total % | Total Amount
---------------------------------------
-Expenses     | 70%     | ₹70,000
-Savings      | 30%     | ₹30,000
-
-
-3. Pie chart based on GROUPS (Expenses vs Savings)
-(not individual categories)
-
-
-
-
----
-
-🧠 DESIGN (IMPORTANT – WHY THIS IS CORRECT)
-
-Key decisions
-
-Grouping is domain logic, not UI logic
-
-Category knows its GroupType
-
-Service calculates group aggregates
-
-Pie chart uses group data
-
-Tables stay independent
-
-
-
----
-
-1️⃣ NEW ENUM – GroupType
-
-GroupType.java (NEW)
-
-package com.fundsmanager.model;
-
-public enum GroupType {
-    EXPENSE("Expenses"),
-    SAVING("Savings");
-
-    private final String displayName;
-
-    GroupType(String displayName) {
-        this.displayName = displayName;
-    }
-
-    public String getDisplayName() {
-        return displayName;
-    }
-}
-
-
----
-
-2️⃣ Category MODEL (CHANGED)
-
-Category.java (FULL UPDATED CODE)
-
-package com.fundsmanager.model;
-
-public class Category {
-
-    private String name;
-    private double percentage;
-    private boolean locked;
-    private GroupType groupType; // 🔥 NEW
-
-    public Category(String name, double percentage, boolean locked, GroupType groupType) {
-        this.name = name;
-        this.percentage = percentage;
-        this.locked = locked;
-        this.groupType = groupType;
-    }
-
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
-
-    public double getPercentage() { return percentage; }
-    public void setPercentage(double percentage) { this.percentage = percentage; }
-
-    public boolean isLocked() { return locked; }
-
-    public GroupType getGroupType() { return groupType; }
-    public void setGroupType(GroupType groupType) { this.groupType = groupType; }
-}
-
-
----
-
-3️⃣ DefaultCategories (CHANGED)
-
-DefaultCategories.java
-
-package com.fundsmanager.util;
-
-import com.fundsmanager.model.Category;
-import com.fundsmanager.model.GroupType;
-
-import java.util.List;
-
-public class DefaultCategories {
-
-    public static List<Category> load() {
-        return List.of(
-            new Category("Necessary Expenses", 40, true, GroupType.EXPENSE),
-            new Category("Emergency Fund", 10, true, GroupType.SAVING),
-            new Category("Health Emergency", 10, true, GroupType.SAVING),
-            new Category("EMIs", 15, true, GroupType.EXPENSE),
-            new Category("Savings", 10, false, GroupType.SAVING),
-            new Category("Investments", 10, false, GroupType.SAVING),
-            new Category("Miscellaneous", 5, false, GroupType.EXPENSE)
-        );
-    }
-}
-
-
----
-
-4️⃣ NEW DTO – GroupSummary
-
-GroupSummary.java (NEW)
-
-package com.fundsmanager.model;
-
-public class GroupSummary {
-
-    private final GroupType groupType;
-    private final double totalPercentage;
-    private final double totalAmount;
-
-    public GroupSummary(GroupType groupType, double totalPercentage, double totalAmount) {
-        this.groupType = groupType;
-        this.totalPercentage = totalPercentage;
-        this.totalAmount = totalAmount;
-    }
-
-    public GroupType getGroupType() { return groupType; }
-    public double getTotalPercentage() { return totalPercentage; }
-    public double getTotalAmount() { return totalAmount; }
-}
-
-
----
-
-5️⃣ FundCalculationService (CHANGED – CORE LOGIC)
-
-FundCalculationService.java (FULL UPDATED)
-
-package com.fundsmanager.service;
+package com.fundsmanager.ui;
 
 import com.fundsmanager.model.*;
-
-import java.util.*;
-import java.util.stream.Collectors;
-
-public class FundCalculationService {
-
-    public List<FundAllocation> calculate(double income, List<Category> categories) {
-
-        List<FundAllocation> result = new ArrayList<>();
-
-        for (Category c : categories) {
-            double amount = income * c.getPercentage() / 100;
-            result.add(new FundAllocation(
-                    c.getName(),
-                    c.getPercentage(),
-                    amount
-            ));
-        }
-        return result;
-    }
-
-    public List<GroupSummary> calculateGroupSummary(
-            double income,
-            List<Category> categories
-    ) {
-
-        Map<GroupType, Double> percentMap = new EnumMap<>(GroupType.class);
-        Map<GroupType, Double> amountMap = new EnumMap<>(GroupType.class);
-
-        for (GroupType gt : GroupType.values()) {
-            percentMap.put(gt, 0.0);
-            amountMap.put(gt, 0.0);
-        }
-
-        for (Category c : categories) {
-            double percent = c.getPercentage();
-            double amount = income * percent / 100;
-
-            percentMap.put(
-                    c.getGroupType(),
-                    percentMap.get(c.getGroupType()) + percent
-            );
-
-            amountMap.put(
-                    c.getGroupType(),
-                    amountMap.get(c.getGroupType()) + amount
-            );
-        }
-
-        List<GroupSummary> result = new ArrayList<>();
-        for (GroupType gt : GroupType.values()) {
-            result.add(new GroupSummary(
-                    gt,
-                    round(percentMap.get(gt)),
-                    round(amountMap.get(gt))
-            ));
-        }
-
-        return result;
-    }
-
-    public boolean validatePercentage(List<Category> categories) {
-        double sum = categories.stream()
-                .mapToDouble(Category::getPercentage)
-                .sum();
-        return Math.abs(sum - 100.0) < 0.01;
-    }
-
-    private double round(double v) {
-        return Math.round(v * 100.0) / 100.0;
-    }
-}
-
-
----
-
-6️⃣ NEW TABLE MODEL – Group Summary Table
-
-GroupSummaryTableModel.java (NEW)
-
-package com.fundsmanager.ui;
-
-import com.fundsmanager.model.GroupSummary;
-
-import javax.swing.table.AbstractTableModel;
-import java.util.List;
-
-public class GroupSummaryTableModel extends AbstractTableModel {
-
-    private final String[] columns = {
-            "Group",
-            "Total Percentage (%)",
-            "Total Amount"
-    };
-
-    private List<GroupSummary> data;
-
-    public void setData(List<GroupSummary> data) {
-        this.data = data;
-        fireTableDataChanged();
-    }
-
-    @Override
-    public int getRowCount() {
-        return data == null ? 0 : data.size();
-    }
-
-    @Override
-    public int getColumnCount() {
-        return columns.length;
-    }
-
-    @Override
-    public String getColumnName(int col) {
-        return columns[col];
-    }
-
-    @Override
-    public Object getValueAt(int row, int col) {
-        GroupSummary g = data.get(row);
-        return switch (col) {
-            case 0 -> g.getGroupType().getDisplayName();
-            case 1 -> g.getTotalPercentage();
-            default -> "₹ " + String.format("%.2f", g.getTotalAmount());
-        };
-    }
-}
-
-
----
-
-7️⃣ PIE CHART – GROUP-BASED (FULL UPDATED CODE)
-
-PieChartPanel.java (FULL REPLACEMENT)
-
-package com.fundsmanager.ui;
-
-import com.fundsmanager.model.GroupSummary;
-import com.fundsmanager.model.GroupType;
-import org.jfree.chart.*;
-import org.jfree.chart.plot.PiePlot;
-import org.jfree.data.general.DefaultPieDataset;
+import com.fundsmanager.service.FundCalculationService;
+import com.fundsmanager.util.DefaultCategories;
+import com.fundsmanager.util.ThemeUtil;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.util.*;
 import java.util.List;
 
-public class PieChartPanel extends JPanel {
+public class MainFrame extends JFrame {
 
-    private JPanel chartHolder;
+    // ---------------- UI ----------------
 
-    public PieChartPanel() {
-        setLayout(new BorderLayout());
-        setBorder(BorderFactory.createTitledBorder("Expenses vs Savings"));
+    private JTextField incomeField;
+    private JLabel totalLabel;
 
-        chartHolder = new JPanel(new BorderLayout());
-        chartHolder.setPreferredSize(new Dimension(420, 280));
+    private JTable categoryTable;
+    private JTable allocationTable;
+    private JTable groupSummaryTable;
 
-        JScrollPane scrollPane = new JScrollPane(chartHolder);
-        scrollPane.setHorizontalScrollBarPolicy(
-                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
-        );
+    private CategoryTableModel categoryTableModel;
+    private ReportTableModel allocationTableModel;
+    private GroupSummaryTableModel groupSummaryTableModel;
 
-        add(scrollPane, BorderLayout.CENTER);
+    private PieChartPanel pieChartPanel;
+
+    // ---------------- LOGIC ----------------
+
+    private final FundCalculationService service = new FundCalculationService();
+
+    // Undo / Redo
+    private final Deque<List<Category>> undoStack = new ArrayDeque<>();
+    private final Deque<List<Category>> redoStack = new ArrayDeque<>();
+
+    // ---------------- CONSTRUCTOR ----------------
+
+    public MainFrame() {
+        setTitle("Funds Management Dashboard");
+        setSize(1250, 760);
+        setLocationRelativeTo(null);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setLayout(new BorderLayout(10, 10));
+
+        initModels();
+
+        add(createHeader(), BorderLayout.NORTH);
+        add(createMainContent(), BorderLayout.CENTER);
+
+        setupKeyboardShortcuts();
+        updateTotalLabel();
     }
 
-    public void updateChart(List<GroupSummary> summaries) {
-        chartHolder.removeAll();
+    // ---------------- INIT ----------------
 
-        DefaultPieDataset dataset = new DefaultPieDataset();
-        for (GroupSummary gs : summaries) {
-            dataset.setValue(
-                    gs.getGroupType().getDisplayName(),
-                    gs.getTotalAmount()
-            );
+    private void initModels() {
+        categoryTableModel =
+                new CategoryTableModel(deepCopy(DefaultCategories.load()));
+
+        allocationTableModel = new ReportTableModel();
+        groupSummaryTableModel = new GroupSummaryTableModel();
+    }
+
+    // ---------------- HEADER ----------------
+
+    private JPanel createHeader() {
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBorder(BorderFactory.createEmptyBorder(12, 16, 12, 16));
+
+        JLabel title = new JLabel("Funds Management Dashboard");
+        title.setFont(new Font("Segoe UI", Font.BOLD, 24));
+
+        JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+
+        incomeField = new JTextField(10);
+        incomeField.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+
+        JButton generateBtn = new JButton("Generate");
+        JButton resetBtn = new JButton("Reset");
+        JButton themeBtn = new JButton("🌙 Dark Mode");
+
+        totalLabel = new JLabel();
+        totalLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
+
+        generateBtn.addActionListener(e -> generateReport());
+        resetBtn.addActionListener(e -> resetCategories());
+        themeBtn.addActionListener(e -> ThemeUtil.toggleTheme(this));
+
+        controls.add(new JLabel("Monthly Income:"));
+        controls.add(incomeField);
+        controls.add(generateBtn);
+        controls.add(resetBtn);
+        controls.add(themeBtn);
+        controls.add(totalLabel);
+
+        header.add(title, BorderLayout.WEST);
+        header.add(controls, BorderLayout.EAST);
+
+        return header;
+    }
+
+    // ---------------- MAIN CONTENT ----------------
+
+    private JSplitPane createMainContent() {
+
+        // ===== LEFT : CATEGORY MANAGEMENT =====
+
+        categoryTable = new JTable(categoryTableModel);
+        categoryTable.setRowHeight(28);
+
+        JScrollPane categoryScroll =
+                new JScrollPane(categoryTable);
+        categoryScroll.setBorder(
+                BorderFactory.createTitledBorder("Categories")
+        );
+
+        JButton addBtn = new JButton("+ Add");
+        JButton removeBtn = new JButton("Remove");
+
+        addBtn.addActionListener(e -> addCategory());
+        removeBtn.addActionListener(e -> removeSelectedCategory());
+
+        JPanel leftButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        leftButtons.add(addBtn);
+        leftButtons.add(removeBtn);
+
+        JPanel leftPanel = new JPanel(new BorderLayout(8, 8));
+        leftPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        leftPanel.add(categoryScroll, BorderLayout.CENTER);
+        leftPanel.add(leftButtons, BorderLayout.SOUTH);
+
+        // ===== RIGHT : REPORTS =====
+
+        pieChartPanel = new PieChartPanel();
+
+        allocationTable = new JTable(allocationTableModel);
+        allocationTable.setRowHeight(26);
+
+        JScrollPane allocationScroll =
+                new JScrollPane(allocationTable);
+        allocationScroll.setBorder(
+                BorderFactory.createTitledBorder("Category Allocation")
+        );
+
+        groupSummaryTable = new JTable(groupSummaryTableModel);
+        groupSummaryTable.setRowHeight(26);
+
+        JScrollPane groupScroll =
+                new JScrollPane(groupSummaryTable);
+        groupScroll.setBorder(
+                BorderFactory.createTitledBorder("Group Summary")
+        );
+
+        JSplitPane reportSplit = new JSplitPane(
+                JSplitPane.VERTICAL_SPLIT,
+                allocationScroll,
+                groupScroll
+        );
+        reportSplit.setDividerLocation(260);
+        reportSplit.setResizeWeight(0.6);
+
+        JSplitPane rightSplit = new JSplitPane(
+                JSplitPane.VERTICAL_SPLIT,
+                pieChartPanel,
+                reportSplit
+        );
+        rightSplit.setDividerLocation(300);
+        rightSplit.setResizeWeight(0.4);
+
+        JPanel rightPanel = new JPanel(new BorderLayout());
+        rightPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        rightPanel.add(rightSplit, BorderLayout.CENTER);
+
+        // ===== MAIN SPLIT =====
+
+        JSplitPane mainSplit = new JSplitPane(
+                JSplitPane.HORIZONTAL_SPLIT,
+                leftPanel,
+                rightPanel
+        );
+        mainSplit.setDividerLocation(430);
+        mainSplit.setResizeWeight(0.35);
+
+        return mainSplit;
+    }
+
+    // ---------------- ACTIONS ----------------
+
+    private void addCategory() {
+        saveState();
+
+        AddCategoryDialog dialog = new AddCategoryDialog(this);
+        dialog.setVisible(true);
+
+        Category c = dialog.getCategory();
+        if (c != null) {
+            categoryTableModel.addCategory(c);
+            updateTotalLabel();
+        }
+    }
+
+    private void removeSelectedCategory() {
+        int row = categoryTable.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "Select a category to remove");
+            return;
         }
 
-        JFreeChart chart = ChartFactory.createPieChart(
-                "Overall Distribution",
-                dataset,
-                true,
-                true,
-                false
-        );
+        if (categoryTableModel.getCategories().get(row).isLocked()) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Default categories cannot be removed"
+            );
+            return;
+        }
 
-        PiePlot plot = (PiePlot) chart.getPlot();
-
-        plot.setSectionPaint(
-                GroupType.EXPENSE.getDisplayName(),
-                new Color(220, 53, 69)
-        );
-
-        plot.setSectionPaint(
-                GroupType.SAVING.getDisplayName(),
-                new Color(40, 167, 69)
-        );
-
-        ChartPanel cp = new ChartPanel(chart);
-        cp.setPreferredSize(new Dimension(420, 260));
-
-        chartHolder.add(cp, BorderLayout.CENTER);
-        revalidate();
-        repaint();
+        saveState();
+        categoryTableModel.removeCategory(row);
+        updateTotalLabel();
     }
 
-    public void clear() {
-        chartHolder.removeAll();
-        repaint();
+    private void generateReport() {
+
+        double income;
+        try {
+            income = Double.parseDouble(incomeField.getText());
+            if (income <= 0) throw new NumberFormatException();
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "Enter a valid income");
+            return;
+        }
+
+        if (!service.validatePercentage(categoryTableModel.getCategories())) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Total percentage must be exactly 100%"
+            );
+            return;
+        }
+
+        List<Category> categories =
+                categoryTableModel.getCategories();
+
+        List<FundAllocation> allocations =
+                service.calculate(income, categories);
+
+        List<GroupSummary> groupSummaries =
+                service.calculateGroupSummary(income, categories);
+
+        allocationTableModel.setData(allocations);
+        groupSummaryTableModel.setData(groupSummaries);
+        pieChartPanel.updateChart(groupSummaries);
+    }
+
+    private void resetCategories() {
+        int confirm = JOptionPane.showConfirmDialog(
+                this,
+                "Reset all categories to default?",
+                "Confirm Reset",
+                JOptionPane.YES_NO_OPTION
+        );
+
+        if (confirm == JOptionPane.YES_OPTION) {
+            saveState();
+            categoryTableModel.setCategories(
+                    deepCopy(DefaultCategories.load())
+            );
+            allocationTableModel.setData(null);
+            groupSummaryTableModel.setData(null);
+            pieChartPanel.clear();
+            updateTotalLabel();
+        }
+    }
+
+    // ---------------- TOTAL VALIDATION ----------------
+
+    private void updateTotalLabel() {
+        double total = categoryTableModel.getCategories()
+                .stream()
+                .mapToDouble(Category::getPercentage)
+                .sum();
+
+        if (Math.abs(total - 100) > 0.01) {
+            totalLabel.setForeground(Color.RED);
+            totalLabel.setText(
+                    String.format("Total: %.2f%% ❌", total)
+            );
+        } else {
+            totalLabel.setForeground(new Color(0, 130, 0));
+            totalLabel.setText("Total: 100% ✔");
+        }
+    }
+
+    // ---------------- UNDO / REDO ----------------
+
+    private void saveState() {
+        undoStack.push(deepCopy(categoryTableModel.getCategories()));
+        redoStack.clear();
+    }
+
+    private void undo() {
+        if (undoStack.isEmpty()) return;
+        redoStack.push(deepCopy(categoryTableModel.getCategories()));
+        categoryTableModel.setCategories(undoStack.pop());
+        updateTotalLabel();
+    }
+
+    private void redo() {
+        if (redoStack.isEmpty()) return;
+        undoStack.push(deepCopy(categoryTableModel.getCategories()));
+        categoryTableModel.setCategories(redoStack.pop());
+        updateTotalLabel();
+    }
+
+    // ---------------- SHORTCUTS ----------------
+
+    private void setupKeyboardShortcuts() {
+        JRootPane root = getRootPane();
+        InputMap im = root.getInputMap(
+                JComponent.WHEN_IN_FOCUSED_WINDOW
+        );
+        ActionMap am = root.getActionMap();
+
+        im.put(KeyStroke.getKeyStroke("ctrl G"), "generate");
+        im.put(KeyStroke.getKeyStroke("ctrl R"), "reset");
+        im.put(KeyStroke.getKeyStroke("ctrl Z"), "undo");
+        im.put(KeyStroke.getKeyStroke("ctrl Y"), "redo");
+
+        am.put("generate", new AbstractAction() {
+            public void actionPerformed(ActionEvent e) {
+                generateReport();
+            }
+        });
+        am.put("reset", new AbstractAction() {
+            public void actionPerformed(ActionEvent e) {
+                resetCategories();
+            }
+        });
+        am.put("undo", new AbstractAction() {
+            public void actionPerformed(ActionEvent e) {
+                undo();
+            }
+        });
+        am.put("redo", new AbstractAction() {
+            public void actionPerformed(ActionEvent e) {
+                redo();
+            }
+        });
+    }
+
+    // ---------------- UTIL ----------------
+
+    private List<Category> deepCopy(List<Category> src) {
+        List<Category> copy = new ArrayList<>();
+        for (Category c : src) {
+            copy.add(
+                    new Category(
+                            c.getName(),
+                            c.getPercentage(),
+                            c.isLocked(),
+                            c.getGroupType()
+                    )
+            );
+        }
+        return copy;
     }
 }
 
 
 ---
 
-8️⃣ HOW YOU USE THIS IN MainFrame
+🏆 WHAT THIS VERSION GIVES YOU
 
-Inside generateReport():
+✅ Category-level control
+✅ Group-level aggregation
+✅ Expenses vs Savings summary table
+✅ Expenses vs Savings pie chart
+✅ Locked defaults + auto-balance
+✅ Undo / Redo + Reset
+✅ Professional dashboard layout
 
-List<GroupSummary> groupSummaries =
-        service.calculateGroupSummary(
-                income,
-                categoryTableModel.getCategories()
-        );
-
-groupSummaryTableModel.setData(groupSummaries);
-pieChartPanel.updateChart(groupSummaries);
-
-And add a JTable for GroupSummaryTableModel below category report.
-
-
----
-
-🏆 FINAL RESULT
-
-✅ Categories still editable individually
-✅ Expenses vs Savings aggregated correctly
-✅ Group totals shown in table
-✅ Group totals shown in pie chart
-✅ Domain-driven, extensible design
-✅ Easy to add more groups later
-
-This is exactly how real finance systems do aggregation.
-
-
----
+This is now finance-app grade architecture, not just Swing UI.
 
 If you want next:
 
-Drill-down on pie slice click
+Drill-down from group → categories
 
 More groups (Needs / Wants / Investments)
 
-Group-wise budget warnings
+Save/load profiles
 
-Persist group config
+JavaFX Material redesign
 
 
-Just tell me 👍
+Just say 👍
