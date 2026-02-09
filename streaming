@@ -1,127 +1,173 @@
-Got it 👍 — that feedback makes total sense.
-What you have right now works, but it looks like a 2008 admin tool 😅
-Let’s turn this into something that feels modern, clean, and impressive, while still staying in Swing.
-
-Below I’ll give you:
-
-✅ Modern UI approach (FlatLaf – industry-grade look & feel)
-✅ Dashboard-style layout
-✅ Tabular Report (JTable) + Pie Chart together
-✅ Better spacing, typography, cards
-✅ Full working updated code (drop-in replacement)
+Perfect — this is exactly the level where the app starts feeling enterprise-grade 💼🔥
+I’ll fix all three issues properly, not with hacks.
 
 
 ---
 
-🔥 UI Upgrade Strategy (What we’ll change)
+✅ What we’ll add (cleanly)
 
-1️⃣ Use FlatLaf (Modern Swing Look)
+1️⃣ Dark Mode Toggle (FlatLaf – runtime switch)
 
-This is what IntelliJ uses internally.
-It instantly makes Swing look professional.
+✔ Light ↔ Dark without restarting
+✔ Uses FlatLightLaf / FlatDarkLaf
 
-Dependency
+2️⃣ Export Report
 
+✔ Excel (.xlsx) → Apache POI
+✔ PDF → OpenPDF (lightweight, modern)
+
+3️⃣ Pie Chart Layout Fix
+
+✔ Chart inside scroll pane
+✔ Proper max height
+✔ Table scrolls independently
+✔ Dashboard no longer breaks on small screens
+
+
+---
+
+📦 New Dependencies (Maven)
+
+<!-- FlatLaf -->
 <dependency>
-    <groupId>com.formdev</groupId>
-    <artifactId>flatlaf</artifactId>
-    <version>3.3</version>
+  <groupId>com.formdev</groupId>
+  <artifactId>flatlaf</artifactId>
+  <version>3.3</version>
 </dependency>
 
-Or download jar and add to classpath.
+<!-- JFreeChart -->
+<dependency>
+  <groupId>org.jfree</groupId>
+  <artifactId>jfreechart</artifactId>
+  <version>1.5.4</version>
+</dependency>
+
+<!-- Excel -->
+<dependency>
+  <groupId>org.apache.poi</groupId>
+  <artifactId>poi-ooxml</artifactId>
+  <version>5.2.5</version>
+</dependency>
+
+<!-- PDF -->
+<dependency>
+  <groupId>com.github.librepdf</groupId>
+  <artifactId>openpdf</artifactId>
+  <version>1.3.39</version>
+</dependency>
 
 
 ---
 
-2️⃣ New Layout (Dashboard Style)
+🌙 1️⃣ Dark Mode Toggle (Runtime)
 
-┌────────────────────────────────────────────┐
-│  Funds Management Dashboard                │
-│  Monthly Income: [ 50000 ]   Generate ▶    │
-└────────────────────────────────────────────┘
+Add this utility
 
-┌───────────────┬────────────────────────────┐
-│ Categories    │ Allocation Report           │
-│ (Editable)    │ ┌──────────────┐           │
-│ JTable        │ │  Pie Chart   │           │
-│               │ └──────────────┘           │
-│ + Add Cat     │ JTable (Report)             │
-└───────────────┴────────────────────────────┘
+ThemeUtil.java (NEW)
 
+package com.fundsmanager.util;
 
----
+import com.formdev.flatlaf.FlatDarkLaf;
+import com.formdev.flatlaf.FlatLightLaf;
 
-3️⃣ What “Generate Report” does now
+import javax.swing.*;
 
-✔ Validates
-✔ Generates tabular report (Category | % | Amount)
-✔ Updates pie chart
-✔ Both visible together
+public class ThemeUtil {
 
+    private static boolean dark = false;
 
----
-
-🧩 New / Updated Components
-
-
----
-
-1️⃣ Report Table Model (NEW)
-
-ReportTableModel.java
-
-package com.fundsmanager.ui;
-
-import com.fundsmanager.model.FundAllocation;
-
-import javax.swing.table.AbstractTableModel;
-import java.util.List;
-
-public class ReportTableModel extends AbstractTableModel {
-
-    private final String[] columns = {"Category", "Percentage (%)", "Amount"};
-    private List<FundAllocation> data;
-
-    public void setData(List<FundAllocation> data) {
-        this.data = data;
-        fireTableDataChanged();
-    }
-
-    public int getRowCount() {
-        return data == null ? 0 : data.size();
-    }
-
-    public int getColumnCount() {
-        return columns.length;
-    }
-
-    public String getColumnName(int col) {
-        return columns[col];
-    }
-
-    public Object getValueAt(int row, int col) {
-        FundAllocation fa = data.get(row);
-        return switch (col) {
-            case 0 -> fa.getCategory();
-            case 1 -> fa.getPercentage();
-            default -> String.format("₹ %.2f", fa.getAmount());
-        };
+    public static void toggleTheme(JFrame frame) {
+        try {
+            dark = !dark;
+            UIManager.setLookAndFeel(
+                    dark ? new FlatDarkLaf() : new FlatLightLaf()
+            );
+            SwingUtilities.updateComponentTreeUI(frame);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 }
 
 
 ---
 
-2️⃣ Pie Chart Panel (Improved Card Style)
+📊 2️⃣ Export Services
+
+ExportService.java (NEW)
+
+package com.fundsmanager.service;
+
+import com.fundsmanager.model.FundAllocation;
+import com.lowagie.text.*;
+import com.lowagie.text.pdf.*;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.util.List;
+
+public class ExportService {
+
+    public void exportToExcel(List<FundAllocation> data, File file) throws Exception {
+        Workbook wb = new XSSFWorkbook();
+        Sheet sheet = wb.createSheet("Funds Report");
+
+        Row header = sheet.createRow(0);
+        header.createCell(0).setCellValue("Category");
+        header.createCell(1).setCellValue("Percentage");
+        header.createCell(2).setCellValue("Amount");
+
+        int rowNum = 1;
+        for (FundAllocation fa : data) {
+            Row row = sheet.createRow(rowNum++);
+            row.createCell(0).setCellValue(fa.getCategory());
+            row.createCell(1).setCellValue(fa.getPercentage());
+            row.createCell(2).setCellValue(fa.getAmount());
+        }
+
+        try (FileOutputStream fos = new FileOutputStream(file)) {
+            wb.write(fos);
+        }
+        wb.close();
+    }
+
+    public void exportToPDF(List<FundAllocation> data, File file) throws Exception {
+        Document doc = new Document();
+        PdfWriter.getInstance(doc, new FileOutputStream(file));
+        doc.open();
+
+        doc.add(new Paragraph("Funds Allocation Report"));
+        doc.add(new Paragraph(" "));
+
+        PdfPTable table = new PdfPTable(3);
+        table.addCell("Category");
+        table.addCell("Percentage");
+        table.addCell("Amount");
+
+        for (FundAllocation fa : data) {
+            table.addCell(fa.getCategory());
+            table.addCell(String.valueOf(fa.getPercentage()));
+            table.addCell("₹ " + String.format("%.2f", fa.getAmount()));
+        }
+
+        doc.add(table);
+        doc.close();
+    }
+}
+
+
+---
+
+📈 3️⃣ Pie Chart Layout Fix (Scrollable)
 
 PieChartPanel.java (UPDATED)
 
 package com.fundsmanager.ui;
 
 import com.fundsmanager.model.FundAllocation;
-import org.jfree.chart.ChartFactory;
-import org.jfree.chart.ChartPanel;
-import org.jfree.chart.JFreeChart;
+import org.jfree.chart.*;
 import org.jfree.data.general.DefaultPieDataset;
 
 import javax.swing.*;
@@ -130,13 +176,23 @@ import java.util.List;
 
 public class PieChartPanel extends JPanel {
 
+    private JPanel chartHolder;
+
     public PieChartPanel() {
         setLayout(new BorderLayout());
         setBorder(BorderFactory.createTitledBorder("Fund Distribution"));
+
+        chartHolder = new JPanel(new BorderLayout());
+        chartHolder.setPreferredSize(new Dimension(400, 280));
+
+        JScrollPane scrollPane = new JScrollPane(chartHolder);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+
+        add(scrollPane, BorderLayout.CENTER);
     }
 
     public void updateChart(List<FundAllocation> allocations) {
-        removeAll();
+        chartHolder.removeAll();
 
         DefaultPieDataset dataset = new DefaultPieDataset();
         allocations.forEach(a ->
@@ -152,8 +208,9 @@ public class PieChartPanel extends JPanel {
         );
 
         ChartPanel chartPanel = new ChartPanel(chart);
-        add(chartPanel, BorderLayout.CENTER);
+        chartPanel.setPreferredSize(new Dimension(400, 260));
 
+        chartHolder.add(chartPanel, BorderLayout.CENTER);
         revalidate();
         repaint();
     }
@@ -162,189 +219,129 @@ public class PieChartPanel extends JPanel {
 
 ---
 
-3️⃣ MainFrame (🔥 Major UI Upgrade)
+🧭 4️⃣ Dashboard Layout Fix (Independent Scroll Areas)
 
-MainFrame.java (REPLACEMENT)
+Replace RIGHT PANEL in MainFrame
 
-package com.fundsmanager.ui;
+// RIGHT PANEL
+pieChartPanel = new PieChartPanel();
 
-import com.fundsmanager.model.Category;
-import com.fundsmanager.model.FundAllocation;
-import com.fundsmanager.service.FundCalculationService;
-import com.fundsmanager.util.DefaultCategories;
+reportTableModel = new ReportTableModel();
+JTable reportTable = new JTable(reportTableModel);
 
-import javax.swing.*;
-import java.awt.*;
-import java.util.List;
+JScrollPane reportScroll = new JScrollPane(reportTable);
+reportScroll.setBorder(BorderFactory.createTitledBorder("Tabular Report"));
 
-public class MainFrame extends JFrame {
+JSplitPane verticalSplit = new JSplitPane(
+        JSplitPane.VERTICAL_SPLIT,
+        pieChartPanel,
+        reportScroll
+);
+verticalSplit.setDividerLocation(300);
+verticalSplit.setResizeWeight(0.4);
 
-    private JTextField incomeField;
-    private CategoryTableModel categoryTableModel;
-    private ReportTableModel reportTableModel;
-    private PieChartPanel pieChartPanel;
+➡ This prevents pie chart from hijacking space
 
-    private FundCalculationService service = new FundCalculationService();
 
-    public MainFrame() {
-        setTitle("Funds Management Dashboard");
-        setSize(1100, 650);
-        setLocationRelativeTo(null);
-        setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setLayout(new BorderLayout(10, 10));
+---
 
-        add(createHeader(), BorderLayout.NORTH);
-        add(createMainContent(), BorderLayout.CENTER);
-    }
+🌗 5️⃣ Header Controls (Dark Mode + Export)
 
-    private JPanel createHeader() {
-        JPanel header = new JPanel(new BorderLayout());
-        header.setBorder(BorderFactory.createEmptyBorder(10, 15, 10, 15));
+Update Header Panel
 
-        JLabel title = new JLabel("Funds Management Dashboard");
-        title.setFont(new Font("Segoe UI", Font.BOLD, 22));
+JButton themeBtn = new JButton("🌙 Dark Mode");
+themeBtn.addActionListener(e ->
+        ThemeUtil.toggleTheme(this)
+);
 
-        JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        incomeField = new JTextField(10);
-        JButton generateBtn = new JButton("Generate Report");
+JButton excelBtn = new JButton("Export Excel");
+excelBtn.addActionListener(e -> exportExcel());
 
-        generateBtn.addActionListener(e -> generateReport());
+JButton pdfBtn = new JButton("Export PDF");
+pdfBtn.addActionListener(e -> exportPDF());
 
-        controls.add(new JLabel("Monthly Income:"));
-        controls.add(incomeField);
-        controls.add(generateBtn);
+controls.add(themeBtn);
+controls.add(excelBtn);
+controls.add(pdfBtn);
 
-        header.add(title, BorderLayout.WEST);
-        header.add(controls, BorderLayout.EAST);
 
-        return header;
-    }
+---
 
-    private JSplitPane createMainContent() {
+Add fields to MainFrame
 
-        // LEFT: Categories
-        categoryTableModel = new CategoryTableModel(DefaultCategories.load());
-        JTable categoryTable = new JTable(categoryTableModel);
+private List<FundAllocation> lastReport;
+private ExportService exportService = new ExportService();
 
-        JButton addCategoryBtn = new JButton("+ Add Category");
-        addCategoryBtn.addActionListener(e -> addCategory());
 
-        JPanel left = new JPanel(new BorderLayout(5, 5));
-        left.setBorder(BorderFactory.createTitledBorder("Categories"));
-        left.add(new JScrollPane(categoryTable), BorderLayout.CENTER);
-        left.add(addCategoryBtn, BorderLayout.SOUTH);
+---
 
-        // RIGHT: Report + Chart
-        pieChartPanel = new PieChartPanel();
+Store report on generate
 
-        reportTableModel = new ReportTableModel();
-        JTable reportTable = new JTable(reportTableModel);
+lastReport = allocations;
 
-        JPanel right = new JPanel(new BorderLayout(5, 5));
-        right.setBorder(BorderFactory.createTitledBorder("Allocation Report"));
-        right.add(pieChartPanel, BorderLayout.NORTH);
-        right.add(new JScrollPane(reportTable), BorderLayout.CENTER);
 
-        JSplitPane splitPane = new JSplitPane(
-                JSplitPane.HORIZONTAL_SPLIT,
-                left,
-                right
-        );
-        splitPane.setDividerLocation(400);
+---
 
-        return splitPane;
-    }
+Export handlers
 
-    private void addCategory() {
-        AddCategoryDialog dialog = new AddCategoryDialog(this);
-        dialog.setVisible(true);
+private void exportExcel() {
+    if (lastReport == null) return;
 
-        Category c = dialog.getCategory();
-        if (c != null) {
-            categoryTableModel.getCategories().add(c);
-            categoryTableModel.fireTableDataChanged();
-        }
-    }
-
-    private void generateReport() {
-        double income;
+    JFileChooser fc = new JFileChooser();
+    if (fc.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
         try {
-            income = Double.parseDouble(incomeField.getText());
+            exportService.exportToExcel(lastReport, fc.getSelectedFile());
+            JOptionPane.showMessageDialog(this, "Excel exported");
         } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "Enter valid income");
-            return;
+            JOptionPane.showMessageDialog(this, "Export failed");
         }
+    }
+}
 
-        List<Category> categories = categoryTableModel.getCategories();
+private void exportPDF() {
+    if (lastReport == null) return;
 
-        if (!service.validatePercentage(categories)) {
-            JOptionPane.showMessageDialog(this, "Total percentage must be exactly 100%");
-            return;
+    JFileChooser fc = new JFileChooser();
+    if (fc.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+        try {
+            exportService.exportToPDF(lastReport, fc.getSelectedFile());
+            JOptionPane.showMessageDialog(this, "PDF exported");
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "Export failed");
         }
-
-        List<FundAllocation> allocations =
-                service.calculate(income, categories);
-
-        reportTableModel.setData(allocations);
-        pieChartPanel.updateChart(allocations);
     }
 }
 
 
 ---
 
-4️⃣ Enable FlatLaf (🔥 Instant UI Upgrade)
+🏆 Final Result (Now This Is 🔥)
 
-FundsManagerApp.java (UPDATED)
+✅ Modern Light/Dark toggle
+✅ Professional dashboard layout
+✅ Scrollable pie chart (no UI break)
+✅ Tabular + chart report together
+✅ Excel & PDF export
+✅ Enterprise-ready Swing app
 
-package com.fundsmanager.app;
-
-import com.fundsmanager.ui.MainFrame;
-import com.formdev.flatlaf.FlatLightLaf;
-
-import javax.swing.*;
-
-public class FundsManagerApp {
-
-    public static void main(String[] args) {
-        FlatLightLaf.setup();
-
-        SwingUtilities.invokeLater(() ->
-                new MainFrame().setVisible(true)
-        );
-    }
-}
+This is now resume-worthy, demo-ready, and interview-killer.
 
 
 ---
 
-🧠 What You Have Now (Big Upgrade)
+Want next?
 
-✅ Modern professional UI (FlatLaf)
-✅ Dashboard layout (split panes, titled cards)
-✅ Editable category table
-✅ Tabular report + Pie chart together
-✅ Clean spacing, fonts, borders
-✅ Interview-ready & demo-ready
+I can still add:
 
-This now looks like something a bank / finance tool would ship.
+SQLite persistence
 
+Monthly history view
 
----
+Category locking rules
 
-Want to go next level? 😎
+JavaFX Material redesign
 
-I can:
-
-Add Dark Mode toggle
-
-Export report to Excel / PDF
-
-Persist data using SQLite
-
-Convert this to JavaFX Material UI
-
-Package as Windows EXE
+Windows installer (EXE)
 
 
-Just say the word 🔥
+Just say it 😎
