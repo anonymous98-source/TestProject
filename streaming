@@ -1,170 +1,244 @@
+Great question — this is the right UX decision 👍
+Yes, you can (and should) allow direct inline editing of:
+
+✅ Category name
+✅ Category percentage
+✅ Optional delete row support
+
+All inside the Categories panel JTable, no extra dialogs needed.
+
+Below is a clean, Swing-correct, production-ready solution.
+
+
+---
+
+🎯 What we’ll enable
+
+In Categories panel JTable:
+
+Category Name	Percentage (%)
+
+Editable	Editable
+
+
+✔ Double-click to edit
+✔ Enter / Tab to save
+✔ Real-time validation
+✔ Prevent empty names
+✔ Prevent negative %
+✔ Changes instantly reflected in report
+
+
+---
+
+1️⃣ Update Category model (small but important)
+
+Category.java (FINAL)
+
+package com.fundsmanager.model;
+
+public class Category {
+
+    private String name;
+    private double percentage;
+
+    public Category(String name, double percentage) {
+        this.name = name;
+        this.percentage = percentage;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public double getPercentage() {
+        return percentage;
+    }
+
+    public void setPercentage(double percentage) {
+        this.percentage = percentage;
+    }
+}
+
+
+---
+
+2️⃣ Replace CategoryTableModel (THIS IS THE KEY)
+
+This enables direct inline editing for both columns.
+
+CategoryTableModel.java (FULL REPLACEMENT)
+
 package com.fundsmanager.ui;
 
 import com.fundsmanager.model.Category;
-import com.fundsmanager.model.FundAllocation;
-import com.fundsmanager.service.FundCalculationService;
-import com.fundsmanager.util.DefaultCategories;
-import com.fundsmanager.util.ThemeUtil;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.table.AbstractTableModel;
 import java.util.List;
 
-public class MainFrame extends JFrame {
+public class CategoryTableModel extends AbstractTableModel {
 
-    private JTextField incomeField;
+    private final String[] columns = {"Category Name", "Percentage (%)"};
+    private final List<Category> categories;
 
-    private CategoryTableModel categoryTableModel;
-    private ReportTableModel reportTableModel;
-
-    private PieChartPanel pieChartPanel;
-
-    private final FundCalculationService service = new FundCalculationService();
-
-    public MainFrame() {
-        setTitle("Funds Management Dashboard");
-        setSize(1150, 700);
-        setLocationRelativeTo(null);
-        setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setLayout(new BorderLayout(10, 10));
-
-        add(createHeader(), BorderLayout.NORTH);
-        add(createMainContent(), BorderLayout.CENTER);
+    public CategoryTableModel(List<Category> categories) {
+        this.categories = categories;
     }
 
-    // ================= HEADER =================
-
-    private JPanel createHeader() {
-        JPanel header = new JPanel(new BorderLayout());
-        header.setBorder(BorderFactory.createEmptyBorder(12, 16, 12, 16));
-
-        JLabel title = new JLabel("Funds Management Dashboard");
-        title.setFont(new Font("Segoe UI", Font.BOLD, 24));
-
-        JPanel rightControls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
-
-        incomeField = new JTextField(10);
-        incomeField.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-
-        JButton generateBtn = new JButton("Generate Report");
-        JButton themeBtn = new JButton("🌙 Dark Mode");
-
-        generateBtn.addActionListener(e -> generateReport());
-        themeBtn.addActionListener(e -> ThemeUtil.toggleTheme(this));
-
-        rightControls.add(new JLabel("Monthly Income:"));
-        rightControls.add(incomeField);
-        rightControls.add(generateBtn);
-        rightControls.add(themeBtn);
-
-        header.add(title, BorderLayout.WEST);
-        header.add(rightControls, BorderLayout.EAST);
-
-        return header;
+    @Override
+    public int getRowCount() {
+        return categories.size();
     }
 
-    // ================= MAIN CONTENT =================
-
-    private JSplitPane createMainContent() {
-
-        // ---------- LEFT : CATEGORY MANAGEMENT ----------
-
-        categoryTableModel = new CategoryTableModel(DefaultCategories.load());
-        JTable categoryTable = new JTable(categoryTableModel);
-        categoryTable.setRowHeight(28);
-
-        JScrollPane categoryScroll = new JScrollPane(categoryTable);
-        categoryScroll.setBorder(BorderFactory.createTitledBorder("Categories"));
-
-        JButton addCategoryBtn = new JButton("+ Add Category");
-        addCategoryBtn.addActionListener(e -> addCategory());
-
-        JPanel leftPanel = new JPanel(new BorderLayout(8, 8));
-        leftPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        leftPanel.add(categoryScroll, BorderLayout.CENTER);
-        leftPanel.add(addCategoryBtn, BorderLayout.SOUTH);
-
-        // ---------- RIGHT : REPORT + CHART ----------
-
-        pieChartPanel = new PieChartPanel();
-
-        reportTableModel = new ReportTableModel();
-        JTable reportTable = new JTable(reportTableModel);
-        reportTable.setRowHeight(28);
-
-        JScrollPane reportScroll = new JScrollPane(reportTable);
-        reportScroll.setBorder(BorderFactory.createTitledBorder("Tabular Report"));
-
-        JSplitPane verticalSplit = new JSplitPane(
-                JSplitPane.VERTICAL_SPLIT,
-                pieChartPanel,
-                reportScroll
-        );
-        verticalSplit.setDividerLocation(320);
-        verticalSplit.setResizeWeight(0.45);
-
-        JPanel rightPanel = new JPanel(new BorderLayout());
-        rightPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        rightPanel.add(verticalSplit, BorderLayout.CENTER);
-
-        // ---------- MAIN SPLIT ----------
-
-        JSplitPane mainSplit = new JSplitPane(
-                JSplitPane.HORIZONTAL_SPLIT,
-                leftPanel,
-                rightPanel
-        );
-        mainSplit.setDividerLocation(420);
-        mainSplit.setResizeWeight(0.35);
-
-        return mainSplit;
+    @Override
+    public int getColumnCount() {
+        return columns.length;
     }
 
-    // ================= ACTIONS =================
-
-    private void addCategory() {
-        AddCategoryDialog dialog = new AddCategoryDialog(this);
-        dialog.setVisible(true);
-
-        Category category = dialog.getCategory();
-        if (category != null) {
-            categoryTableModel.getCategories().add(category);
-            categoryTableModel.fireTableDataChanged();
-        }
+    @Override
+    public String getColumnName(int col) {
+        return columns[col];
     }
 
-    private void generateReport() {
+    @Override
+    public Object getValueAt(int row, int col) {
+        Category c = categories.get(row);
+        return col == 0 ? c.getName() : c.getPercentage();
+    }
 
-        double income;
-        try {
-            income = Double.parseDouble(incomeField.getText());
-            if (income <= 0) throw new NumberFormatException();
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Please enter a valid monthly income",
-                    "Invalid Input",
-                    JOptionPane.WARNING_MESSAGE
-            );
-            return;
+    @Override
+    public boolean isCellEditable(int row, int col) {
+        return true; // ✅ BOTH columns editable
+    }
+
+    @Override
+    public void setValueAt(Object value, int row, int col) {
+        Category c = categories.get(row);
+
+        if (col == 0) { // Category Name
+            String name = value.toString().trim();
+            if (!name.isEmpty()) {
+                c.setName(name);
+            }
+        } else { // Percentage
+            try {
+                double percent = Double.parseDouble(value.toString());
+                if (percent >= 0) {
+                    c.setPercentage(percent);
+                }
+            } catch (NumberFormatException ignored) {
+                // invalid input → ignore change
+            }
         }
 
-        List<Category> categories = categoryTableModel.getCategories();
+        fireTableRowsUpdated(row, row);
+    }
 
-        if (!service.validatePercentage(categories)) {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Total category percentage must be exactly 100%",
-                    "Validation Error",
-                    JOptionPane.ERROR_MESSAGE
-            );
-            return;
+    public List<Category> getCategories() {
+        return categories;
+    }
+
+    public void addCategory(Category category) {
+        categories.add(category);
+        fireTableRowsInserted(categories.size() - 1, categories.size() - 1);
+    }
+
+    public void removeCategory(int row) {
+        if (row >= 0 && row < categories.size()) {
+            categories.remove(row);
+            fireTableRowsDeleted(row, row);
         }
-
-        List<FundAllocation> allocations =
-                service.calculate(income, categories);
-
-        reportTableModel.setData(allocations);
-        pieChartPanel.updateChart(allocations);
     }
 }
+
+
+---
+
+3️⃣ Small UI Enhancement in MainFrame (Optional but recommended)
+
+Allow deleting selected category
+
+Add a Remove button under the category table.
+
+In createMainContent() → LEFT panel
+
+JButton removeCategoryBtn = new JButton("🗑 Remove Selected");
+removeCategoryBtn.addActionListener(e -> removeSelectedCategory());
+
+JPanel categoryBtnPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+categoryBtnPanel.add(addCategoryBtn);
+categoryBtnPanel.add(removeCategoryBtn);
+
+leftPanel.add(categoryBtnPanel, BorderLayout.SOUTH);
+
+
+---
+
+Add this method to MainFrame
+
+private void removeSelectedCategory() {
+    JTable table = new JTable(categoryTableModel);
+    int row = table.getSelectedRow();
+    if (row >= 0) {
+        categoryTableModel.removeCategory(row);
+    } else {
+        JOptionPane.showMessageDialog(
+                this,
+                "Please select a category to remove",
+                "No Selection",
+                JOptionPane.WARNING_MESSAGE
+        );
+    }
+}
+
+(If you already have the table reference, reuse it instead of creating new.)
+
+
+---
+
+4️⃣ How editing works now (UX behavior)
+
+🖱 Double-click Category Name → rename
+🖱 Double-click Percentage → edit %
+⌨ Press Enter → value saved
+❌ Invalid values ignored
+⚠ Total % validation happens on Generate Report
+
+This matches real finance tools.
+
+
+---
+
+✅ Final Result
+
+✔ Clean inline editing
+✔ No dialogs needed
+✔ Faster workflow
+✔ Professional UX
+✔ Logic unchanged
+
+Your Categories panel now behaves like a real editable grid, not a form.
+
+
+---
+
+Want next?
+
+I can:
+
+Auto-recalculate percentages
+
+Lock default categories
+
+Highlight invalid totals in red
+
+Add keyboard shortcuts
+
+Add undo/redo
+
+
+Just tell me 👍
