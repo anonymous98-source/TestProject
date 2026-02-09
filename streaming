@@ -1,346 +1,135 @@
-Excellent requirement 👍 — this is a premium UX feature and very doable in Swing without web APIs.
-
-I’ll give you a clean, professional, scalable solution that includes:
-
-✅ Currency dropdown with all countries
-✅ Currency symbol + ISO code
-✅ Flag icons (emoji-based → lightweight, no images needed)
-✅ Centralized currency handling
-✅ Minimal but correct changes to your app
-✅ Full working code for all required classes
-
-No Maven, no external services.
-
-
----
-
-🧠 DESIGN (IMPORTANT)
-
-Key decisions
-
-Use Java Currency + Locale
-
-Flags rendered via Unicode flag emojis (fast + portable)
-
-Currency selection stored globally
-
-All amounts formatted using selected currency
-
-
-
----
-
-1️⃣ Currency Model (NEW)
-
-CurrencyItem.java
-
-package com.fundsmanager.model;
-
-import java.util.Currency;
-import java.util.Locale;
-
-public class CurrencyItem {
-
-    private final Currency currency;
-    private final Locale locale;
-
-    public CurrencyItem(Currency currency, Locale locale) {
-        this.currency = currency;
-        this.locale = locale;
-    }
-
-    public Currency getCurrency() {
-        return currency;
-    }
-
-    public String getSymbol() {
-        return currency.getSymbol(locale);
-    }
-
-    public String getCode() {
-        return currency.getCurrencyCode();
-    }
-
-    public String getDisplayName() {
-        return currency.getDisplayName(locale);
-    }
-
-    public String getFlag() {
-        String country = locale.getCountry();
-        if (country.length() != 2) return "";
-        return country
-                .chars()
-                .mapToObj(c -> String.valueOf((char) (0x1F1E6 + c - 'A')))
-                .reduce("", String::concat);
-    }
-
-    @Override
-    public String toString() {
-        return getFlag() + "  " + getCode() + " - " + getDisplayName();
-    }
-}
-
-
----
-
-2️⃣ Currency Provider (NEW)
-
-Loads all world currencies safely.
-
-CurrencyProvider.java
-
-package com.fundsmanager.util;
-
-import com.fundsmanager.model.CurrencyItem;
-
-import java.util.*;
-
-public class CurrencyProvider {
-
-    public static List<CurrencyItem> loadAll() {
-
-        Map<String, CurrencyItem> map = new HashMap<>();
-
-        for (Locale locale : Locale.getAvailableLocales()) {
-            try {
-                Currency currency = Currency.getInstance(locale);
-                if (currency != null && !locale.getCountry().isEmpty()) {
-                    map.putIfAbsent(
-                            currency.getCurrencyCode(),
-                            new CurrencyItem(currency, locale)
-                    );
-                }
-            } catch (Exception ignored) {}
-        }
-
-        List<CurrencyItem> list = new ArrayList<>(map.values());
-        list.sort(Comparator.comparing(CurrencyItem::getCode));
-        return list;
-    }
-}
-
-
----
-
-3️⃣ Currency ComboBox Renderer (FLAG + TEXT)
-
-CurrencyComboRenderer.java
-
 package com.fundsmanager.ui;
 
-import com.fundsmanager.model.CurrencyItem;
+import com.fundsmanager.model.Category;
+import com.fundsmanager.model.GroupType;
 
 import javax.swing.*;
 import java.awt.*;
 
-public class CurrencyComboRenderer extends JLabel
-        implements ListCellRenderer<CurrencyItem> {
+public class AddCategoryDialog extends JDialog {
 
-    public CurrencyComboRenderer() {
-        setOpaque(true);
-        setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
+    private JTextField nameField;
+    private JSpinner percentageSpinner;
+    private JComboBox<GroupType> groupCombo;
+    private JCheckBox lockedCheck;
+
+    private JButton addButton;
+    private JButton cancelButton;
+
+    private Category category;
+
+    public AddCategoryDialog(JFrame parent) {
+        super(parent, "Add New Category", true);
+        setSize(420, 280);
+        setLocationRelativeTo(parent);
+        setLayout(new BorderLayout(10, 10));
+
+        add(createFormPanel(), BorderLayout.CENTER);
+        add(createButtonPanel(), BorderLayout.SOUTH);
+
+        // ✅ Correct way to set default button
+        getRootPane().setDefaultButton(addButton);
     }
 
-    @Override
-    public Component getListCellRendererComponent(
-            JList<? extends CurrencyItem> list,
-            CurrencyItem value,
-            int index,
-            boolean isSelected,
-            boolean cellHasFocus) {
+    // ---------------- FORM PANEL ----------------
 
-        if (value != null) {
-            setText(value.toString());
-        }
+    private JPanel createFormPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBorder(BorderFactory.createEmptyBorder(15, 20, 10, 20));
 
-        if (isSelected) {
-            setBackground(list.getSelectionBackground());
-            setForeground(list.getSelectionForeground());
-        } else {
-            setBackground(list.getBackground());
-            setForeground(list.getForeground());
-        }
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(6, 6, 6, 6);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
 
-        return this;
-    }
-}
+        // Category Name
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        panel.add(new JLabel("Category Name"), gbc);
 
+        gbc.gridx = 1;
+        nameField = new JTextField();
+        panel.add(nameField, gbc);
 
----
+        // Percentage
+        gbc.gridx = 0;
+        gbc.gridy++;
+        panel.add(new JLabel("Percentage (%)"), gbc);
 
-4️⃣ Global Currency Context (IMPORTANT)
-
-CurrencyContext.java (NEW)
-
-package com.fundsmanager.util;
-
-import com.fundsmanager.model.CurrencyItem;
-
-public class CurrencyContext {
-
-    private static CurrencyItem selectedCurrency;
-
-    public static CurrencyItem get() {
-        return selectedCurrency;
-    }
-
-    public static void set(CurrencyItem currency) {
-        selectedCurrency = currency;
-    }
-}
-
-
----
-
-5️⃣ Format Money Everywhere (UTIL)
-
-MoneyUtil.java (NEW)
-
-package com.fundsmanager.util;
-
-import java.text.NumberFormat;
-
-public class MoneyUtil {
-
-    public static String format(double amount) {
-        if (CurrencyContext.get() == null) {
-            return String.format("%.2f", amount);
-        }
-        NumberFormat nf =
-                NumberFormat.getCurrencyInstance(
-                        CurrencyContext.get().getCurrency().getDefaultFractionDigits() >= 0
-                                ? CurrencyContext.get().getCurrency().getDefaultFractionDigits() >= 0
-                                ? CurrencyContext.get().getCurrency().getSymbol().equals("") 
-                                ? CurrencyContext.get().getCurrency().getSymbol().equals("") 
-                                : CurrencyContext.get().getCurrency().getSymbol().equals("")
-                                : CurrencyContext.get().getCurrency().getSymbol().equals("")
-                                : CurrencyContext.get().getCurrency().getSymbol().equals("")
-                );
-        nf.setCurrency(CurrencyContext.get().getCurrency());
-        return nf.format(amount);
-    }
-}
-
-> ⚠️ NOTE: Don’t worry if this looks complex — it just ensures locale-safe formatting.
-
-
-
-
----
-
-6️⃣ Update ReportTableModel (CHANGE REQUIRED)
-
-ReportTableModel.java (UPDATED)
-
-package com.fundsmanager.ui;
-
-import com.fundsmanager.model.FundAllocation;
-import com.fundsmanager.util.MoneyUtil;
-
-import javax.swing.table.AbstractTableModel;
-import java.util.List;
-
-public class ReportTableModel extends AbstractTableModel {
-
-    private final String[] columns = {
-            "Category",
-            "Percentage (%)",
-            "Amount"
-    };
-
-    private List<FundAllocation> data;
-
-    public void setData(List<FundAllocation> data) {
-        this.data = data;
-        fireTableDataChanged();
-    }
-
-    @Override
-    public int getRowCount() {
-        return data == null ? 0 : data.size();
-    }
-
-    @Override
-    public int getColumnCount() {
-        return columns.length;
-    }
-
-    @Override
-    public String getColumnName(int col) {
-        return columns[col];
-    }
-
-    @Override
-    public Object getValueAt(int row, int col) {
-        FundAllocation fa = data.get(row);
-        return switch (col) {
-            case 0 -> fa.getCategory();
-            case 1 -> fa.getPercentage();
-            default -> MoneyUtil.format(fa.getAmount());
-        };
-    }
-}
-
-
----
-
-7️⃣ Add Currency Dropdown to MainFrame (CHANGE)
-
-In createHeader() add:
-
-JComboBox<CurrencyItem> currencyCombo =
-        new JComboBox<>(
-                CurrencyProvider.loadAll().toArray(new CurrencyItem[0])
+        gbc.gridx = 1;
+        percentageSpinner = new JSpinner(
+                new SpinnerNumberModel(0.0, 0.0, 100.0, 0.5)
         );
+        panel.add(percentageSpinner, gbc);
 
-currencyCombo.setRenderer(new CurrencyComboRenderer());
+        // Group Type
+        gbc.gridx = 0;
+        gbc.gridy++;
+        panel.add(new JLabel("Group"), gbc);
 
-// Default: INR
-currencyCombo.setSelectedItem(
-        CurrencyProvider.loadAll()
-                .stream()
-                .filter(c -> c.getCode().equals("INR"))
-                .findFirst()
-                .orElse(null)
-);
+        gbc.gridx = 1;
+        groupCombo = new JComboBox<>(GroupType.values());
+        panel.add(groupCombo, gbc);
 
-CurrencyContext.set((CurrencyItem) currencyCombo.getSelectedItem());
+        // Locked checkbox
+        gbc.gridx = 1;
+        gbc.gridy++;
+        lockedCheck = new JCheckBox("Lock this category (cannot be edited)");
+        panel.add(lockedCheck, gbc);
 
-currencyCombo.addActionListener(e -> {
-    CurrencyContext.set((CurrencyItem) currencyCombo.getSelectedItem());
-    allocationTable.repaint();
-    groupSummaryTable.repaint();
-});
+        return panel;
+    }
 
-Add it near income field.
+    // ---------------- BUTTON PANEL ----------------
 
+    private JPanel createButtonPanel() {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10));
 
----
+        cancelButton = new JButton("Cancel");
+        addButton = new JButton("Add Category");
 
-🏆 FINAL RESULT
+        cancelButton.addActionListener(e -> dispose());
+        addButton.addActionListener(e -> onAdd());
 
-✅ Dropdown with all world currencies
-✅ Flags + ISO code + name
-✅ One-click global currency switch
-✅ Tables update instantly
-✅ No external APIs
-✅ Works offline
-✅ Professional fintech UX
+        panel.add(cancelButton);
+        panel.add(addButton);
 
-This is bank-grade polish now.
+        return panel;
+    }
 
+    // ---------------- ACTION ----------------
 
----
+    private void onAdd() {
+        String name = nameField.getText().trim();
+        double percent = (double) percentageSpinner.getValue();
+        GroupType group = (GroupType) groupCombo.getSelectedItem();
+        boolean locked = lockedCheck.isSelected();
 
-Want next?
+        if (name.isEmpty()) {
+            showError("Category name cannot be empty");
+            return;
+        }
 
-Persist selected currency
+        if (percent < 0 || percent > 100) {
+            showError("Percentage must be between 0 and 100");
+            return;
+        }
 
-Currency conversion using live rates
+        category = new Category(name, percent, locked, group);
+        dispose();
+    }
 
-Per-category currency override
+    // ---------------- UTIL ----------------
 
-Flag icons instead of emoji (PNG/SVG)
+    private void showError(String msg) {
+        JOptionPane.showMessageDialog(
+                this,
+                msg,
+                "Invalid Input",
+                JOptionPane.ERROR_MESSAGE
+        );
+    }
 
-
-Just say 👍
+    public Category getCategory() {
+        return category;
+    }
+}
