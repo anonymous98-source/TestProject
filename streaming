@@ -1,78 +1,305 @@
-Great timing to do this — both of these are architecture-level concerns, not cosmetic tweaks.
-I’ll do this in two clear parts:
-
-1️⃣ Full review + corrected CategoryTableModel (production-safe)
-2️⃣ Deterministic color mapping between Category table ↔ Pie chart
-
-No fluff, no partial snippets — ready-to-use code.
+Perfect — this is a structural enhancement, not just UI polish.
+We’ll do it properly, with clean domain modeling and minimal but correct class changes.
 
 
 ---
 
-1️⃣ CategoryTableModel — FULL REVIEW & FIXES
+🎯 REQUIREMENT CLARIFIED
 
-❌ Problems in a typical first version
+You want:
 
-Most Swing table models fail in these areas:
+Groups
 
-❌ Auto-balance logic mutates list while iterating
+EXPENSES
 
-❌ Locked categories still editable via keyboard paste
+Necessary Expenses
 
-❌ No snapshot hook for undo/redo
+EMIs
 
-❌ Floating-point drift (99.999999%)
+Miscellaneous
 
-❌ No notification to UI when auto-balance runs
-
-❌ No single source of truth for total = 100
+(any user-added expense category)
 
 
-We’ll fix all of them.
+SAVINGS / INVESTMENTS
+
+Emergency Fund
+
+Health Emergency
+
+Savings
+
+Investments
+
+(any user-added saving category)
+
+
+
+Outputs
+
+1. Category-level table (already exists)
+
+
+2. Group-level summary table:
+
+Group        | Total % | Total Amount
+--------------------------------------
+Expenses     | 70%     | ₹70,000
+Savings      | 30%     | ₹30,000
+
+
+3. Pie chart based on GROUPS (Expenses vs Savings)
+(not individual categories)
+
+
 
 
 ---
 
-✅ FINAL CategoryTableModel.java (CORRECT & SAFE)
+🧠 DESIGN (IMPORTANT – WHY THIS IS CORRECT)
 
-Guarantees
+Key decisions
 
-✔ Locked categories truly immutable
-✔ Auto-recalculation only affects unlocked categories
-✔ Percentages always normalized
-✔ No concurrent modification bugs
-✔ Undo/redo friendly
-✔ UI refresh handled correctly
+Grouping is domain logic, not UI logic
+
+Category knows its GroupType
+
+Service calculates group aggregates
+
+Pie chart uses group data
+
+Tables stay independent
+
 
 
 ---
 
-CategoryTableModel.java (FULL CODE)
+1️⃣ NEW ENUM – GroupType
+
+GroupType.java (NEW)
+
+package com.fundsmanager.model;
+
+public enum GroupType {
+    EXPENSE("Expenses"),
+    SAVING("Savings");
+
+    private final String displayName;
+
+    GroupType(String displayName) {
+        this.displayName = displayName;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+}
+
+
+---
+
+2️⃣ Category MODEL (CHANGED)
+
+Category.java (FULL UPDATED CODE)
+
+package com.fundsmanager.model;
+
+public class Category {
+
+    private String name;
+    private double percentage;
+    private boolean locked;
+    private GroupType groupType; // 🔥 NEW
+
+    public Category(String name, double percentage, boolean locked, GroupType groupType) {
+        this.name = name;
+        this.percentage = percentage;
+        this.locked = locked;
+        this.groupType = groupType;
+    }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public double getPercentage() { return percentage; }
+    public void setPercentage(double percentage) { this.percentage = percentage; }
+
+    public boolean isLocked() { return locked; }
+
+    public GroupType getGroupType() { return groupType; }
+    public void setGroupType(GroupType groupType) { this.groupType = groupType; }
+}
+
+
+---
+
+3️⃣ DefaultCategories (CHANGED)
+
+DefaultCategories.java
+
+package com.fundsmanager.util;
+
+import com.fundsmanager.model.Category;
+import com.fundsmanager.model.GroupType;
+
+import java.util.List;
+
+public class DefaultCategories {
+
+    public static List<Category> load() {
+        return List.of(
+            new Category("Necessary Expenses", 40, true, GroupType.EXPENSE),
+            new Category("Emergency Fund", 10, true, GroupType.SAVING),
+            new Category("Health Emergency", 10, true, GroupType.SAVING),
+            new Category("EMIs", 15, true, GroupType.EXPENSE),
+            new Category("Savings", 10, false, GroupType.SAVING),
+            new Category("Investments", 10, false, GroupType.SAVING),
+            new Category("Miscellaneous", 5, false, GroupType.EXPENSE)
+        );
+    }
+}
+
+
+---
+
+4️⃣ NEW DTO – GroupSummary
+
+GroupSummary.java (NEW)
+
+package com.fundsmanager.model;
+
+public class GroupSummary {
+
+    private final GroupType groupType;
+    private final double totalPercentage;
+    private final double totalAmount;
+
+    public GroupSummary(GroupType groupType, double totalPercentage, double totalAmount) {
+        this.groupType = groupType;
+        this.totalPercentage = totalPercentage;
+        this.totalAmount = totalAmount;
+    }
+
+    public GroupType getGroupType() { return groupType; }
+    public double getTotalPercentage() { return totalPercentage; }
+    public double getTotalAmount() { return totalAmount; }
+}
+
+
+---
+
+5️⃣ FundCalculationService (CHANGED – CORE LOGIC)
+
+FundCalculationService.java (FULL UPDATED)
+
+package com.fundsmanager.service;
+
+import com.fundsmanager.model.*;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+public class FundCalculationService {
+
+    public List<FundAllocation> calculate(double income, List<Category> categories) {
+
+        List<FundAllocation> result = new ArrayList<>();
+
+        for (Category c : categories) {
+            double amount = income * c.getPercentage() / 100;
+            result.add(new FundAllocation(
+                    c.getName(),
+                    c.getPercentage(),
+                    amount
+            ));
+        }
+        return result;
+    }
+
+    public List<GroupSummary> calculateGroupSummary(
+            double income,
+            List<Category> categories
+    ) {
+
+        Map<GroupType, Double> percentMap = new EnumMap<>(GroupType.class);
+        Map<GroupType, Double> amountMap = new EnumMap<>(GroupType.class);
+
+        for (GroupType gt : GroupType.values()) {
+            percentMap.put(gt, 0.0);
+            amountMap.put(gt, 0.0);
+        }
+
+        for (Category c : categories) {
+            double percent = c.getPercentage();
+            double amount = income * percent / 100;
+
+            percentMap.put(
+                    c.getGroupType(),
+                    percentMap.get(c.getGroupType()) + percent
+            );
+
+            amountMap.put(
+                    c.getGroupType(),
+                    amountMap.get(c.getGroupType()) + amount
+            );
+        }
+
+        List<GroupSummary> result = new ArrayList<>();
+        for (GroupType gt : GroupType.values()) {
+            result.add(new GroupSummary(
+                    gt,
+                    round(percentMap.get(gt)),
+                    round(amountMap.get(gt))
+            ));
+        }
+
+        return result;
+    }
+
+    public boolean validatePercentage(List<Category> categories) {
+        double sum = categories.stream()
+                .mapToDouble(Category::getPercentage)
+                .sum();
+        return Math.abs(sum - 100.0) < 0.01;
+    }
+
+    private double round(double v) {
+        return Math.round(v * 100.0) / 100.0;
+    }
+}
+
+
+---
+
+6️⃣ NEW TABLE MODEL – Group Summary Table
+
+GroupSummaryTableModel.java (NEW)
 
 package com.fundsmanager.ui;
 
-import com.fundsmanager.model.Category;
+import com.fundsmanager.model.GroupSummary;
 
 import javax.swing.table.AbstractTableModel;
-import java.util.ArrayList;
 import java.util.List;
 
-public class CategoryTableModel extends AbstractTableModel {
+public class GroupSummaryTableModel extends AbstractTableModel {
 
-    private static final double TARGET_TOTAL = 100.0;
+    private final String[] columns = {
+            "Group",
+            "Total Percentage (%)",
+            "Total Amount"
+    };
 
-    private final String[] columns = {"Category Name", "Percentage (%)"};
-    private List<Category> categories;
+    private List<GroupSummary> data;
 
-    public CategoryTableModel(List<Category> categories) {
-        this.categories = categories;
+    public void setData(List<GroupSummary> data) {
+        this.data = data;
+        fireTableDataChanged();
     }
-
-    // ================= TABLE METADATA =================
 
     @Override
     public int getRowCount() {
-        return categories.size();
+        return data == null ? 0 : data.size();
     }
 
     @Override
@@ -81,321 +308,148 @@ public class CategoryTableModel extends AbstractTableModel {
     }
 
     @Override
-    public String getColumnName(int column) {
-        return columns[column];
+    public String getColumnName(int col) {
+        return columns[col];
     }
 
     @Override
-    public Class<?> getColumnClass(int columnIndex) {
-        return columnIndex == 1 ? Double.class : String.class;
-    }
-
-    // ================= DATA ACCESS =================
-
-    @Override
-    public Object getValueAt(int rowIndex, int columnIndex) {
-        Category c = categories.get(rowIndex);
-        return columnIndex == 0 ? c.getName() : c.getPercentage();
-    }
-
-    // ================= EDITING RULES =================
-
-    @Override
-    public boolean isCellEditable(int rowIndex, int columnIndex) {
-        Category c = categories.get(rowIndex);
-
-        // Locked → nothing editable
-        if (c.isLocked()) return false;
-
-        // Unlocked → both name and percentage editable
-        return true;
-    }
-
-    @Override
-    public void setValueAt(Object aValue, int rowIndex, int columnIndex) {
-        Category edited = categories.get(rowIndex);
-
-        if (edited.isLocked()) return;
-
-        if (columnIndex == 0) {
-            // -------- Category Name --------
-            String name = aValue.toString().trim();
-            if (!name.isEmpty()) {
-                edited.setName(name);
-                fireTableRowsUpdated(rowIndex, rowIndex);
-            }
-            return;
-        }
-
-        // -------- Percentage --------
-        double newValue;
-        try {
-            newValue = Double.parseDouble(aValue.toString());
-        } catch (Exception e) {
-            return;
-        }
-
-        if (newValue < 0 || newValue > TARGET_TOTAL) return;
-
-        edited.setPercentage(round(newValue));
-        autoBalance(rowIndex);
-        normalize();
-
-        fireTableDataChanged();
-    }
-
-    // ================= AUTO BALANCING =================
-
-    private void autoBalance(int editedRow) {
-
-        double lockedTotal = categories.stream()
-                .filter(Category::isLocked)
-                .mapToDouble(Category::getPercentage)
-                .sum();
-
-        double editedValue = categories.get(editedRow).getPercentage();
-        double remaining = TARGET_TOTAL - lockedTotal - editedValue;
-
-        if (remaining < 0) return;
-
-        List<Category> adjustable = new ArrayList<>();
-        for (int i = 0; i < categories.size(); i++) {
-            Category c = categories.get(i);
-            if (!c.isLocked() && i != editedRow) {
-                adjustable.add(c);
-            }
-        }
-
-        if (adjustable.isEmpty()) return;
-
-        double perCategory = remaining / adjustable.size();
-
-        for (Category c : adjustable) {
-            c.setPercentage(round(perCategory));
-        }
-    }
-
-    // ================= NORMALIZATION =================
-
-    private void normalize() {
-        double total = categories.stream()
-                .mapToDouble(Category::getPercentage)
-                .sum();
-
-        double diff = TARGET_TOTAL - total;
-
-        if (Math.abs(diff) < 0.01) return;
-
-        // Push rounding difference into first unlocked category
-        for (Category c : categories) {
-            if (!c.isLocked()) {
-                c.setPercentage(round(c.getPercentage() + diff));
-                break;
-            }
-        }
-    }
-
-    private double round(double value) {
-        return Math.round(value * 100.0) / 100.0;
-    }
-
-    // ================= CRUD =================
-
-    public List<Category> getCategories() {
-        return categories;
-    }
-
-    public void setCategories(List<Category> categories) {
-        this.categories = categories;
-        fireTableDataChanged();
-    }
-
-    public void addCategory(Category category) {
-        categories.add(category);
-        normalize();
-        fireTableDataChanged();
-    }
-
-    public void removeCategory(int row) {
-        if (row >= 0 && row < categories.size()) {
-            categories.remove(row);
-            normalize();
-            fireTableDataChanged();
-        }
+    public Object getValueAt(int row, int col) {
+        GroupSummary g = data.get(row);
+        return switch (col) {
+            case 0 -> g.getGroupType().getDisplayName();
+            case 1 -> g.getTotalPercentage();
+            default -> "₹ " + String.format("%.2f", g.getTotalAmount());
+        };
     }
 }
 
 
 ---
 
-2️⃣ Color Mapping: Category Table ↔ Pie Chart
+7️⃣ PIE CHART – GROUP-BASED (FULL UPDATED CODE)
 
-🎯 Goal
-
-Each category has one stable color
-
-Same color used in:
-
-JTable row
-
-Pie chart slice
-
-
-Colors never change across updates
-
-
-
----
-
-✅ Solution Architecture
-
-We introduce one color registry:
-
-CategoryColorRegistry (Singleton / Utility)
-
-Category name → Color
-This avoids random colors on every refresh.
-
-
----
-
-2️⃣ CategoryColorRegistry (NEW)
-
-package com.fundsmanager.util;
-
-import java.awt.*;
-import java.util.HashMap;
-import java.util.Map;
-
-public class CategoryColorRegistry {
-
-    private static final Color[] PALETTE = {
-            new Color(0x4CAF50),
-            new Color(0x2196F3),
-            new Color(0xFFC107),
-            new Color(0xFF5722),
-            new Color(0x9C27B0),
-            new Color(0x009688),
-            new Color(0x795548),
-            new Color(0x607D8B)
-    };
-
-    private static final Map<String, Color> colorMap = new HashMap<>();
-    private static int index = 0;
-
-    public static Color getColor(String categoryName) {
-        return colorMap.computeIfAbsent(
-                categoryName,
-                k -> PALETTE[index++ % PALETTE.length]
-        );
-    }
-
-    private CategoryColorRegistry() {}
-}
-
-
----
-
-3️⃣ Apply Colors to Pie Chart (CRITICAL)
-
-Update PieChartPanel.updateChart(...)
-
-import com.fundsmanager.util.CategoryColorRegistry;
-import org.jfree.chart.plot.PiePlot;
-
-JFreeChart chart = ChartFactory.createPieChart(
-        null,
-        dataset,
-        true,
-        true,
-        false
-);
-
-PiePlot plot = (PiePlot) chart.getPlot();
-
-allocations.forEach(a -> {
-    plot.setSectionPaint(
-            a.getCategory(),
-            CategoryColorRegistry.getColor(a.getCategory())
-    );
-});
-
-✔ Pie slices now match category colors
-
-
----
-
-4️⃣ Apply Colors to Category JTable Rows
-
-Custom Table Cell Renderer
+PieChartPanel.java (FULL REPLACEMENT)
 
 package com.fundsmanager.ui;
 
-import com.fundsmanager.util.CategoryColorRegistry;
+import com.fundsmanager.model.GroupSummary;
+import com.fundsmanager.model.GroupType;
+import org.jfree.chart.*;
+import org.jfree.chart.plot.PiePlot;
+import org.jfree.data.general.DefaultPieDataset;
 
 import javax.swing.*;
-import javax.swing.table.DefaultTableCellRenderer;
 import java.awt.*;
+import java.util.List;
 
-public class CategoryColorRenderer extends DefaultTableCellRenderer {
+public class PieChartPanel extends JPanel {
 
-    @Override
-    public Component getTableCellRendererComponent(
-            JTable table, Object value, boolean isSelected,
-            boolean hasFocus, int row, int column) {
+    private JPanel chartHolder;
 
-        Component c = super.getTableCellRendererComponent(
-                table, value, isSelected, hasFocus, row, column);
+    public PieChartPanel() {
+        setLayout(new BorderLayout());
+        setBorder(BorderFactory.createTitledBorder("Expenses vs Savings"));
 
-        String categoryName = table.getValueAt(row, 0).toString();
-        Color color = CategoryColorRegistry.getColor(categoryName);
+        chartHolder = new JPanel(new BorderLayout());
+        chartHolder.setPreferredSize(new Dimension(420, 280));
 
-        if (!isSelected) {
-            c.setBackground(new Color(
-                    color.getRed(), color.getGreen(), color.getBlue(), 30
-            ));
+        JScrollPane scrollPane = new JScrollPane(chartHolder);
+        scrollPane.setHorizontalScrollBarPolicy(
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+        );
+
+        add(scrollPane, BorderLayout.CENTER);
+    }
+
+    public void updateChart(List<GroupSummary> summaries) {
+        chartHolder.removeAll();
+
+        DefaultPieDataset dataset = new DefaultPieDataset();
+        for (GroupSummary gs : summaries) {
+            dataset.setValue(
+                    gs.getGroupType().getDisplayName(),
+                    gs.getTotalAmount()
+            );
         }
 
-        return c;
+        JFreeChart chart = ChartFactory.createPieChart(
+                "Overall Distribution",
+                dataset,
+                true,
+                true,
+                false
+        );
+
+        PiePlot plot = (PiePlot) chart.getPlot();
+
+        plot.setSectionPaint(
+                GroupType.EXPENSE.getDisplayName(),
+                new Color(220, 53, 69)
+        );
+
+        plot.setSectionPaint(
+                GroupType.SAVING.getDisplayName(),
+                new Color(40, 167, 69)
+        );
+
+        ChartPanel cp = new ChartPanel(chart);
+        cp.setPreferredSize(new Dimension(420, 260));
+
+        chartHolder.add(cp, BorderLayout.CENTER);
+        revalidate();
+        repaint();
+    }
+
+    public void clear() {
+        chartHolder.removeAll();
+        repaint();
     }
 }
 
 
 ---
 
-Attach Renderer in MainFrame
+8️⃣ HOW YOU USE THIS IN MainFrame
 
-categoryTable.setDefaultRenderer(
-        Object.class,
-        new CategoryColorRenderer()
-);
+Inside generateReport():
+
+List<GroupSummary> groupSummaries =
+        service.calculateGroupSummary(
+                income,
+                categoryTableModel.getCategories()
+        );
+
+groupSummaryTableModel.setData(groupSummaries);
+pieChartPanel.updateChart(groupSummaries);
+
+And add a JTable for GroupSummaryTableModel below category report.
 
 
 ---
 
 🏆 FINAL RESULT
 
-✅ CategoryTableModel is correct, safe, deterministic
-✅ Auto-balancing works without floating bugs
-✅ Locked categories enforced at model level
-✅ Category colors are consistent everywhere
-✅ Table ↔ Chart visual mapping is intuitive
-✅ UX feels premium and intentional
+✅ Categories still editable individually
+✅ Expenses vs Savings aggregated correctly
+✅ Group totals shown in table
+✅ Group totals shown in pie chart
+✅ Domain-driven, extensible design
+✅ Easy to add more groups later
 
-This is now banking / fintech-grade Swing design.
+This is exactly how real finance systems do aggregation.
 
 
 ---
 
 If you want next:
 
-Color legend panel
+Drill-down on pie slice click
 
-Persist colors across app restarts
+More groups (Needs / Wants / Investments)
 
-Animated chart transitions
+Group-wise budget warnings
 
-Per-category icons
+Persist group config
 
 
-Just say the word 👍
+Just tell me 👍
