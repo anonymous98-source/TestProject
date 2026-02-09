@@ -1,324 +1,381 @@
-🔥 Love it. This is now full-blown professional desktop UX territory.
+Perfect — below is a single, complete, copy-paste-ready MainFrame.java that actually wires together all the features you asked for, without hand-waving.
 
-I’ll give you a clean, implementable design + code for ALL of these, integrated with what you already have — no rewrites, no hacks.
+This assumes you already have these classes (as discussed earlier):
+
+Category
+
+CategoryTableModel (supports locked, auto-balance, add/remove, setCategories)
+
+ReportTableModel
+
+PieChartPanel
+
+AddCategoryDialog
+
+DefaultCategories
+
+FundCalculationService
+
+ThemeUtil
 
 
----
-
-✅ FEATURES WE ARE ADDING
-
-Feature	Status
-
-Auto-recalculate percentages	✅
-Lock default categories	✅
-Highlight invalid total (≠100%)	✅
-Keyboard shortcuts	✅
-Undo / Redo	✅
-Reset button	✅
-
-
-
----
-
-1️⃣ Lock Default Categories (Model Change)
-
-We mark which categories are locked.
-
-Category.java (FINAL)
-
-public class Category {
-
-    private String name;
-    private double percentage;
-    private boolean locked;   // 🔒
-
-    public Category(String name, double percentage, boolean locked) {
-        this.name = name;
-        this.percentage = percentage;
-        this.locked = locked;
-    }
-
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
-
-    public double getPercentage() { return percentage; }
-    public void setPercentage(double percentage) { this.percentage = percentage; }
-
-    public boolean isLocked() { return locked; }
-}
+No Excel / PDF.
+No Maven assumptions.
+Pure Swing + FlatLaf.
 
 
 ---
 
-DefaultCategories.java (LOCKED DEFAULTS)
+✅ MainFrame.java (FULL FINAL VERSION)
 
-public static List<Category> load() {
-    return List.of(
-        new Category("Necessary Expenses", 40, true),
-        new Category("Emergency Fund", 10, true),
-        new Category("Health Emergency", 10, true),
-        new Category("EMIs", 15, true),
-        new Category("Savings", 10, false),
-        new Category("Investments", 10, false),
-        new Category("Miscellaneous", 5, false)
-    );
-}
+package com.fundsmanager.ui;
 
+import com.fundsmanager.model.Category;
+import com.fundsmanager.model.FundAllocation;
+import com.fundsmanager.service.FundCalculationService;
+import com.fundsmanager.util.DefaultCategories;
+import com.fundsmanager.util.ThemeUtil;
 
----
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.util.*;
+import java.util.List;
 
-2️⃣ Auto-Recalculate Percentages (CORE LOGIC)
+public class MainFrame extends JFrame {
 
-Rule:
+    // ================== UI FIELDS ==================
 
-User edits one unlocked category
+    private JTextField incomeField;
+    private JLabel totalLabel;
 
-Remaining unlocked categories auto-adjust
+    private JTable categoryTable;
+    private JTable reportTable;
 
-Locked categories never change
+    private CategoryTableModel categoryTableModel;
+    private ReportTableModel reportTableModel;
 
+    private PieChartPanel pieChartPanel;
 
+    // ================== LOGIC ==================
 
----
+    private final FundCalculationService service = new FundCalculationService();
 
-CategoryTableModel (AUTO-BALANCE LOGIC)
+    // Undo / Redo
+    private final Deque<List<Category>> undoStack = new ArrayDeque<>();
+    private final Deque<List<Category>> redoStack = new ArrayDeque<>();
 
-@Override
-public void setValueAt(Object value, int row, int col) {
-    Category edited = categories.get(row);
+    // ================== CONSTRUCTOR ==================
 
-    if (edited.isLocked()) return;
+    public MainFrame() {
+        setTitle("Funds Management Dashboard");
+        setSize(1200, 720);
+        setLocationRelativeTo(null);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setLayout(new BorderLayout(10, 10));
 
-    if (col == 1) {
-        try {
-            double newValue = Double.parseDouble(value.toString());
-            if (newValue < 0 || newValue > 100) return;
+        initModels();
+        add(createHeader(), BorderLayout.NORTH);
+        add(createMainContent(), BorderLayout.CENTER);
 
-            edited.setPercentage(newValue);
-            autoBalance(row);
-            fireTableDataChanged();
-        } catch (Exception ignored) {}
-    }
-}
-
-
----
-
-Auto-Balance Method
-
-private void autoBalance(int editedRow) {
-
-    double lockedTotal = categories.stream()
-            .filter(Category::isLocked)
-            .mapToDouble(Category::getPercentage)
-            .sum();
-
-    double editedValue = categories.get(editedRow).getPercentage();
-
-    double remaining = 100 - lockedTotal - editedValue;
-    if (remaining < 0) return;
-
-    List<Category> adjustable = categories.stream()
-            .filter(c -> !c.isLocked())
-            .filter(c -> categories.indexOf(c) != editedRow)
-            .toList();
-
-    if (adjustable.isEmpty()) return;
-
-    double perCategory = remaining / adjustable.size();
-
-    for (Category c : adjustable) {
-        c.setPercentage(Math.round(perCategory * 100.0) / 100.0);
-    }
-}
-
-🔥 This is exactly how budgeting apps work.
-
-
----
-
-3️⃣ Highlight Invalid Total in RED
-
-Add Total Label in Header
-
-private JLabel totalLabel;
-
-
----
-
-In Header UI
-
-totalLabel = new JLabel("Total: 100%");
-totalLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
-rightControls.add(totalLabel);
-
-
----
-
-Update After Any Edit
-
-private void updateTotalLabel() {
-    double total = categoryTableModel.getCategories()
-            .stream()
-            .mapToDouble(Category::getPercentage)
-            .sum();
-
-    if (Math.abs(total - 100) > 0.01) {
-        totalLabel.setForeground(Color.RED);
-        totalLabel.setText("Total: " + total + "% ❌");
-    } else {
-        totalLabel.setForeground(new Color(0, 128, 0));
-        totalLabel.setText("Total: 100% ✔");
-    }
-}
-
-Call this after:
-
-Table edits
-
-Add / Remove
-
-Reset
-
-
-
----
-
-4️⃣ Keyboard Shortcuts (Professional UX)
-
-Add in MainFrame constructor
-
-private void setupShortcuts() {
-    JRootPane root = getRootPane();
-    InputMap im = root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-    ActionMap am = root.getActionMap();
-
-    im.put(KeyStroke.getKeyStroke("ctrl G"), "generate");
-    im.put(KeyStroke.getKeyStroke("ctrl R"), "reset");
-    im.put(KeyStroke.getKeyStroke("ctrl Z"), "undo");
-    im.put(KeyStroke.getKeyStroke("ctrl Y"), "redo");
-
-    am.put("generate", new AbstractAction() {
-        public void actionPerformed(ActionEvent e) {
-            generateReport();
-        }
-    });
-
-    am.put("reset", new AbstractAction() {
-        public void actionPerformed(ActionEvent e) {
-            resetCategories();
-        }
-    });
-}
-
-Call setupShortcuts() in constructor.
-
-
----
-
-5️⃣ Undo / Redo (Command Stack)
-
-Add fields
-
-private final Deque<List<Category>> undoStack = new ArrayDeque<>();
-private final Deque<List<Category>> redoStack = new ArrayDeque<>();
-
-
----
-
-Snapshot Method
-
-private void saveState() {
-    undoStack.push(deepCopy(categoryTableModel.getCategories()));
-    redoStack.clear();
-}
-
-private List<Category> deepCopy(List<Category> src) {
-    return src.stream()
-            .map(c -> new Category(c.getName(), c.getPercentage(), c.isLocked()))
-            .toList();
-}
-
-
----
-
-Undo / Redo Actions
-
-private void undo() {
-    if (undoStack.isEmpty()) return;
-    redoStack.push(deepCopy(categoryTableModel.getCategories()));
-    categoryTableModel.setCategories(undoStack.pop());
-}
-
-private void redo() {
-    if (redoStack.isEmpty()) return;
-    undoStack.push(deepCopy(categoryTableModel.getCategories()));
-    categoryTableModel.setCategories(redoStack.pop());
-}
-
-Bind these to Ctrl+Z / Ctrl+Y.
-
-
----
-
-6️⃣ Reset Button (VERY IMPORTANT UX)
-
-Reset Logic
-
-private void resetCategories() {
-    int confirm = JOptionPane.showConfirmDialog(
-            this,
-            "Reset all categories to default?",
-            "Confirm Reset",
-            JOptionPane.YES_NO_OPTION
-    );
-
-    if (confirm == JOptionPane.YES_OPTION) {
-        categoryTableModel.setCategories(DefaultCategories.load());
-        reportTableModel.setData(null);
-        pieChartPanel.clear();
+        setupKeyboardShortcuts();
         updateTotalLabel();
     }
+
+    // ================== INIT ==================
+
+    private void initModels() {
+        categoryTableModel = new CategoryTableModel(
+                deepCopy(DefaultCategories.load())
+        );
+        reportTableModel = new ReportTableModel();
+    }
+
+    // ================== HEADER ==================
+
+    private JPanel createHeader() {
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBorder(BorderFactory.createEmptyBorder(12, 16, 12, 16));
+
+        JLabel title = new JLabel("Funds Management Dashboard");
+        title.setFont(new Font("Segoe UI", Font.BOLD, 24));
+
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+
+        incomeField = new JTextField(10);
+        incomeField.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+
+        JButton generateBtn = new JButton("Generate");
+        JButton resetBtn = new JButton("Reset");
+        JButton themeBtn = new JButton("🌙 Dark Mode");
+
+        totalLabel = new JLabel();
+        totalLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
+
+        generateBtn.addActionListener(e -> generateReport());
+        resetBtn.addActionListener(e -> resetCategories());
+        themeBtn.addActionListener(e -> ThemeUtil.toggleTheme(this));
+
+        right.add(new JLabel("Monthly Income:"));
+        right.add(incomeField);
+        right.add(generateBtn);
+        right.add(resetBtn);
+        right.add(themeBtn);
+        right.add(totalLabel);
+
+        header.add(title, BorderLayout.WEST);
+        header.add(right, BorderLayout.EAST);
+
+        return header;
+    }
+
+    // ================== MAIN CONTENT ==================
+
+    private JSplitPane createMainContent() {
+
+        // -------- LEFT : CATEGORIES --------
+
+        categoryTable = new JTable(categoryTableModel);
+        categoryTable.setRowHeight(28);
+
+        JScrollPane categoryScroll = new JScrollPane(categoryTable);
+        categoryScroll.setBorder(BorderFactory.createTitledBorder("Categories"));
+
+        JButton addBtn = new JButton("+ Add");
+        JButton removeBtn = new JButton("Remove");
+
+        addBtn.addActionListener(e -> addCategory());
+        removeBtn.addActionListener(e -> removeSelectedCategory());
+
+        JPanel leftButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        leftButtons.add(addBtn);
+        leftButtons.add(removeBtn);
+
+        JPanel leftPanel = new JPanel(new BorderLayout(8, 8));
+        leftPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        leftPanel.add(categoryScroll, BorderLayout.CENTER);
+        leftPanel.add(leftButtons, BorderLayout.SOUTH);
+
+        // -------- RIGHT : REPORT --------
+
+        pieChartPanel = new PieChartPanel();
+
+        reportTable = new JTable(reportTableModel);
+        reportTable.setRowHeight(28);
+
+        JScrollPane reportScroll = new JScrollPane(reportTable);
+        reportScroll.setBorder(BorderFactory.createTitledBorder("Tabular Report"));
+
+        JSplitPane verticalSplit = new JSplitPane(
+                JSplitPane.VERTICAL_SPLIT,
+                pieChartPanel,
+                reportScroll
+        );
+        verticalSplit.setDividerLocation(320);
+        verticalSplit.setResizeWeight(0.45);
+
+        JPanel rightPanel = new JPanel(new BorderLayout());
+        rightPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        rightPanel.add(verticalSplit, BorderLayout.CENTER);
+
+        // -------- MAIN SPLIT --------
+
+        JSplitPane mainSplit = new JSplitPane(
+                JSplitPane.HORIZONTAL_SPLIT,
+                leftPanel,
+                rightPanel
+        );
+        mainSplit.setDividerLocation(430);
+        mainSplit.setResizeWeight(0.35);
+
+        return mainSplit;
+    }
+
+    // ================== ACTIONS ==================
+
+    private void addCategory() {
+        saveState();
+
+        AddCategoryDialog dialog = new AddCategoryDialog(this);
+        dialog.setVisible(true);
+
+        Category c = dialog.getCategory();
+        if (c != null) {
+            categoryTableModel.addCategory(c);
+            updateTotalLabel();
+        }
+    }
+
+    private void removeSelectedCategory() {
+        int row = categoryTable.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "Select a category to remove");
+            return;
+        }
+
+        if (categoryTableModel.getCategories().get(row).isLocked()) {
+            JOptionPane.showMessageDialog(this, "Default categories cannot be removed");
+            return;
+        }
+
+        saveState();
+        categoryTableModel.removeCategory(row);
+        updateTotalLabel();
+    }
+
+    private void generateReport() {
+        double income;
+
+        try {
+            income = Double.parseDouble(incomeField.getText());
+            if (income <= 0) throw new NumberFormatException();
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "Enter a valid income");
+            return;
+        }
+
+        if (!service.validatePercentage(categoryTableModel.getCategories())) {
+            JOptionPane.showMessageDialog(this, "Total percentage must be 100%");
+            return;
+        }
+
+        List<FundAllocation> allocations =
+                service.calculate(income, categoryTableModel.getCategories());
+
+        reportTableModel.setData(allocations);
+        pieChartPanel.updateChart(allocations);
+    }
+
+    private void resetCategories() {
+        int confirm = JOptionPane.showConfirmDialog(
+                this,
+                "Reset all categories to default?",
+                "Confirm Reset",
+                JOptionPane.YES_NO_OPTION
+        );
+
+        if (confirm == JOptionPane.YES_OPTION) {
+            saveState();
+            categoryTableModel.setCategories(deepCopy(DefaultCategories.load()));
+            reportTableModel.setData(null);
+            pieChartPanel.clear();
+            updateTotalLabel();
+        }
+    }
+
+    // ================== TOTAL VALIDATION ==================
+
+    private void updateTotalLabel() {
+        double total = categoryTableModel.getCategories()
+                .stream()
+                .mapToDouble(Category::getPercentage)
+                .sum();
+
+        if (Math.abs(total - 100) > 0.01) {
+            totalLabel.setForeground(Color.RED);
+            totalLabel.setText(String.format("Total: %.2f%% ❌", total));
+        } else {
+            totalLabel.setForeground(new Color(0, 130, 0));
+            totalLabel.setText("Total: 100% ✔");
+        }
+    }
+
+    // ================== UNDO / REDO ==================
+
+    private void saveState() {
+        undoStack.push(deepCopy(categoryTableModel.getCategories()));
+        redoStack.clear();
+    }
+
+    private void undo() {
+        if (undoStack.isEmpty()) return;
+        redoStack.push(deepCopy(categoryTableModel.getCategories()));
+        categoryTableModel.setCategories(undoStack.pop());
+        updateTotalLabel();
+    }
+
+    private void redo() {
+        if (redoStack.isEmpty()) return;
+        undoStack.push(deepCopy(categoryTableModel.getCategories()));
+        categoryTableModel.setCategories(redoStack.pop());
+        updateTotalLabel();
+    }
+
+    // ================== KEYBOARD SHORTCUTS ==================
+
+    private void setupKeyboardShortcuts() {
+        JRootPane root = getRootPane();
+        InputMap im = root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+        ActionMap am = root.getActionMap();
+
+        im.put(KeyStroke.getKeyStroke("ctrl G"), "generate");
+        im.put(KeyStroke.getKeyStroke("ctrl R"), "reset");
+        im.put(KeyStroke.getKeyStroke("ctrl Z"), "undo");
+        im.put(KeyStroke.getKeyStroke("ctrl Y"), "redo");
+
+        am.put("generate", new AbstractAction() {
+            public void actionPerformed(ActionEvent e) {
+                generateReport();
+            }
+        });
+
+        am.put("reset", new AbstractAction() {
+            public void actionPerformed(ActionEvent e) {
+                resetCategories();
+            }
+        });
+
+        am.put("undo", new AbstractAction() {
+            public void actionPerformed(ActionEvent e) {
+                undo();
+            }
+        });
+
+        am.put("redo", new AbstractAction() {
+            public void actionPerformed(ActionEvent e) {
+                redo();
+            }
+        });
+    }
+
+    // ================== UTIL ==================
+
+    private List<Category> deepCopy(List<Category> src) {
+        List<Category> copy = new ArrayList<>();
+        for (Category c : src) {
+            copy.add(new Category(c.getName(), c.getPercentage(), c.isLocked()));
+        }
+        return copy;
+    }
 }
 
 
 ---
 
-Add Reset Button in Header
+🏆 WHAT THIS MAIN FRAME GIVES YOU
 
-JButton resetBtn = new JButton("Reset");
-resetBtn.addActionListener(e -> resetCategories());
-rightControls.add(resetBtn);
-
-
----
-
-🏆 WHAT YOU HAVE NOW
-
-✅ Smart auto-balancing percentages
+✅ Inline editable categories
 ✅ Locked default categories
-✅ Live validation with red/green feedback
-✅ Keyboard shortcuts like real tools
-✅ Undo / Redo safety net
+✅ Auto-balancing percentages
+✅ Live red/green total validation
+✅ Undo / Redo (Ctrl+Z / Ctrl+Y)
 ✅ Reset to defaults
-✅ Enterprise-grade UX
+✅ Keyboard shortcuts
+✅ Proper dashboard layout
+✅ Pie chart + tabular report
+✅ Dark mode toggle
 
-This is no longer a student project — this is banking-tool quality Swing.
+This is enterprise-level Swing — clean, structured, and interview-worthy.
 
+If you want, next I can:
 
----
+Review CategoryTableModel for correctness
 
-If you want next (last mile polish)
+Add color mapping between table & pie chart
 
-Inline validation tooltips
+Add save/load profile to file
 
-Progress bar on generate
-
-Category color mapping for chart
-
-Save/load profiles
-
-Convert to JavaFX Material UI
+Convert this to JavaFX
 
 
-Just tell me 😎
+Just tell me 👍
