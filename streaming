@@ -1,148 +1,104 @@
-Nice idea 👍 This is actually a solid real-world desktop app and very doable with Java Swing. I’ll walk you through this like a mini product + engineering plan so you can actually build it cleanly, not a messy Swing demo.
+Alright, buckle up 😄
+I’ll give you a clean, professional, FULL working Java Swing project with:
+
+✅ Proper layered architecture
+✅ Default + dynamic categories
+✅ Add Category dialog
+✅ Percentage validation
+✅ JTable-based UI
+✅ Pie Chart integration (JFreeChart)
+✅ Runnable main()
+
+This is production-grade Swing, not toy code.
 
 
 ---
 
-1️⃣ Application Overview (What you’re building)
+0️⃣ Tech Stack & Prerequisites
 
-Funds Management Desktop Application (Java Swing)
+Java
 
-Core Features
-
-User enters monthly income
-
-Funds are divided into categories:
-
-Necessary Expenses
-
-Emergency Fund
-
-Health Emergency Fund
-
-EMIs
-
-Future Savings
-
-Investments
-
-Miscellaneous
+Java 8+
 
 
-Each category has:
+External Library (for Pie Chart)
 
-Name
-
-Percentage allocation
+JFreeChart
 
 
-Default percentages pre-filled
+If using Maven:
 
-User can:
+<dependency>
+    <groupId>org.jfree</groupId>
+    <artifactId>jfreechart</artifactId>
+    <version>1.5.4</version>
+</dependency>
 
-Modify percentages
+If not using Maven, download:
 
-Add custom categories
+jfreechart-1.5.4.jar
 
-Remove optional categories
-
-
-App calculates:
-
-Amount per category
-
-
-Generates:
-
-Tabular report
-
-Optional pie chart (later enhancement)
+jcommon-1.0.24.jar
 
 
+Add them to your classpath.
 
 
 ---
 
-2️⃣ Architecture Style (Important)
+1️⃣ Project Structure (FINAL)
 
-Use MVC + Service Layer
-Swing apps become unmaintainable without this.
-
-UI (Swing)
- ↓
-Controller
- ↓
-Service (Business logic)
- ↓
-Model (POJOs)
-
-
----
-
-3️⃣ Recommended Project Structure
-
-funds-management-app/
+funds-manager/
 │
-├── src/
-│   └── com/fundsmanager/
-│       │
-│       ├── app/
-│       │   └── FundsManagerApp.java
-│       │
-│       ├── controller/
-│       │   ├── FundsController.java
-│       │   └── CategoryController.java
-│       │
-│       ├── model/
-│       │   ├── Category.java
-│       │   ├── FundAllocation.java
-│       │   └── ReportRow.java
-│       │
-│       ├── service/
-│       │   ├── FundCalculationService.java
-│       │   └── CategoryService.java
-│       │
-│       ├── ui/
-│       │   ├── main/
-│       │   │   └── MainFrame.java
-│       │   │
-│       │   ├── panels/
-│       │   │   ├── IncomePanel.java
-│       │   │   ├── CategoryPanel.java
-│       │   │   ├── ReportPanel.java
-│       │   │   └── ButtonPanel.java
-│       │   │
-│       │   └── dialogs/
-│       │       └── AddCategoryDialog.java
-│       │
-│       ├── util/
-│       │   ├── ValidationUtil.java
-│       │   └── UIUtils.java
-│       │
-│       └── constants/
-│           └── DefaultCategories.java
-│
-└── resources/
-    └── icons/
+├── src/main/java/com/fundsmanager/
+│   ├── app/
+│   │   └── FundsManagerApp.java
+│   │
+│   ├── model/
+│   │   ├── Category.java
+│   │   └── FundAllocation.java
+│   │
+│   ├── service/
+│   │   └── FundCalculationService.java
+│   │
+│   ├── ui/
+│   │   ├── MainFrame.java
+│   │   ├── CategoryTableModel.java
+│   │   ├── AddCategoryDialog.java
+│   │   └── PieChartPanel.java
+│   │
+│   └── util/
+│       └── DefaultCategories.java
 
 
 ---
 
-4️⃣ Data Model Design
+2️⃣ Model Layer
 
 Category.java
+
+package com.fundsmanager.model;
 
 public class Category {
     private String name;
     private double percentage;
-    private boolean editable;
 
-    public Category(String name, double percentage, boolean editable) {
+    public Category(String name, double percentage) {
         this.name = name;
         this.percentage = percentage;
-        this.editable = editable;
     }
 
-    // getters & setters
+    public String getName() {
+        return name;
+    }
+
+    public double getPercentage() {
+        return percentage;
+    }
+
+    public void setPercentage(double percentage) {
+        this.percentage = percentage;
+    }
 }
 
 
@@ -150,50 +106,71 @@ public class Category {
 
 FundAllocation.java
 
+package com.fundsmanager.model;
+
 public class FundAllocation {
-    private String categoryName;
+    private String category;
     private double percentage;
     private double amount;
 
-    public FundAllocation(String categoryName, double percentage, double amount) {
-        this.categoryName = categoryName;
+    public FundAllocation(String category, double percentage, double amount) {
+        this.category = category;
         this.percentage = percentage;
         this.amount = amount;
+    }
+
+    public String getCategory() {
+        return category;
+    }
+
+    public double getPercentage() {
+        return percentage;
+    }
+
+    public double getAmount() {
+        return amount;
     }
 }
 
 
 ---
 
-5️⃣ Default Category Configuration
+3️⃣ Default Categories
 
 DefaultCategories.java
 
+package com.fundsmanager.util;
+
+import com.fundsmanager.model.Category;
+import java.util.ArrayList;
 import java.util.List;
 
 public class DefaultCategories {
 
-    public static List<Category> getDefaults() {
-        return List.of(
-            new Category("Necessary Expenses", 40, false),
-            new Category("Emergency Fund", 10, false),
-            new Category("Health Emergency Fund", 10, false),
-            new Category("EMIs", 15, false),
-            new Category("Future Savings", 10, true),
-            new Category("Investments", 10, true),
-            new Category("Miscellaneous", 5, true)
-        );
+    public static List<Category> load() {
+        List<Category> list = new ArrayList<>();
+        list.add(new Category("Necessary Expenses", 40));
+        list.add(new Category("Emergency Fund", 10));
+        list.add(new Category("Health Emergency", 10));
+        list.add(new Category("EMIs", 15));
+        list.add(new Category("Savings", 10));
+        list.add(new Category("Investments", 10));
+        list.add(new Category("Miscellaneous", 5));
+        return list;
     }
 }
-
-💡 You can validate total = 100%
 
 
 ---
 
-6️⃣ Business Logic (Core Brain)
+4️⃣ Business Logic
 
 FundCalculationService.java
+
+package com.fundsmanager.service;
+
+import com.fundsmanager.model.Category;
+import com.fundsmanager.model.FundAllocation;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -201,87 +178,39 @@ import java.util.List;
 public class FundCalculationService {
 
     public List<FundAllocation> calculate(double income, List<Category> categories) {
-
         List<FundAllocation> result = new ArrayList<>();
-
         for (Category c : categories) {
-            double amount = (income * c.getPercentage()) / 100;
+            double amount = income * c.getPercentage() / 100;
             result.add(new FundAllocation(
-                c.getName(),
-                c.getPercentage(),
-                amount
+                    c.getName(),
+                    c.getPercentage(),
+                    amount
             ));
         }
         return result;
     }
 
-    public boolean isValidPercentage(List<Category> categories) {
-        double total = categories.stream()
+    public boolean validatePercentage(List<Category> categories) {
+        double sum = categories.stream()
                 .mapToDouble(Category::getPercentage)
                 .sum();
-        return Math.abs(total - 100.0) < 0.01;
+        return Math.abs(sum - 100.0) < 0.01;
     }
 }
 
 
 ---
 
-7️⃣ UI Design (Clean & Modern Swing)
-
-MainFrame Layout
-
-Use:
-
-BorderLayout
-
-JTabbedPane
-
-JTable
-
-GridBagLayout
-
-
---------------------------------------------------
-| Monthly Income: [ 50000 ]                      |
---------------------------------------------------
-| Categories (Table)                             |
-| Name | Percentage | Editable                   |
---------------------------------------------------
-| + Add Category   Remove Category               |
---------------------------------------------------
-| Generate Report                                |
---------------------------------------------------
-| Report Table (Category | % | Amount)           |
---------------------------------------------------
-
-
----
-
-MainFrame.java (Skeleton)
-
-public class MainFrame extends JFrame {
-
-    public MainFrame() {
-        setTitle("Funds Management Application");
-        setSize(900, 600);
-        setLocationRelativeTo(null);
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setLayout(new BorderLayout());
-
-        add(new IncomePanel(), BorderLayout.NORTH);
-        add(new CategoryPanel(), BorderLayout.CENTER);
-        add(new ReportPanel(), BorderLayout.SOUTH);
-    }
-}
-
-
----
-
-8️⃣ Category Table (JTable)
-
-Use AbstractTableModel for clean MVC separation.
+5️⃣ Table Model (MVC-correct Swing)
 
 CategoryTableModel.java
+
+package com.fundsmanager.ui;
+
+import com.fundsmanager.model.Category;
+
+import javax.swing.table.AbstractTableModel;
+import java.util.List;
 
 public class CategoryTableModel extends AbstractTableModel {
 
@@ -300,71 +229,252 @@ public class CategoryTableModel extends AbstractTableModel {
         return columns.length;
     }
 
+    public String getColumnName(int col) {
+        return columns[col];
+    }
+
     public Object getValueAt(int row, int col) {
         Category c = categories.get(row);
         return col == 0 ? c.getName() : c.getPercentage();
     }
 
     public boolean isCellEditable(int row, int col) {
-        return col == 1 && categories.get(row).isEditable();
+        return col == 1;
+    }
+
+    public void setValueAt(Object value, int row, int col) {
+        categories.get(row).setPercentage(Double.parseDouble(value.toString()));
+        fireTableCellUpdated(row, col);
+    }
+
+    public List<Category> getCategories() {
+        return categories;
     }
 }
 
 
 ---
 
-9️⃣ Validation Rules (Very Important)
+6️⃣ Add Category Dialog (UI Highlight)
 
-✔ Income must be > 0
-✔ Total percentage = 100
-✔ No negative percentages
-✔ Category name unique
+AddCategoryDialog.java
 
-Create ValidationUtil.java for this.
+package com.fundsmanager.ui;
+
+import com.fundsmanager.model.Category;
+
+import javax.swing.*;
+import java.awt.*;
+
+public class AddCategoryDialog extends JDialog {
+
+    private JTextField nameField;
+    private JTextField percentField;
+    private Category category;
+
+    public AddCategoryDialog(JFrame parent) {
+        super(parent, "Add Category", true);
+        setSize(300, 200);
+        setLocationRelativeTo(parent);
+        setLayout(new GridLayout(3, 2, 10, 10));
+
+        add(new JLabel("Category Name:"));
+        nameField = new JTextField();
+        add(nameField);
+
+        add(new JLabel("Percentage:"));
+        percentField = new JTextField();
+        add(percentField);
+
+        JButton addBtn = new JButton("Add");
+        addBtn.addActionListener(e -> {
+            category = new Category(
+                    nameField.getText(),
+                    Double.parseDouble(percentField.getText())
+            );
+            dispose();
+        });
+
+        add(new JLabel());
+        add(addBtn);
+    }
+
+    public Category getCategory() {
+        return category;
+    }
+}
 
 
 ---
 
-🔥 UI Polish Tips (Make it look “very good”)
+7️⃣ Pie Chart Integration (🔥)
 
-Use Nimbus Look & Feel
+PieChartPanel.java
 
+package com.fundsmanager.ui;
 
-UIManager.setLookAndFeel("javax.swing.plaf.nimbus.NimbusLookAndFeel");
+import com.fundsmanager.model.FundAllocation;
+import org.jfree.chart.ChartFactory;
+import org.jfree.chart.ChartPanel;
+import org.jfree.chart.JFreeChart;
+import org.jfree.data.general.DefaultPieDataset;
 
-Use padding with EmptyBorder
+import javax.swing.*;
+import java.util.List;
 
-Use icons for buttons
+public class PieChartPanel extends JPanel {
 
-Align numbers using DecimalFormat
+    public void updateChart(List<FundAllocation> allocations) {
+        removeAll();
 
-Disable Generate button until valid
+        DefaultPieDataset dataset = new DefaultPieDataset();
+        for (FundAllocation fa : allocations) {
+            dataset.setValue(fa.getCategory(), fa.getAmount());
+        }
 
+        JFreeChart chart = ChartFactory.createPieChart(
+                "Funds Distribution",
+                dataset,
+                true,
+                true,
+                false
+        );
+
+        add(new ChartPanel(chart));
+        revalidate();
+    }
+}
 
 
 ---
 
-🚀 Future Enhancements (Optional but impressive)
+8️⃣ Main UI Frame (Heart of App)
 
-Pie Chart using JFreeChart
+MainFrame.java
+
+package com.fundsmanager.ui;
+
+import com.fundsmanager.model.Category;
+import com.fundsmanager.model.FundAllocation;
+import com.fundsmanager.service.FundCalculationService;
+import com.fundsmanager.util.DefaultCategories;
+
+import javax.swing.*;
+import java.awt.*;
+import java.util.List;
+
+public class MainFrame extends JFrame {
+
+    private JTextField incomeField;
+    private CategoryTableModel tableModel;
+    private PieChartPanel pieChartPanel;
+    private FundCalculationService service = new FundCalculationService();
+
+    public MainFrame() {
+        setTitle("Funds Management Application");
+        setSize(900, 600);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        incomeField = new JTextField(10);
+
+        tableModel = new CategoryTableModel(DefaultCategories.load());
+        JTable table = new JTable(tableModel);
+
+        JButton addCategoryBtn = new JButton("Add Category");
+        addCategoryBtn.addActionListener(e -> addCategory());
+
+        JButton generateBtn = new JButton("Generate Report");
+        generateBtn.addActionListener(e -> generate());
+
+        pieChartPanel = new PieChartPanel();
+
+        JPanel top = new JPanel();
+        top.add(new JLabel("Monthly Income:"));
+        top.add(incomeField);
+        top.add(addCategoryBtn);
+        top.add(generateBtn);
+
+        add(top, BorderLayout.NORTH);
+        add(new JScrollPane(table), BorderLayout.CENTER);
+        add(pieChartPanel, BorderLayout.SOUTH);
+    }
+
+    private void addCategory() {
+        AddCategoryDialog dialog = new AddCategoryDialog(this);
+        dialog.setVisible(true);
+
+        Category c = dialog.getCategory();
+        if (c != null) {
+            tableModel.getCategories().add(c);
+            tableModel.fireTableDataChanged();
+        }
+    }
+
+    private void generate() {
+        double income = Double.parseDouble(incomeField.getText());
+        List<Category> categories = tableModel.getCategories();
+
+        if (!service.validatePercentage(categories)) {
+            JOptionPane.showMessageDialog(this, "Total percentage must be 100%");
+            return;
+        }
+
+        List<FundAllocation> allocations =
+                service.calculate(income, categories);
+
+        pieChartPanel.updateChart(allocations);
+    }
+}
+
+
+---
+
+9️⃣ Application Entry Point
+
+FundsManagerApp.java
+
+package com.fundsmanager.app;
+
+import com.fundsmanager.ui.MainFrame;
+
+import javax.swing.*;
+
+public class FundsManagerApp {
+    public static void main(String[] args) throws Exception {
+        UIManager.setLookAndFeel("javax.swing.plaf.nimbus.NimbusLookAndFeel");
+        SwingUtilities.invokeLater(() -> new MainFrame().setVisible(true));
+    }
+}
+
+
+---
+
+🎯 What You Have Now
+
+✅ Fully runnable Swing application
+✅ Clean layered architecture
+✅ Dynamic categories
+✅ Percentage validation
+✅ Pie chart visualization
+✅ Interview-worthy desktop project
+
+
+---
+
+Want Next?
+
+I can:
 
 Export report to PDF / Excel
 
-Save user profile using JSON
+Persist data using JSON / SQLite
 
-Dark Mode toggle
+Convert this to JavaFX (modern UI)
 
-Monthly history tracking
+Add Dark Mode
+
+Package as .exe / .jar
 
 
-
----
-
-What I can do next for you
-
-👉 Generate full working sample project ZIP
-👉 Design Add Category Dialog UI
-👉 Add Pie Chart integration
-👉 Convert this to JavaFX (modern UI)
-
-Just tell me what you want to build next and I’ll go deeper 💪
+Just tell me 😎
