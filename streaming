@@ -1,1 +1,77 @@
-"AWT-EventQueue-0" java.lang.NoClassDefFoundError: Could not initialize class org.apache.poi.xssf.usermodel.XSSFWorkbook
+private void exportExcel() {
+    if (lastAllocations == null) return;
+
+    JFileChooser chooser = new JFileChooser();
+    chooser.setDialogTitle("Save Excel Report");
+    chooser.setFileFilter(
+            new javax.swing.filechooser.FileNameExtensionFilter(
+                    "Excel Files (*.xlsx)", "xlsx"
+            )
+    );
+
+    if (chooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+        File file = chooser.getSelectedFile();
+
+        // ✅ Auto-append .xlsx
+        if (!file.getName().toLowerCase().endsWith(".xlsx")) {
+            file = new File(file.getAbsolutePath() + ".xlsx");
+        }
+
+        try {
+            exportService.exportExcel(
+                    file,
+                    lastAllocations,
+                    lastGroupSummaries
+            );
+            JOptionPane.showMessageDialog(this, "Excel exported successfully");
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Excel export failed:\n" + ex.getMessage(),
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE
+            );
+        }
+    }
+}
+
+
+
+private void exportPdf() {
+    if (lastAllocations == null) return;
+
+    JFileChooser chooser = new JFileChooser();
+    chooser.setDialogTitle("Save PDF Report");
+    chooser.setFileFilter(
+            new javax.swing.filechooser.FileNameExtensionFilter(
+                    "PDF Files (*.pdf)", "pdf"
+            )
+    );
+
+    if (chooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+        File file = chooser.getSelectedFile();
+
+        // ✅ Auto-append .pdf
+        if (!file.getName().toLowerCase().endsWith(".pdf")) {
+            file = new File(file.getAbsolutePath() + ".pdf");
+        }
+
+        try {
+            exportService.exportPdf(
+                    file,
+                    lastAllocations,
+                    lastGroupSummaries
+            );
+            JOptionPane.showMessageDialog(this, "PDF exported successfully");
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            JOptionPane.showMessageDialog(
+                    this,
+                    "PDF export failed:\n" + ex.getMessage(),
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE
+            );
+        }
+    }
+}
