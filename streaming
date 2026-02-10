@@ -1,104 +1,106 @@
-Nice touch 👍 — this is exactly the kind of professional finishing detail that makes the app feel complete.
+package com.fundsmanager.ui;
 
-Below is a clean, Swing-correct way to add a copyright footer with version v1.0, and exactly where to put it.
+import com.fundsmanager.model.GroupSummary;
+import com.fundsmanager.model.GroupType;
+import org.jfree.chart.ChartFactory;
+import org.jfree.chart.ChartPanel;
+import org.jfree.chart.JFreeChart;
+import org.jfree.chart.labels.StandardPieSectionLabelGenerator;
+import org.jfree.chart.plot.PiePlot;
+import org.jfree.data.general.DefaultPieDataset;
 
+import javax.swing.*;
+import java.awt.*;
+import java.text.DecimalFormat;
+import java.util.List;
 
----
+public class PieChartPanel extends JPanel {
 
-🎯 What we’ll add
+    private final JPanel chartHolder;
 
-At the bottom of the MainFrame, centered:
+    public PieChartPanel() {
+        setLayout(new BorderLayout());
+        setBorder(BorderFactory.createTitledBorder("Expenses vs Savings"));
 
-© 2026 Funds Manager • Version v1.0
+        chartHolder = new JPanel(new BorderLayout());
+        chartHolder.setPreferredSize(new Dimension(420, 280));
 
-✔ Always visible
-✔ Does not interfere with main layout
-✔ Looks professional (subtle, not loud)
-✔ Easy to update version later
+        JScrollPane scrollPane = new JScrollPane(chartHolder);
+        scrollPane.setHorizontalScrollBarPolicy(
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+        );
 
+        add(scrollPane, BorderLayout.CENTER);
+    }
 
----
+    public void updateChart(List<GroupSummary> summaries) {
 
-1️⃣ Code to ADD (Footer Panel)
+        chartHolder.removeAll();
 
-Add this method to MainFrame.java
+        if (summaries == null || summaries.isEmpty()) {
+            repaint();
+            return;
+        }
 
-private JPanel createFooter() {
-    JPanel footer = new JPanel(new BorderLayout());
-    footer.setBorder(
-            BorderFactory.createEmptyBorder(6, 10, 6, 10)
-    );
+        // -------- DATASET --------
+        DefaultPieDataset dataset = new DefaultPieDataset();
+        for (GroupSummary gs : summaries) {
+            dataset.setValue(
+                    gs.getGroupType().getDisplayName(),
+                    gs.getTotalAmount()
+            );
+        }
 
-    JLabel copyright =
-            new JLabel("© 2026 Funds Manager • Version v1.0",
-                    SwingConstants.CENTER);
+        // -------- CHART --------
+        JFreeChart chart = ChartFactory.createPieChart(
+                "Overall Distribution",
+                dataset,
+                true,   // legend
+                true,   // tooltips
+                false
+        );
 
-    copyright.setFont(
-            new Font("Segoe UI", Font.PLAIN, 12)
-    );
-    copyright.setForeground(Color.GRAY);
+        PiePlot plot = (PiePlot) chart.getPlot();
 
-    footer.add(copyright, BorderLayout.CENTER);
-    return footer;
+        // -------- COLORS --------
+        plot.setSectionPaint(
+                GroupType.EXPENSE.getDisplayName(),
+                new Color(220, 53, 69)   // Red
+        );
+        plot.setSectionPaint(
+                GroupType.SAVING.getDisplayName(),
+                new Color(40, 167, 69)   // Green
+        );
+
+        // -------- LABELS WITH PERCENTAGE --------
+        plot.setLabelGenerator(
+                new StandardPieSectionLabelGenerator(
+                        "{0} – {2}",
+                        new DecimalFormat("0.00"),
+                        new DecimalFormat("0.00%")
+                )
+        );
+
+        plot.setLabelFont(new Font("Segoe UI", Font.BOLD, 12));
+        plot.setLabelBackgroundPaint(Color.WHITE);
+        plot.setLabelOutlinePaint(null);
+        plot.setLabelShadowPaint(null);
+
+        plot.setBackgroundPaint(Color.WHITE);
+        plot.setOutlineVisible(false);
+
+        // -------- PANEL --------
+        ChartPanel chartPanel = new ChartPanel(chart);
+        chartPanel.setPreferredSize(new Dimension(420, 260));
+        chartPanel.setMouseWheelEnabled(true);
+
+        chartHolder.add(chartPanel, BorderLayout.CENTER);
+        revalidate();
+        repaint();
+    }
+
+    public void clear() {
+        chartHolder.removeAll();
+        repaint();
+    }
 }
-
-
----
-
-2️⃣ Where to PUT it (IMPORTANT)
-
-In your MainFrame constructor, you currently have:
-
-add(createHeader(), BorderLayout.NORTH);
-add(createMainContent(), BorderLayout.CENTER);
-
-🔁 Change it to:
-
-add(createHeader(), BorderLayout.NORTH);
-add(createMainContent(), BorderLayout.CENTER);
-add(createFooter(), BorderLayout.SOUTH);
-
-That’s it.
-No other changes required.
-
-
----
-
-3️⃣ Result in UI
-
-At the bottom of your app window you’ll see:
-
-> © 2026 Funds Manager • Version v1.0
-
-
-
-Subtle gray text, centered, always visible.
-
-
----
-
-🧠 Why this is the right approach
-
-✔ Uses BorderLayout.SOUTH (correct Swing pattern)
-✔ Footer stays fixed even when content scrolls
-✔ No hard-coding inside UI logic
-✔ Easy to update version number
-✔ Works with Dark Mode (FlatLaf handles colors well)
-
-
----
-
-4️⃣ Optional (if you want later)
-
-You can improve it further by:
-
-Making version dynamic (BuildInfo.VERSION)
-
-Adding clickable “About” dialog
-
-Adding company name
-
-Showing build date
-
-
-If you want that next, just say 👍
