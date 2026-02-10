@@ -1,454 +1,250 @@
+Great requirement 👍 — this is exactly the right UX polish for a finance app.
+
+We’ll implement this cleanly and visibly, without breaking your logic.
+
+
+---
+
+🎯 WHAT WE ARE ADDING (CLEAR UX)
+
+In Category section (table):
+
+Visual identification
+
+🔒 Default / Locked categories
+
+Lock icon
+
+Greyed background
+
+Tooltip: “Default category (locked)”
+
+
+✏ User-added / Unlocked categories
+
+Pencil icon
+
+Normal background
+
+Tooltip: “User editable category”
+
+
+
+Result
+
+At a glance, user immediately understands:
+
+What is system-defined
+
+What is custom
+
+
+
+---
+
+✅ DESIGN DECISION (IMPORTANT)
+
+We will:
+
+NOT add extra columns (keeps table clean)
+
+Use custom cell renderer
+
+Use icons + background + tooltip
+
+Enforce logic already present (locked flag)
+
+
+
+---
+
+1️⃣ NEW ICONS (REQUIRED)
+
+Add these PNGs to your resources:
+
+src/resources/icons/
+ ├── lock.png     (16x16)
+ └── edit.png     (16x16)
+
+(Any flat icon set works. Keep them small.)
+
+
+---
+
+2️⃣ CategoryTableModel (NO LOGIC CHANGE)
+
+👉 NO CHANGE REQUIRED
+Your existing CategoryTableModel is already correct.
+
+We only enhance UI rendering, not behavior.
+
+
+---
+
+3️⃣ NEW: CategoryStatusRenderer (CORE UI CHANGE)
+
+CategoryStatusRenderer.java (NEW – FULL CODE)
+
 package com.fundsmanager.ui;
 
-import com.fundsmanager.model.*;
-import com.fundsmanager.service.ExportService;
-import com.fundsmanager.service.FundCalculationService;
-import com.fundsmanager.util.*;
+import com.fundsmanager.model.Category;
 
 import javax.swing.*;
+import javax.swing.table.DefaultTableCellRenderer;
 import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.util.*;
-import java.util.List;
 
-public class MainFrame extends JFrame {
+public class CategoryStatusRenderer extends DefaultTableCellRenderer {
 
-    // ================= HEADER =================
-    private JTextField incomeField;
-    private JLabel totalLabel;
-    private JComboBox<CurrencyItem> currencyCombo;
+    private final Icon lockIcon;
+    private final Icon editIcon;
 
-    // ================= TABLES =================
-    private JTable categoryTable;
-    private JTable allocationTable;
-    private JTable groupSummaryTable;
-
-    private CategoryTableModel categoryTableModel;
-    private ReportTableModel allocationTableModel;
-    private GroupSummaryTableModel groupSummaryTableModel;
-
-    // ================= CHART =================
-    private PieChartPanel pieChartPanel;
-
-    // ================= SERVICES =================
-    private final FundCalculationService calculationService =
-            new FundCalculationService();
-    private final ExportService exportService =
-            new ExportService();
-
-    // ================= STATE =================
-    private List<FundAllocation> lastAllocations;
-    private List<GroupSummary> lastGroupSummaries;
-
-    // ================= UNDO / REDO =================
-    private final Deque<List<Category>> undoStack = new ArrayDeque<>();
-    private final Deque<List<Category>> redoStack = new ArrayDeque<>();
-
-    // ======================================================
-
-    public MainFrame() {
-        setTitle("Funds Management Dashboard");
-        setSize(1350, 800);
-        setLocationRelativeTo(null);
-        setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setLayout(new BorderLayout(10, 10));
-
-        initModels();
-
-        add(createHeader(), BorderLayout.NORTH);
-        add(createMainContent(), BorderLayout.CENTER);
-
-        setupKeyboardShortcuts();
-        updateTotalLabel();
+    public CategoryStatusRenderer() {
+        lockIcon = loadIcon("/icons/lock.png");
+        editIcon = loadIcon("/icons/edit.png");
+        setOpaque(true);
     }
 
-    // ======================================================
-    // INIT
-    // ======================================================
+    @Override
+    public Component getTableCellRendererComponent(
+            JTable table,
+            Object value,
+            boolean isSelected,
+            boolean hasFocus,
+            int row,
+            int column
+    ) {
 
-    private void initModels() {
-        categoryTableModel =
-                new CategoryTableModel(deepCopy(DefaultCategories.load()));
-        allocationTableModel = new ReportTableModel();
-        groupSummaryTableModel = new GroupSummaryTableModel();
-    }
-
-    // ======================================================
-    // HEADER
-    // ======================================================
-
-    private JPanel createHeader() {
-        JPanel header = new JPanel(new BorderLayout());
-        header.setBorder(BorderFactory.createEmptyBorder(12, 16, 12, 16));
-
-        JLabel title = new JLabel("Funds Management Dashboard");
-        title.setFont(new Font("Segoe UI", Font.BOLD, 24));
-
-        JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
-
-        incomeField = new JTextField(10);
-        incomeField.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-
-        // -------- Currency Dropdown --------
-        currencyCombo = new JComboBox<>(
-                CurrencyProvider.loadAll().toArray(new CurrencyItem[0])
-        );
-        currencyCombo.setRenderer(new CurrencyComboRenderer());
-        currencyCombo.setPreferredSize(new Dimension(260, 28));
-
-        // Default currency = INR
-        CurrencyItem inr = null;
-        for (CurrencyItem item : CurrencyProvider.loadAll()) {
-            if ("INR".equals(item.getCode())) {
-                inr = item;
-                break;
-            }
-        }
-        if (inr != null) {
-            currencyCombo.setSelectedItem(inr);
-            CurrencyContext.set(inr);
-        }
-
-        currencyCombo.addActionListener(e -> {
-            CurrencyContext.set((CurrencyItem) currencyCombo.getSelectedItem());
-            allocationTable.repaint();
-            groupSummaryTable.repaint();
-        });
-
-        JButton generateBtn = new JButton("Generate");
-        JButton resetBtn = new JButton("Reset");
-        JButton exportExcelBtn = new JButton("Export Excel");
-        JButton exportPdfBtn = new JButton("Export PDF");
-        JButton themeBtn = new JButton("🌙 Dark Mode");
-
-        totalLabel = new JLabel();
-        totalLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
-
-        generateBtn.addActionListener(e -> generateReport());
-        resetBtn.addActionListener(e -> resetCategories());
-        exportExcelBtn.addActionListener(e -> exportExcel());
-        exportPdfBtn.addActionListener(e -> exportPdf());
-        themeBtn.addActionListener(e -> ThemeUtil.toggleTheme(this));
-
-        controls.add(new JLabel("Monthly Income:"));
-        controls.add(incomeField);
-        controls.add(new JLabel("Currency:"));
-        controls.add(currencyCombo);
-        controls.add(generateBtn);
-        controls.add(resetBtn);
-        controls.add(exportExcelBtn);
-        controls.add(exportPdfBtn);
-        controls.add(themeBtn);
-        controls.add(totalLabel);
-
-        header.add(title, BorderLayout.WEST);
-        header.add(controls, BorderLayout.EAST);
-
-        return header;
-    }
-
-    // ======================================================
-    // MAIN CONTENT
-    // ======================================================
-
-    private JSplitPane createMainContent() {
-
-        // ---------- LEFT : CATEGORY MANAGEMENT ----------
-        categoryTable = new JTable(categoryTableModel);
-        categoryTable.setRowHeight(28);
-
-        JScrollPane categoryScroll =
-                new JScrollPane(categoryTable);
-        categoryScroll.setBorder(
-                BorderFactory.createTitledBorder("Categories")
+        super.getTableCellRendererComponent(
+                table, value, isSelected, hasFocus, row, column
         );
 
-        JButton addBtn = new JButton("+ Add");
-        JButton removeBtn = new JButton("Remove");
+        CategoryTableModel model =
+                (CategoryTableModel) table.getModel();
+        Category category = model.getCategories().get(row);
 
-        addBtn.addActionListener(e -> addCategory());
-        removeBtn.addActionListener(e -> removeSelectedCategory());
-
-        JPanel leftButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        leftButtons.add(addBtn);
-        leftButtons.add(removeBtn);
-
-        JPanel leftPanel = new JPanel(new BorderLayout(8, 8));
-        leftPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        leftPanel.add(categoryScroll, BorderLayout.CENTER);
-        leftPanel.add(leftButtons, BorderLayout.SOUTH);
-
-        // ---------- RIGHT : REPORTS ----------
-        pieChartPanel = new PieChartPanel();
-
-        allocationTable = new JTable(allocationTableModel);
-        allocationTable.setRowHeight(26);
-
-        JScrollPane allocationScroll =
-                new JScrollPane(allocationTable);
-        allocationScroll.setBorder(
-                BorderFactory.createTitledBorder("Category Allocation")
-        );
-
-        groupSummaryTable = new JTable(groupSummaryTableModel);
-        groupSummaryTable.setRowHeight(26);
-
-        JScrollPane groupScroll =
-                new JScrollPane(groupSummaryTable);
-        groupScroll.setBorder(
-                BorderFactory.createTitledBorder("Group Summary")
-        );
-
-        JSplitPane tablesSplit = new JSplitPane(
-                JSplitPane.VERTICAL_SPLIT,
-                allocationScroll,
-                groupScroll
-        );
-        tablesSplit.setDividerLocation(260);
-        tablesSplit.setResizeWeight(0.6);
-
-        JSplitPane rightSplit = new JSplitPane(
-                JSplitPane.VERTICAL_SPLIT,
-                pieChartPanel,
-                tablesSplit
-        );
-        rightSplit.setDividerLocation(320);
-        rightSplit.setResizeWeight(0.4);
-
-        JPanel rightPanel = new JPanel(new BorderLayout());
-        rightPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        rightPanel.add(rightSplit, BorderLayout.CENTER);
-
-        // ---------- MAIN SPLIT ----------
-        JSplitPane mainSplit = new JSplitPane(
-                JSplitPane.HORIZONTAL_SPLIT,
-                leftPanel,
-                rightPanel
-        );
-        mainSplit.setDividerLocation(460);
-        mainSplit.setResizeWeight(0.35);
-
-        return mainSplit;
-    }
-
-    // ======================================================
-    // ACTIONS
-    // ======================================================
-
-    private void addCategory() {
-        saveState();
-        AddCategoryDialog dialog = new AddCategoryDialog(this);
-        dialog.setVisible(true);
-
-        Category c = dialog.getCategory();
-        if (c != null) {
-            categoryTableModel.addCategory(c);
-            updateTotalLabel();
-        }
-    }
-
-    private void removeSelectedCategory() {
-        int row = categoryTable.getSelectedRow();
-        if (row < 0) {
-            JOptionPane.showMessageDialog(this, "Select a category to remove");
-            return;
-        }
-        if (categoryTableModel.getCategories().get(row).isLocked()) {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Default categories cannot be removed"
-            );
-            return;
-        }
-        saveState();
-        categoryTableModel.removeCategory(row);
-        updateTotalLabel();
-    }
-
-    private void generateReport() {
-        double income;
-        try {
-            income = Double.parseDouble(incomeField.getText());
-            if (income <= 0) throw new NumberFormatException();
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "Enter a valid income");
-            return;
-        }
-
-        if (!calculationService.validatePercentage(
-                categoryTableModel.getCategories())) {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Total percentage must be exactly 100%"
-            );
-            return;
-        }
-
-        List<Category> categories =
-                categoryTableModel.getCategories();
-
-        lastAllocations =
-                calculationService.calculate(income, categories);
-        lastGroupSummaries =
-                calculationService.calculateGroupSummary(income, categories);
-
-        allocationTableModel.setData(lastAllocations);
-        groupSummaryTableModel.setData(lastGroupSummaries);
-        pieChartPanel.updateChart(lastGroupSummaries);
-    }
-
-    private void resetCategories() {
-        int confirm = JOptionPane.showConfirmDialog(
-                this,
-                "Reset all categories to default?",
-                "Confirm Reset",
-                JOptionPane.YES_NO_OPTION
-        );
-
-        if (confirm == JOptionPane.YES_OPTION) {
-            saveState();
-            categoryTableModel.setCategories(
-                    deepCopy(DefaultCategories.load())
-            );
-            allocationTableModel.setData(null);
-            groupSummaryTableModel.setData(null);
-            pieChartPanel.clear();
-            updateTotalLabel();
-        }
-    }
-
-    // ================= EXPORT =================
-
-    private void exportExcel() {
-        if (lastAllocations == null) return;
-
-        JFileChooser fc = new JFileChooser();
-        if (fc.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
-            try {
-                exportService.exportExcel(
-                        fc.getSelectedFile(),
-                        lastAllocations,
-                        lastGroupSummaries
-                );
-                JOptionPane.showMessageDialog(this, "Excel exported successfully");
-            } catch (Exception e) {
-                JOptionPane.showMessageDialog(this, "Excel export failed");
-            }
-        }
-    }
-
-    private void exportPdf() {
-        if (lastAllocations == null) return;
-
-        JFileChooser fc = new JFileChooser();
-        if (fc.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
-            try {
-                exportService.exportPdf(
-                        fc.getSelectedFile(),
-                        lastAllocations,
-                        lastGroupSummaries
-                );
-                JOptionPane.showMessageDialog(this, "PDF exported successfully");
-            } catch (Exception e) {
-                JOptionPane.showMessageDialog(this, "PDF export failed");
-            }
-        }
-    }
-
-    // ======================================================
-    // TOTAL VALIDATION
-    // ======================================================
-
-    private void updateTotalLabel() {
-        double total = categoryTableModel.getCategories()
-                .stream()
-                .mapToDouble(Category::getPercentage)
-                .sum();
-
-        if (Math.abs(total - 100) > 0.01) {
-            totalLabel.setForeground(Color.RED);
-            totalLabel.setText(
-                    String.format("Total: %.2f%% ❌", total)
-            );
+        // -------- ICON & TOOLTIP --------
+        if (category.isLocked()) {
+            setIcon(lockIcon);
+            setToolTipText("Default category (locked)");
         } else {
-            totalLabel.setForeground(new Color(0, 130, 0));
-            totalLabel.setText("Total: 100% ✔");
+            setIcon(editIcon);
+            setToolTipText("User editable category");
         }
-    }
 
-    // ======================================================
-    // UNDO / REDO
-    // ======================================================
-
-    private void saveState() {
-        undoStack.push(deepCopy(categoryTableModel.getCategories()));
-        redoStack.clear();
-    }
-
-    private void undo() {
-        if (undoStack.isEmpty()) return;
-        redoStack.push(deepCopy(categoryTableModel.getCategories()));
-        categoryTableModel.setCategories(undoStack.pop());
-        updateTotalLabel();
-    }
-
-    private void redo() {
-        if (redoStack.isEmpty()) return;
-        undoStack.push(deepCopy(categoryTableModel.getCategories()));
-        categoryTableModel.setCategories(redoStack.pop());
-        updateTotalLabel();
-    }
-
-    // ======================================================
-    // SHORTCUTS
-    // ======================================================
-
-    private void setupKeyboardShortcuts() {
-        JRootPane root = getRootPane();
-        InputMap im = root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-        ActionMap am = root.getActionMap();
-
-        im.put(KeyStroke.getKeyStroke("ctrl G"), "generate");
-        im.put(KeyStroke.getKeyStroke("ctrl R"), "reset");
-        im.put(KeyStroke.getKeyStroke("ctrl Z"), "undo");
-        im.put(KeyStroke.getKeyStroke("ctrl Y"), "redo");
-
-        am.put("generate", new AbstractAction() {
-            public void actionPerformed(ActionEvent e) {
-                generateReport();
+        // -------- BACKGROUND --------
+        if (!isSelected) {
+            if (category.isLocked()) {
+                setBackground(new Color(245, 245, 245)); // subtle grey
+            } else {
+                setBackground(Color.WHITE);
             }
-        });
-        am.put("reset", new AbstractAction() {
-            public void actionPerformed(ActionEvent e) {
-                resetCategories();
-            }
-        });
-        am.put("undo", new AbstractAction() {
-            public void actionPerformed(ActionEvent e) {
-                undo();
-            }
-        });
-        am.put("redo", new AbstractAction() {
-            public void actionPerformed(ActionEvent e) {
-                redo();
-            }
-        });
-    }
-
-    // ======================================================
-    // UTIL
-    // ======================================================
-
-    private List<Category> deepCopy(List<Category> src) {
-        List<Category> copy = new ArrayList<>();
-        for (Category c : src) {
-            copy.add(new Category(
-                    c.getName(),
-                    c.getPercentage(),
-                    c.isLocked(),
-                    c.getGroupType()
-            ));
         }
-        return copy;
+
+        // -------- TEXT COLOR --------
+        setForeground(Color.DARK_GRAY);
+
+        return this;
+    }
+
+    private Icon loadIcon(String path) {
+        try {
+            return new ImageIcon(
+                    CategoryStatusRenderer.class.getResource(path)
+            );
+        } catch (Exception e) {
+            return null;
+        }
     }
 }
+
+
+---
+
+4️⃣ MainFrame (UPDATED – SMALL BUT IMPORTANT CHANGE)
+
+We only need to attach the renderer.
+
+
+---
+
+🔁 UPDATED PART OF MainFrame.java
+
+🔧 Inside createMainContent()
+
+(Replace category table creation)
+
+categoryTable = new JTable(categoryTableModel);
+categoryTable.setRowHeight(28);
+
+// 🔥 APPLY STATUS RENDERER
+CategoryStatusRenderer statusRenderer =
+        new CategoryStatusRenderer();
+
+// Apply renderer to BOTH columns
+categoryTable.getColumnModel()
+        .getColumn(0)
+        .setCellRenderer(statusRenderer);
+
+categoryTable.getColumnModel()
+        .getColumn(1)
+        .setCellRenderer(statusRenderer);
+
+✅ That’s it.
+No other MainFrame changes required.
+
+
+---
+
+5️⃣ OPTIONAL (VERY NICE UX ADDITION)
+
+Add legend under category table
+
+JLabel legend = new JLabel(
+        "🔒 Default Category   |   ✏ User Category"
+);
+legend.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+legend.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+
+leftPanel.add(legend, BorderLayout.NORTH);
+
+
+---
+
+🧠 WHY THIS IS THE RIGHT SOLUTION
+
+✔ No extra columns clutter
+✔ No new business logic
+✔ Visual cues are immediate
+✔ Tooltips help beginners
+✔ Scales if more category types are added
+✔ Matches banking / enterprise UX
+
+
+---
+
+🏆 FINAL RESULT (WHAT USER SEES)
+
+| 🔒 Necessary Expenses | 40 | | 🔒 EMIs              | 15 | | ✏ Savings            | 10 | | ✏ Investments        | 10 |
+
+Locked rows look distinct
+
+Editable rows look active
+
+Zero confusion
+
+
+
+---
+
+Want next polish?
+
+Disable editing UI for locked rows visually
+
+Inline badge instead of icon
+
+Hover highlight
+
+Context menu (Edit / Delete)
+
+
+Just say 👍
