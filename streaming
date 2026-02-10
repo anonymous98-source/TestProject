@@ -1,138 +1,461 @@
-Perfect 👍 — this is a small but important polish, and we’ll do it cleanly and permanently.
+Perfect 👍
+Now we’ll do this properly, end-to-end, enterprise-grade, without hacks.
 
-You already have 90% of this done.
-We’ll just make the default INR selection guaranteed (even if locale order changes).
+You want one-click export that produces:
 
+✅ Excel (.xlsx)
 
----
+Category Allocation table
 
-✅ Goal
+Group Summary table
 
-When the app starts:
-
-Default currency = Indian Rupee (INR)
-
-Symbol shown = ₹
-
-Tables & calculations use INR immediately
-
-User can still change currency later
+Embedded Pie Chart (Expenses vs Savings)
 
 
+✅ PDF (.pdf)
 
----
+Title & metadata
 
-✅ Correct & SAFE Way to Set Default INR
+Category Allocation table
 
-❌ What we DON’T want
+Group Summary table
 
-Hardcoding index like currencyCombo.setSelectedIndex(0)
-
-Relying on system locale order
+Embedded Pie Chart image
 
 
-✅ What we WILL do
-
-Search by currency code = "INR"
-
-Fallback safely if not found
-
+✅ Clean architecture
+✅ No Maven required (manual JAR friendly)
+✅ Works with your existing models
 
 
 ---
 
-🔧 REQUIRED CHANGE (ONLY IN MainFrame.createHeader())
+🧠 DESIGN (IMPORTANT – WHY THIS IS CORRECT)
 
-🔁 Replace your existing default-currency code with this
+We DO NOT export directly from UI components.
 
-✅ FINAL, CORRECT CODE
+Instead:
 
-// Currency dropdown
-currencyCombo = new JComboBox<>(
-        CurrencyProvider.loadAll().toArray(new CurrencyItem[0])
-);
-currencyCombo.setRenderer(new CurrencyComboRenderer());
-currencyCombo.setPreferredSize(new Dimension(240, 28));
+MainFrame
+  → ExportService
+       → ExcelExporter
+       → PdfExporter
 
-// ✅ Force default currency to INR
-CurrencyItem inr = null;
-for (CurrencyItem item : CurrencyProvider.loadAll()) {
-    if ("INR".equals(item.getCode())) {
-        inr = item;
-        break;
+This keeps UI clean and export reusable.
+
+
+---
+
+📦 REQUIRED LIBRARIES (NO MAVEN)
+
+Excel
+
+poi-5.2.5.jar
+poi-ooxml-5.2.5.jar
+poi-ooxml-lite-5.2.5.jar
+xmlbeans-5.1.1.jar
+commons-compress.jar
+commons-collections4.jar
+commons-io.jar
+
+PDF
+
+openpdf-1.3.41.jar
+
+Chart Image
+
+jfreechart-1.5.4.jar
+jcommon-1.0.24.jar
+
+
+---
+
+1️⃣ EXPORT SERVICE (FACADE)
+
+ExportService.java
+
+package com.fundsmanager.service;
+
+import com.fundsmanager.model.FundAllocation;
+import com.fundsmanager.model.GroupSummary;
+
+import java.io.File;
+import java.util.List;
+
+public class ExportService {
+
+    private final ExcelExporter excelExporter = new ExcelExporter();
+    private final PdfExporter pdfExporter = new PdfExporter();
+
+    public void exportExcel(
+            File file,
+            List<FundAllocation> allocations,
+            List<GroupSummary> groupSummaries
+    ) throws Exception {
+
+        excelExporter.export(file, allocations, groupSummaries);
+    }
+
+    public void exportPdf(
+            File file,
+            List<FundAllocation> allocations,
+            List<GroupSummary> groupSummaries
+    ) throws Exception {
+
+        pdfExporter.export(file, allocations, groupSummaries);
     }
 }
 
-if (inr != null) {
-    currencyCombo.setSelectedItem(inr);
-    CurrencyContext.set(inr);
-} else {
-    // Fallback: first item (very unlikely, but safe)
-    CurrencyContext.set((CurrencyItem) currencyCombo.getSelectedItem());
+
+---
+
+2️⃣ PIE CHART → IMAGE (REUSABLE)
+
+ChartImageUtil.java (NEW)
+
+package com.fundsmanager.util;
+
+import com.fundsmanager.model.GroupSummary;
+import com.fundsmanager.model.GroupType;
+import org.jfree.chart.*;
+import org.jfree.chart.plot.PiePlot;
+import org.jfree.data.general.DefaultPieDataset;
+
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.util.List;
+
+public class ChartImageUtil {
+
+    public static BufferedImage createGroupPieChart(
+            List<GroupSummary> summaries,
+            int width,
+            int height
+    ) {
+
+        DefaultPieDataset dataset = new DefaultPieDataset();
+        for (GroupSummary gs : summaries) {
+            dataset.setValue(
+                    gs.getGroupType().getDisplayName(),
+                    gs.getTotalAmount()
+            );
+        }
+
+        JFreeChart chart = ChartFactory.createPieChart(
+                "Expenses vs Savings",
+                dataset,
+                true,
+                true,
+                false
+        );
+
+        PiePlot plot = (PiePlot) chart.getPlot();
+        plot.setSectionPaint(
+                GroupType.EXPENSE.getDisplayName(),
+                new Color(220, 53, 69)
+        );
+        plot.setSectionPaint(
+                GroupType.SAVING.getDisplayName(),
+                new Color(40, 167, 69)
+        );
+
+        return chart.createBufferedImage(width, height);
+    }
 }
 
-// Update UI on currency change
-currencyCombo.addActionListener(e -> {
-    CurrencyContext.set((CurrencyItem) currencyCombo.getSelectedItem());
-    allocationTable.repaint();
-    groupSummaryTable.repaint();
-});
+
+---
+
+3️⃣ EXCEL EXPORTER (FULL)
+
+ExcelExporter.java
+
+package com.fundsmanager.service;
+
+import com.fundsmanager.model.FundAllocation;
+import com.fundsmanager.model.GroupSummary;
+import com.fundsmanager.util.ChartImageUtil;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.*;
+
+import javax.imageio.ImageIO;
+import java.io.*;
+import java.util.List;
+
+public class ExcelExporter {
+
+    public void export(
+            File file,
+            List<FundAllocation> allocations,
+            List<GroupSummary> groupSummaries
+    ) throws Exception {
+
+        XSSFWorkbook workbook = new XSSFWorkbook();
+        XSSFSheet sheet = workbook.createSheet("Funds Report");
+
+        int rowIdx = 0;
+
+        // ---------- TITLE ----------
+        Row title = sheet.createRow(rowIdx++);
+        title.createCell(0).setCellValue("Funds Management Report");
+
+        rowIdx++;
+
+        // ---------- CATEGORY TABLE ----------
+        Row header = sheet.createRow(rowIdx++);
+        header.createCell(0).setCellValue("Category");
+        header.createCell(1).setCellValue("Percentage");
+        header.createCell(2).setCellValue("Amount");
+
+        for (FundAllocation fa : allocations) {
+            Row r = sheet.createRow(rowIdx++);
+            r.createCell(0).setCellValue(fa.getCategory());
+            r.createCell(1).setCellValue(fa.getPercentage());
+            r.createCell(2).setCellValue(fa.getAmount());
+        }
+
+        rowIdx += 2;
+
+        // ---------- GROUP SUMMARY ----------
+        Row gHeader = sheet.createRow(rowIdx++);
+        gHeader.createCell(0).setCellValue("Group");
+        gHeader.createCell(1).setCellValue("Total %");
+        gHeader.createCell(2).setCellValue("Total Amount");
+
+        for (GroupSummary gs : groupSummaries) {
+            Row r = sheet.createRow(rowIdx++);
+            r.createCell(0).setCellValue(gs.getGroupType().getDisplayName());
+            r.createCell(1).setCellValue(gs.getTotalPercentage());
+            r.createCell(2).setCellValue(gs.getTotalAmount());
+        }
+
+        rowIdx += 2;
+
+        // ---------- PIE CHART IMAGE ----------
+        var image = ChartImageUtil.createGroupPieChart(
+                groupSummaries, 500, 350
+        );
+
+        ByteArrayOutputStream imgBytes = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", imgBytes);
+
+        int pictureIdx = workbook.addPicture(
+                imgBytes.toByteArray(),
+                Workbook.PICTURE_TYPE_PNG
+        );
+
+        Drawing<?> drawing = sheet.createDrawingPatriarch();
+        ClientAnchor anchor = workbook.getCreationHelper().createClientAnchor();
+        anchor.setCol1(0);
+        anchor.setRow1(rowIdx);
+
+        drawing.createPicture(anchor, pictureIdx);
+
+        sheet.autoSizeColumn(0);
+        sheet.autoSizeColumn(1);
+        sheet.autoSizeColumn(2);
+
+        try (FileOutputStream fos = new FileOutputStream(file)) {
+            workbook.write(fos);
+        }
+        workbook.close();
+    }
+}
 
 
 ---
 
-✅ That’s it — nothing else needed
+4️⃣ PDF EXPORTER (FULL)
 
-No changes required in:
+PdfExporter.java
 
-CurrencyProvider
+package com.fundsmanager.service;
 
-CurrencyItem
+import com.fundsmanager.model.FundAllocation;
+import com.fundsmanager.model.GroupSummary;
+import com.fundsmanager.util.ChartImageUtil;
+import com.lowagie.text.*;
+import com.lowagie.text.pdf.*;
 
-MoneyUtil
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.*;
+import java.util.List;
 
-Table models
+public class PdfExporter {
 
-Pie chart
+    public void export(
+            File file,
+            List<FundAllocation> allocations,
+            List<GroupSummary> groupSummaries
+    ) throws Exception {
 
-Dialogs
+        Document document = new Document(PageSize.A4);
+        PdfWriter.getInstance(document, new FileOutputStream(file));
+        document.open();
 
+        document.add(new Paragraph(
+                "Funds Management Report",
+                FontFactory.getFont(FontFactory.HELVETICA_BOLD, 18)
+        ));
+        document.add(Chunk.NEWLINE);
+
+        // ---------- CATEGORY TABLE ----------
+        document.add(new Paragraph("Category Allocation"));
+
+        PdfPTable table = new PdfPTable(3);
+        table.setWidthPercentage(100);
+
+        table.addCell("Category");
+        table.addCell("Percentage");
+        table.addCell("Amount");
+
+        for (FundAllocation fa : allocations) {
+            table.addCell(fa.getCategory());
+            table.addCell(String.valueOf(fa.getPercentage()));
+            table.addCell(String.format("%.2f", fa.getAmount()));
+        }
+
+        document.add(table);
+        document.add(Chunk.NEWLINE);
+
+        // ---------- GROUP SUMMARY ----------
+        document.add(new Paragraph("Group Summary"));
+
+        PdfPTable gTable = new PdfPTable(3);
+        gTable.setWidthPercentage(100);
+
+        gTable.addCell("Group");
+        gTable.addCell("Total %");
+        gTable.addCell("Total Amount");
+
+        for (GroupSummary gs : groupSummaries) {
+            gTable.addCell(gs.getGroupType().getDisplayName());
+            gTable.addCell(String.valueOf(gs.getTotalPercentage()));
+            gTable.addCell(String.format("%.2f", gs.getTotalAmount()));
+        }
+
+        document.add(gTable);
+        document.add(Chunk.NEWLINE);
+
+        // ---------- PIE CHART ----------
+        BufferedImage chart =
+                ChartImageUtil.createGroupPieChart(groupSummaries, 450, 300);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(chart, "png", baos);
+
+        Image chartImg = Image.getInstance(baos.toByteArray());
+        chartImg.setAlignment(Image.ALIGN_CENTER);
+        document.add(chartImg);
+
+        document.close();
+    }
+}
 
 
 ---
 
-🧠 Why this is correct
+5️⃣ MAINFRAME INTEGRATION (BUTTONS)
 
-✔ Works on any OS / locale
-✔ No fragile assumptions
-✔ INR always selected if available
-✔ Safe fallback
-✔ Professional-grade initialization
+Add fields
+
+private final ExportService exportService = new ExportService();
+private List<FundAllocation> lastAllocations;
+private List<GroupSummary> lastGroupSummaries;
+
+Store results in generateReport()
+
+lastAllocations = allocations;
+lastGroupSummaries = groupSummaries;
+
+Export buttons
+
+JButton excelBtn = new JButton("Export Excel");
+excelBtn.addActionListener(e -> exportExcel());
+
+JButton pdfBtn = new JButton("Export PDF");
+pdfBtn.addActionListener(e -> exportPdf());
+
+Handlers
+
+private void exportExcel() {
+    if (lastAllocations == null) return;
+
+    JFileChooser fc = new JFileChooser();
+    if (fc.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+        try {
+            exportService.exportExcel(
+                    fc.getSelectedFile(),
+                    lastAllocations,
+                    lastGroupSummaries
+            );
+            JOptionPane.showMessageDialog(this, "Excel exported");
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Export failed");
+        }
+    }
+}
+
+private void exportPdf() {
+    if (lastAllocations == null) return;
+
+    JFileChooser fc = new JFileChooser();
+    if (fc.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+        try {
+            exportService.exportPdf(
+                    fc.getSelectedFile(),
+                    lastAllocations,
+                    lastGroupSummaries
+            );
+            JOptionPane.showMessageDialog(this, "PDF exported");
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Export failed");
+        }
+    }
+}
 
 
 ---
 
-🏁 Result
+🏆 FINAL RESULT
 
-When the app launches, you will see:
+You now have:
 
-🇮🇳  INR – Indian Rupee (₹)
+✅ Professional Excel report
 
-Already selected ✔
-All amounts formatted in ₹ ✔
+Tables
+
+Embedded pie chart
+
+
+✅ Professional PDF report
+
+Tables
+
+Embedded pie chart
+
+
+✅ Clean separation of concerns
+✅ Offline-friendly
+✅ Interview / production ready
+
+This is bank-grade export functionality.
 
 
 ---
 
 If you want next:
 
-Persist selected currency across restarts
+Currency symbol in exports
 
-Auto-detect currency from OS locale
+Styling (colors, fonts)
 
-Show symbol next to income input
+Totals row
 
-Currency conversion (live rates)
+Multi-sheet Excel
+
+One-click “Export All”
 
 
-Just tell me 👍
+Just say 👍
