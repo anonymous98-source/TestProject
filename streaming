@@ -23,6 +23,44 @@ BarChartPanel
 
 ChartImageUtil
 
+
+import java.awt.*;
+import java.util.Random;
+
+public class CursorVibrate {
+
+    public static void main(String[] args) {
+        try {
+            Robot robot = new Robot();
+            Random random = new Random();
+
+            // Maximum vibration range (pixels)
+            int vibrationRange = 5;  
+
+            while (true) {
+
+                Point current = MouseInfo.getPointerInfo().getLocation();
+
+                // Generate small random movement
+                int dx = random.nextInt(vibrationRange * 2 + 1) - vibrationRange;
+                int dy = random.nextInt(vibrationRange * 2 + 1) - vibrationRange;
+
+                int newX = current.x + dx;
+                int newY = current.y + dy;
+
+                robot.mouseMove(newX, newY);
+
+                // Small delay for smooth vibration
+                Thread.sleep(1000);  // 1 second
+
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
+
 PdfExporter
 
 MainFrame
