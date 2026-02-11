@@ -1,261 +1,271 @@
-Excellent 👌 — now we’re fixing real business-logic correctness, not just UI.
+Excellent upgrade 👌 — adding a Bar Chart beside the Pie Chart makes your dashboard look like a proper financial analytics tool.
 
-You have three problems:
+We’ll implement this cleanly using JFreeChart, and place:
 
-1️⃣ Exception messages are generic
-2️⃣ When removing a category → percentage gets subtracted from Savings only
-3️⃣ Percentages can go negative or exceed 100%
+[ Pie Chart ]   [ Bar Chart ]
 
-We’ll fix this properly at model + validation level, not hacks.
+Side-by-side inside the right panel.
 
 
 ---
 
-🎯 FINAL RULES (Clear Business Logic)
+🎯 Final Result
 
-✅ Total percentage must ALWAYS = 100
+Right side of dashboard will show:
 
-❌ No category percentage can be < 0
+🥧 Pie Chart → Expenses vs Savings (group summary)
 
-❌ No category percentage can exceed 100
-
-❌ Removing a category must NOT push others into negative
-
-❌ System must not auto-adjust blindly
+📊 Bar Chart → Category-wise Allocation (visual comparison)
 
 
----
-
-🔴 WHY YOUR CURRENT ISSUE HAPPENS
-
-You likely have logic like:
-
-remaining = 100 - total
-savings.setPercentage(remaining);
-
-When removing something:
-
-It subtracts only from Savings
-
-If removed percentage > savings → Savings becomes negative ❌
-
-
-That is wrong design.
+Clean, professional layout.
 
 
 ---
 
-✅ PROPER FIX STRATEGY
+🧠 DESIGN APPROACH
 
-We will:
+Currently:
 
-1. Remove auto-adjust logic from Savings
+PieChartPanel (top)
+Tables (bottom)
 
+We will change to:
 
-2. Validate totals strictly
+Charts SplitPane (Pie | Bar)
+Tables below
 
+So:
 
-3. Prevent invalid edits before they apply
+Top half → Charts (horizontal split)
 
-
-4. Improve exception messages
-
-
-5. Prevent negative values
-
+Bottom half → Tables
 
 
 
 ---
 
-✅ STEP 1 — FIX CategoryTableModel
+✅ STEP 1 — Create BarChartPanel
+
+Create new file:
+
+BarChartPanel.java
+
+
+---
+
+✅ FULL BarChartPanel.java
+
+package com.fundsmanager.ui;
+
+import com.fundsmanager.model.FundAllocation;
+import org.jfree.chart.ChartFactory;
+import org.jfree.chart.ChartPanel;
+import org.jfree.chart.JFreeChart;
+import org.jfree.chart.plot.CategoryPlot;
+import org.jfree.chart.renderer.category.BarRenderer;
+import org.jfree.data.category.DefaultCategoryDataset;
+
+import javax.swing.*;
+import java.awt.*;
+import java.util.List;
+
+public class BarChartPanel extends JPanel {
+
+    private final JPanel chartHolder;
+
+    public BarChartPanel() {
+        setLayout(new BorderLayout());
+        setBorder(BorderFactory.createTitledBorder("Category Allocation"));
+
+        chartHolder = new JPanel(new BorderLayout());
+        add(chartHolder, BorderLayout.CENTER);
+    }
+
+    public void updateChart(List<FundAllocation> allocations) {
+
+        chartHolder.removeAll();
+
+        if (allocations == null || allocations.isEmpty()) {
+            repaint();
+            return;
+        }
+
+        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
+
+        for (FundAllocation fa : allocations) {
+            dataset.addValue(
+                    fa.getAmount(),
+                    "Amount",
+                    fa.getCategory()
+            );
+        }
+
+        JFreeChart chart = ChartFactory.createBarChart(
+                "Category Allocation",
+                "Category",
+                "Amount",
+                dataset
+        );
+
+        CategoryPlot plot = chart.getCategoryPlot();
+        BarRenderer renderer = (BarRenderer) plot.getRenderer();
+
+        renderer.setSeriesPaint(0, new Color(52, 152, 219));
+
+        ChartPanel chartPanel = new ChartPanel(chart);
+        chartPanel.setMouseWheelEnabled(true);
+
+        chartHolder.add(chartPanel, BorderLayout.CENTER);
+
+        revalidate();
+        repaint();
+    }
+
+    public void clear() {
+        chartHolder.removeAll();
+        repaint();
+    }
+}
+
+
+---
+
+✅ STEP 2 — Update MainFrame Layout
 
 Open:
 
-CategoryTableModel.java
+MainFrame.java
 
 
 ---
 
-🔁 Replace setValueAt(...) completely with this
+1️⃣ Add Field
 
-@Override
-public void setValueAt(Object value, int row, int column) {
+At top with other chart fields:
 
-    Category category = categories.get(row);
-
-    if (column == 0) {
-        // Rename
-        if (!category.isLocked()) {
-            category.setName(value.toString().trim());
-        }
-    }
-
-    if (column == 1) {
-        try {
-            double newPercent = Double.parseDouble(value.toString());
-
-            if (newPercent < 0) {
-                throw new IllegalArgumentException(
-                        "Percentage cannot be negative."
-                );
-            }
-
-            if (newPercent > 100) {
-                throw new IllegalArgumentException(
-                        "Percentage cannot exceed 100."
-                );
-            }
-
-            double totalWithoutCurrent = categories.stream()
-                    .filter(c -> c != category)
-                    .mapToDouble(Category::getPercentage)
-                    .sum();
-
-            if (totalWithoutCurrent + newPercent > 100) {
-                throw new IllegalArgumentException(
-                        "Total percentage cannot exceed 100%.\n"
-                        + "Current total (excluding this): "
-                        + totalWithoutCurrent
-                );
-            }
-
-            category.setPercentage(newPercent);
-
-        } catch (NumberFormatException ex) {
-            throw new IllegalArgumentException(
-                    "Please enter a valid numeric percentage value."
-            );
-        }
-    }
-
-    fireTableRowsUpdated(row, row);
-}
+private BarChartPanel barChartPanel;
 
 
 ---
 
-✅ STEP 2 — FIX removeCategory()
+2️⃣ Update createMainContent()
 
-Replace your removeCategory(int row) method with:
+Replace this section:
 
-public void removeCategory(int row) {
-
-    Category category = categories.get(row);
-
-    if (category.isLocked()) {
-        throw new IllegalStateException(
-                "Default categories cannot be removed."
-        );
-    }
-
-    categories.remove(row);
-
-    fireTableDataChanged();
-}
-
-🚫 NO auto redistribution
-🚫 NO subtraction from savings
-
-User must manually rebalance.
-
-This is correct financial behavior.
-
-
----
-
-✅ STEP 3 — Improve Exception Handling in MainFrame
-
-Modify your export / actions to show clean messages.
-
-Example in generateReport():
-
-Replace:
-
-JOptionPane.showMessageDialog(this, "Total percentage must be exactly 100%");
+pieChartPanel = new PieChartPanel();
 
 With:
 
-JOptionPane.showMessageDialog(
-        this,
-        "The total allocation must equal exactly 100%.\n"
-        + "Please adjust your category percentages.",
-        "Invalid Allocation",
-        JOptionPane.WARNING_MESSAGE
+pieChartPanel = new PieChartPanel();
+barChartPanel = new BarChartPanel();
+
+// Split charts horizontally
+JSplitPane chartsSplit = new JSplitPane(
+        JSplitPane.HORIZONTAL_SPLIT,
+        pieChartPanel,
+        barChartPanel
 );
 
-
----
-
-✅ STEP 4 — Catch Model Exceptions Properly
-
-Wrap editing exceptions safely.
-
-In MainFrame constructor add:
-
-Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
-    JOptionPane.showMessageDialog(
-            this,
-            e.getMessage(),
-            "Input Error",
-            JOptionPane.ERROR_MESSAGE
-    );
-});
-
-Now invalid edits show clean dialogs instead of crashing.
+chartsSplit.setDividerLocation(450);
+chartsSplit.setResizeWeight(0.5);
+chartsSplit.setOneTouchExpandable(true);
 
 
 ---
 
-🎯 FINAL BEHAVIOR AFTER FIX
+3️⃣ Replace This Block
 
-Editing:
+Find:
 
-✔ Cannot enter negative
-✔ Cannot exceed 100
-✔ Cannot overflow total
+JSplitPane rightSplit = new JSplitPane(
+        JSplitPane.VERTICAL_SPLIT,
+        pieChartPanel,
+        tablesSplit
+);
 
-Removing:
+Replace with:
 
-✔ Removes category safely
-✔ Does NOT corrupt savings
-✔ Does NOT auto-adjust blindly
+JSplitPane rightSplit = new JSplitPane(
+        JSplitPane.VERTICAL_SPLIT,
+        chartsSplit,
+        tablesSplit
+);
 
-Generating Report:
-
-✔ Only works if total = 100
-✔ Shows proper validation message
-
-
----
-
-🏆 Now Your Logic Is Financially Correct
-
-No:
-
-Silent redistribution
-
-Hidden subtraction
-
-Negative savings
-
-Overflow errors
-
-
-This is now banking-grade safe logic.
+rightSplit.setDividerLocation(350);
+rightSplit.setResizeWeight(0.5);
 
 
 ---
 
-If you want next:
+✅ STEP 3 — Update generateReport()
 
-Auto-balance toggle (optional)
+Inside generateReport() after updating pie chart:
 
-Highlight invalid rows instead of popup
+Add:
 
-Show remaining percentage live
+barChartPanel.updateChart(lastAllocations);
 
-Lock total to 100 auto-calc mode
+So it becomes:
+
+allocationTableModel.setData(lastAllocations);
+groupSummaryTableModel.setData(lastGroupSummaries);
+
+pieChartPanel.updateChart(lastGroupSummaries);
+barChartPanel.updateChart(lastAllocations);
 
 
-Just say 👍
+---
+
+✅ STEP 4 — Update Reset Method
+
+Inside resetCategories() add:
+
+barChartPanel.clear();
+
+
+---
+
+🎯 FINAL LAYOUT
+
+------------------------------------------------------
+ |             |                                       |
+ |  Pie Chart  |   Bar Chart (Category Allocation)    |
+ |             |                                       |
+ ------------------------------------------------------
+ |            Tables Section                          |
+ ------------------------------------------------------
+
+
+---
+
+🏆 What You Now Have
+
+✔ Pie chart (group distribution)
+✔ Bar chart (category allocation)
+✔ Fully dynamic
+✔ Scroll + resize friendly
+✔ Export still works
+✔ Professional analytics dashboard
+
+
+---
+
+🚀 Optional Next Upgrades
+
+If you want, we can now add:
+
+Value labels above bars
+
+Currency formatting on axis
+
+Gradient bars
+
+Horizontal bar chart option
+
+Toggle between Amount & Percentage view
+
+Export both charts together in one image
+
+
+Just tell me 👍
