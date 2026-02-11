@@ -1,117 +1,61 @@
-Great screenshot 👍 — this makes the requirement very clear.
-You want three clear behaviors, not just “locked vs unlocked”.
+Perfect 👍 — that’s absolutely correct UX thinking.
 
-Let’s restate it precisely and then I’ll give you exact code changes.
+Right now icons are appearing in the percentage column because the same renderer is applied to both columns.
 
+We will fix this properly so:
 
----
-
-✅ REQUIRED BEHAVIOR (FINAL)
-
-1️⃣ Default categories (system-defined)
-
-🔒 Category name → NOT editable
-
-✏ Percentage → editable
-
-Visually marked as Default
-
-
-2️⃣ User-added categories
-
-✏ Category name → editable
-
-✏ Percentage → editable
-
-Visually marked as User
-
-
-3️⃣ UX clarity
-
-Lock icon should appear only next to category name
-
-Percentage column should never show lock icon
-
-Cursor & editor should behave correctly
-
+✅ Icons appear ONLY in Category Name column
+✅ Percentage column is clean (no icons)
+✅ Percentage remains editable
+✅ Default category name remains locked
 
 
 ---
 
-🔴 Why your current UI is wrong
+✅ STEP 1 — Fix Renderer Usage in MainFrame
 
-Right now:
+📍 File:
 
-You are applying the same renderer to both columns
+MainFrame.java
 
-That makes percentage look locked, which is misleading
+📍 Method:
 
-Editing rules exist in the model, but UI doesn’t reflect them
-
-
-We’ll fix this cleanly.
+createMainContent()
 
 
 ---
 
-✅ SOLUTION OVERVIEW
+🔴 REMOVE this (if you have it)
 
-We will:
-
-1. Lock editing per column (model change)
-
-
-2. Use different renderers for name vs percentage
-
-
-3. Show lock/edit icon ONLY in Category Name column
-
-
-
-No hacks. Clean Swing design.
+categoryTable.getColumnModel()
+        .getColumn(1)
+        .setCellRenderer(statusRenderer);
 
 
 ---
 
-1️⃣ CategoryTableModel (SMALL BUT IMPORTANT CHANGE)
+✅ KEEP ONLY THIS
 
-🔁 Replace isCellEditable(...) with this
+CategoryStatusRenderer statusRenderer =
+        new CategoryStatusRenderer();
 
-@Override
-public boolean isCellEditable(int rowIndex, int columnIndex) {
-    Category c = categories.get(rowIndex);
+categoryTable.getColumnModel()
+        .getColumn(0)   // ONLY category name column
+        .setCellRenderer(statusRenderer);
 
-    // Column 0 = Category Name
-    if (columnIndex == 0) {
-        // Name editable ONLY for user-added categories
-        return !c.isLocked();
-    }
-
-    // Column 1 = Percentage
-    // Percentage ALWAYS editable
-    return true;
-}
-
-✅ Default categories:
-
-Name ❌
-
-Percentage ✅
-
-
-✅ User categories:
-
-Name ✅
-
-Percentage ✅
-
+⚠️ DO NOT apply renderer to column 1.
 
 
 ---
 
-2️⃣ CategoryStatusRenderer (FIXED – COLUMN-AWARE)
+✅ STEP 2 — Make Renderer Column-Aware (IMPORTANT)
 
-🔁 Replace your existing CategoryStatusRenderer with this
+Make sure your CategoryStatusRenderer looks like this:
+
+
+---
+
+📍 CategoryStatusRenderer.java (FINAL CLEAN VERSION)
 
 package com.fundsmanager.ui;
 
@@ -148,11 +92,7 @@ public class CategoryStatusRenderer extends DefaultTableCellRenderer {
                 (CategoryTableModel) table.getModel();
         Category category = model.getCategories().get(row);
 
-        // Reset icon by default
-        setIcon(null);
-        setToolTipText(null);
-
-        // 🔥 ONLY Category Name column shows lock/edit icon
+        // 🔥 IMPORTANT: Only apply icon for Category Name column
         if (column == 0) {
             if (category.isLocked()) {
                 setIcon(lockIcon);
@@ -161,6 +101,10 @@ public class CategoryStatusRenderer extends DefaultTableCellRenderer {
                 setIcon(editIcon);
                 setToolTipText("User category (editable)");
             }
+        } else {
+            // Percentage column → NO ICON
+            setIcon(null);
+            setToolTipText(null);
         }
 
         // Background styling
@@ -173,6 +117,7 @@ public class CategoryStatusRenderer extends DefaultTableCellRenderer {
         }
 
         setForeground(Color.DARK_GRAY);
+
         return this;
     }
 
@@ -187,97 +132,57 @@ public class CategoryStatusRenderer extends DefaultTableCellRenderer {
     }
 }
 
-✅ Result
-
-Lock icon appears only beside category name
-
-Percentage column looks clean & editable
-
-UI matches actual behavior
-
-
 
 ---
 
-3️⃣ MainFrame (SMALL CHANGE – IMPORTANT)
+✅ STEP 3 — Ensure Editing Rules Are Correct
 
-🔁 Update category table renderer attachment
+In CategoryTableModel confirm you have:
 
-In createMainContent():
+@Override
+public boolean isCellEditable(int rowIndex, int columnIndex) {
+    Category c = categories.get(rowIndex);
 
-categoryTable = new JTable(categoryTableModel);
-categoryTable.setRowHeight(28);
-
-// 🔥 Apply renderer ONLY to Category Name column
-CategoryStatusRenderer statusRenderer =
-        new CategoryStatusRenderer();
-
-categoryTable.getColumnModel()
-        .getColumn(0)
-        .setCellRenderer(statusRenderer);
-
-// Percentage column → default renderer
-
-❌ Do NOT apply renderer to column 1 anymore.
-
-
----
-
-4️⃣ (OPTIONAL BUT NICE) Cursor feedback
-
-Add this to make it feel more professional:
-
-categoryTable.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
-    @Override
-    public void mouseMoved(java.awt.event.MouseEvent e) {
-        int row = categoryTable.rowAtPoint(e.getPoint());
-        int col = categoryTable.columnAtPoint(e.getPoint());
-
-        if (row >= 0 && col == 0) {
-            Category c = categoryTableModel.getCategories().get(row);
-            categoryTable.setCursor(
-                    c.isLocked()
-                            ? Cursor.getDefaultCursor()
-                            : Cursor.getPredefinedCursor(Cursor.TEXT_CURSOR)
-            );
-        } else {
-            categoryTable.setCursor(Cursor.getDefaultCursor());
-        }
+    // Column 0 = Category Name
+    if (columnIndex == 0) {
+        return !c.isLocked();  // Only user-added editable
     }
-});
+
+    // Column 1 = Percentage
+    return true;  // Always editable
+}
 
 
 ---
 
-🏆 FINAL UX RESULT (MATCHES YOUR SCREENSHOT GOAL)
+🎯 FINAL RESULT
 
 Category Name	Percentage
 
-🔒 Necessary Expenses	✏ 40.0
-🔒 Emergency Fund	✏ 10.0
-🔒 EMIs	✏ 15.0
-✏ Savings	✏ 10.0
-✏ Investments	✏ 10.0
-✏ Miscellaneous	✏ 5.0
+🔒 Necessary Expenses	40.0
+🔒 Emergency Fund	10.0
+🔒 EMIs	15.0
+✏ Savings	10.0
+✏ Investments	10.0
 
 
-✔ Clear
-✔ Intuitive
-✔ No confusion
-✔ Finance-app quality
+✔ No icons in percentage
+✔ Clean column alignment
+✔ Correct editing behavior
+✔ Professional UI
 
 
 ---
 
-If you want next polish
+If percentage column still shows icons, it means: 👉 Renderer is still being applied to column 1 somewhere in MainFrame.
 
-Inline badge instead of icon
+If you want next-level polish:
 
-Tooltip explaining auto-balance
+Make percentage right-aligned
 
-Context menu (Rename / Delete)
+Add % sign formatting
 
-Column-level validation styling
+Add inline validation color
 
 
 Just tell me 👍
