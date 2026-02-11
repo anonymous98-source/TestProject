@@ -1,133 +1,235 @@
-Perfect 👍 — now we’ll make the behavior fully consistent and logical.
+Excellent 👍 — adding a right-click context menu makes your app feel professional and desktop-grade.
+
+We’ll implement this cleanly with:
+
+🎯 Final Behavior
+
+When user right-clicks a row in Category table:
+
+🔒 Default Category
+
+❌ Rename (disabled)
+
+❌ Delete (disabled)
+
+ℹ Show Info (enabled)
 
 
----
+✏ User Category
 
-🎯 FINAL REQUIRED BEHAVIOR
+✅ Rename
 
-🔒 Default Categories (locked = true)
+✅ Delete
 
-❌ Category Name → NOT editable
-
-❌ Percentage → NOT editable
-
-
-✏ User-Added Categories (locked = false)
-
-✅ Category Name → editable
-
-✅ Percentage → editable
-
-
-This is cleaner and more intuitive.
-
-
----
-
-✅ ONLY ONE FILE NEEDS CHANGE
-
-You only need to modify:
-
-CategoryTableModel.java
-
-No changes needed in:
-
-MainFrame
-
-Renderer
-
-Pie chart
-
-Services
+ℹ Show Info
 
 
 
 ---
 
-🔧 UPDATE CategoryTableModel.java
+✅ WHAT WE WILL ADD
 
-🔁 Replace your existing isCellEditable(...) method with this:
+1. JPopupMenu for category table
 
-@Override
-public boolean isCellEditable(int rowIndex, int columnIndex) {
-    Category category = categories.get(rowIndex);
 
-    // 🔥 If category is locked → nothing editable
-    if (category.isLocked()) {
-        return false;
-    }
+2. Smart enable/disable logic
 
-    // If user-added → both name and percentage editable
-    return true;
+
+3. Auto row selection on right-click
+
+
+4. Clean separation inside MainFrame
+
+
+
+
+---
+
+🔧 STEP 1 — Add This Method to MainFrame.java
+
+Add this method anywhere inside MainFrame:
+
+
+---
+
+✅ setupCategoryContextMenu() (FULL CODE)
+
+private void setupCategoryContextMenu() {
+
+    JPopupMenu popupMenu = new JPopupMenu();
+
+    JMenuItem renameItem = new JMenuItem("Rename");
+    JMenuItem deleteItem = new JMenuItem("Delete");
+    JMenuItem infoItem = new JMenuItem("Category Info");
+
+    popupMenu.add(renameItem);
+    popupMenu.add(deleteItem);
+    popupMenu.addSeparator();
+    popupMenu.add(infoItem);
+
+    // ---------- Mouse Listener ----------
+    categoryTable.addMouseListener(new java.awt.event.MouseAdapter() {
+
+        @Override
+        public void mousePressed(java.awt.event.MouseEvent e) {
+            if (e.isPopupTrigger()) showMenu(e);
+        }
+
+        @Override
+        public void mouseReleased(java.awt.event.MouseEvent e) {
+            if (e.isPopupTrigger()) showMenu(e);
+        }
+
+        private void showMenu(java.awt.event.MouseEvent e) {
+
+            int row = categoryTable.rowAtPoint(e.getPoint());
+
+            if (row >= 0) {
+                categoryTable.setRowSelectionInterval(row, row);
+
+                Category selected =
+                        categoryTableModel.getCategories().get(row);
+
+                // Enable/Disable based on lock
+                boolean editable = !selected.isLocked();
+
+                renameItem.setEnabled(editable);
+                deleteItem.setEnabled(editable);
+
+                popupMenu.show(e.getComponent(),
+                        e.getX(), e.getY());
+            }
+        }
+    });
+
+    // ---------- Actions ----------
+
+    renameItem.addActionListener(e -> {
+        int row = categoryTable.getSelectedRow();
+        if (row < 0) return;
+
+        Category category =
+                categoryTableModel.getCategories().get(row);
+
+        String newName = JOptionPane.showInputDialog(
+                this,
+                "Enter new category name:",
+                category.getName()
+        );
+
+        if (newName != null && !newName.trim().isEmpty()) {
+            category.setName(newName.trim());
+            categoryTableModel.fireTableRowsUpdated(row, row);
+        }
+    });
+
+    deleteItem.addActionListener(e -> {
+        int row = categoryTable.getSelectedRow();
+        if (row < 0) return;
+
+        int confirm = JOptionPane.showConfirmDialog(
+                this,
+                "Delete this category?",
+                "Confirm Delete",
+                JOptionPane.YES_NO_OPTION
+        );
+
+        if (confirm == JOptionPane.YES_OPTION) {
+            categoryTableModel.removeCategory(row);
+        }
+    });
+
+    infoItem.addActionListener(e -> {
+        int row = categoryTable.getSelectedRow();
+        if (row < 0) return;
+
+        Category category =
+                categoryTableModel.getCategories().get(row);
+
+        JOptionPane.showMessageDialog(
+                this,
+                "Category: " + category.getName()
+                        + "\nPercentage: " + category.getPercentage()
+                        + "\nType: "
+                        + (category.isLocked()
+                        ? "Default (Locked)"
+                        : "User Added (Editable)"),
+                "Category Info",
+                JOptionPane.INFORMATION_MESSAGE
+        );
+    });
 }
 
 
 ---
 
-🧠 Why This Is Correct
+🔧 STEP 2 — Call It in createMainContent()
 
-Before:
+After creating categoryTable, add:
 
-Default category name locked
+setupCategoryContextMenu();
 
-But percentage editable ❌ (inconsistent)
+Example:
 
+categoryTable = new JTable(categoryTableModel);
+categoryTable.setRowHeight(28);
 
-Now:
-
-Locked category = fully protected
-
-User category = fully editable
-
-
-Much cleaner UX logic.
+setupCategoryContextMenu();
 
 
 ---
 
-🎯 Final Behavior in UI
+🎯 FINAL RESULT
 
-Category Name	Percentage
+Right-click on a row →
 
-🔒 Necessary Expenses	40.0 ❌
-🔒 EMIs	15.0 ❌
-✏ Savings	10.0 ✅
-✏ Investments	10.0 ✅
+If Default:
 
+Rename ❌ disabled
 
+Delete ❌ disabled
 
----
-
-🧪 Optional (Visual Enhancement)
-
-If you want locked rows to feel clearly non-editable, you can:
-
-categoryTable.setDefaultEditor(Object.class, null);
-
-Or keep editing disabled automatically via model (recommended).
+Info ✅
 
 
----
+If User:
 
-🏁 Done
+Rename ✅
 
-Now: ✔ Default categories fully protected
-✔ User categories fully editable
-✔ UI behavior matches business logic
-✔ Clean, professional
+Delete ✅
+
+Info ✅
+
 
 
 ---
 
-If you want next:
+🧠 Why This Is Correct Design
 
-Add “Unlock Default Categories” toggle
+✔ Logic stays in model
+✔ UI adapts dynamically
+✔ No duplicate business logic
+✔ Very professional desktop UX
+✔ Scalable (easy to add more options later)
 
-Add right-click context menu
 
-Add confirmation dialog before editing
+---
 
-Add inline validation on percentage
+✨ If You Want Next Upgrade
+
+We can enhance it further with:
+
+Icons inside popup menu
+
+Duplicate category
+
+Move up/down ordering
+
+Convert default → user category
+
+Lock/unlock toggle
+
+Percentage quick edit popup
 
 
 Just tell me 👍
