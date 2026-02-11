@@ -1,188 +1,133 @@
-Perfect 👍 — that’s absolutely correct UX thinking.
-
-Right now icons are appearing in the percentage column because the same renderer is applied to both columns.
-
-We will fix this properly so:
-
-✅ Icons appear ONLY in Category Name column
-✅ Percentage column is clean (no icons)
-✅ Percentage remains editable
-✅ Default category name remains locked
+Perfect 👍 — now we’ll make the behavior fully consistent and logical.
 
 
 ---
 
-✅ STEP 1 — Fix Renderer Usage in MainFrame
+🎯 FINAL REQUIRED BEHAVIOR
 
-📍 File:
+🔒 Default Categories (locked = true)
 
-MainFrame.java
+❌ Category Name → NOT editable
 
-📍 Method:
-
-createMainContent()
+❌ Percentage → NOT editable
 
 
----
+✏ User-Added Categories (locked = false)
 
-🔴 REMOVE this (if you have it)
+✅ Category Name → editable
 
-categoryTable.getColumnModel()
-        .getColumn(1)
-        .setCellRenderer(statusRenderer);
+✅ Percentage → editable
 
 
----
-
-✅ KEEP ONLY THIS
-
-CategoryStatusRenderer statusRenderer =
-        new CategoryStatusRenderer();
-
-categoryTable.getColumnModel()
-        .getColumn(0)   // ONLY category name column
-        .setCellRenderer(statusRenderer);
-
-⚠️ DO NOT apply renderer to column 1.
+This is cleaner and more intuitive.
 
 
 ---
 
-✅ STEP 2 — Make Renderer Column-Aware (IMPORTANT)
+✅ ONLY ONE FILE NEEDS CHANGE
 
-Make sure your CategoryStatusRenderer looks like this:
+You only need to modify:
 
+CategoryTableModel.java
 
----
+No changes needed in:
 
-📍 CategoryStatusRenderer.java (FINAL CLEAN VERSION)
+MainFrame
 
-package com.fundsmanager.ui;
+Renderer
 
-import com.fundsmanager.model.Category;
+Pie chart
 
-import javax.swing.*;
-import javax.swing.table.DefaultTableCellRenderer;
-import java.awt.*;
+Services
 
-public class CategoryStatusRenderer extends DefaultTableCellRenderer {
-
-    private final Icon lockIcon;
-    private final Icon editIcon;
-
-    public CategoryStatusRenderer() {
-        lockIcon = loadIcon("/icons/lock.png");
-        editIcon = loadIcon("/icons/edit.png");
-        setOpaque(true);
-    }
-
-    @Override
-    public Component getTableCellRendererComponent(
-            JTable table,
-            Object value,
-            boolean isSelected,
-            boolean hasFocus,
-            int row,
-            int column) {
-
-        super.getTableCellRendererComponent(
-                table, value, isSelected, hasFocus, row, column);
-
-        CategoryTableModel model =
-                (CategoryTableModel) table.getModel();
-        Category category = model.getCategories().get(row);
-
-        // 🔥 IMPORTANT: Only apply icon for Category Name column
-        if (column == 0) {
-            if (category.isLocked()) {
-                setIcon(lockIcon);
-                setToolTipText("Default category (name locked)");
-            } else {
-                setIcon(editIcon);
-                setToolTipText("User category (editable)");
-            }
-        } else {
-            // Percentage column → NO ICON
-            setIcon(null);
-            setToolTipText(null);
-        }
-
-        // Background styling
-        if (!isSelected) {
-            if (category.isLocked()) {
-                setBackground(new Color(245, 245, 245));
-            } else {
-                setBackground(Color.WHITE);
-            }
-        }
-
-        setForeground(Color.DARK_GRAY);
-
-        return this;
-    }
-
-    private Icon loadIcon(String path) {
-        try {
-            return new ImageIcon(
-                    CategoryStatusRenderer.class.getResource(path)
-            );
-        } catch (Exception e) {
-            return null;
-        }
-    }
-}
 
 
 ---
 
-✅ STEP 3 — Ensure Editing Rules Are Correct
+🔧 UPDATE CategoryTableModel.java
 
-In CategoryTableModel confirm you have:
+🔁 Replace your existing isCellEditable(...) method with this:
 
 @Override
 public boolean isCellEditable(int rowIndex, int columnIndex) {
-    Category c = categories.get(rowIndex);
+    Category category = categories.get(rowIndex);
 
-    // Column 0 = Category Name
-    if (columnIndex == 0) {
-        return !c.isLocked();  // Only user-added editable
+    // 🔥 If category is locked → nothing editable
+    if (category.isLocked()) {
+        return false;
     }
 
-    // Column 1 = Percentage
-    return true;  // Always editable
+    // If user-added → both name and percentage editable
+    return true;
 }
 
 
 ---
 
-🎯 FINAL RESULT
+🧠 Why This Is Correct
 
-Category Name	Percentage
+Before:
 
-🔒 Necessary Expenses	40.0
-🔒 Emergency Fund	10.0
-🔒 EMIs	15.0
-✏ Savings	10.0
-✏ Investments	10.0
+Default category name locked
+
+But percentage editable ❌ (inconsistent)
 
 
-✔ No icons in percentage
-✔ Clean column alignment
-✔ Correct editing behavior
-✔ Professional UI
+Now:
+
+Locked category = fully protected
+
+User category = fully editable
+
+
+Much cleaner UX logic.
 
 
 ---
 
-If percentage column still shows icons, it means: 👉 Renderer is still being applied to column 1 somewhere in MainFrame.
+🎯 Final Behavior in UI
 
-If you want next-level polish:
+Category Name	Percentage
 
-Make percentage right-aligned
+🔒 Necessary Expenses	40.0 ❌
+🔒 EMIs	15.0 ❌
+✏ Savings	10.0 ✅
+✏ Investments	10.0 ✅
 
-Add % sign formatting
 
-Add inline validation color
+
+---
+
+🧪 Optional (Visual Enhancement)
+
+If you want locked rows to feel clearly non-editable, you can:
+
+categoryTable.setDefaultEditor(Object.class, null);
+
+Or keep editing disabled automatically via model (recommended).
+
+
+---
+
+🏁 Done
+
+Now: ✔ Default categories fully protected
+✔ User categories fully editable
+✔ UI behavior matches business logic
+✔ Clean, professional
+
+
+---
+
+If you want next:
+
+Add “Unlock Default Categories” toggle
+
+Add right-click context menu
+
+Add confirmation dialog before editing
+
+Add inline validation on percentage
 
 
 Just tell me 👍
