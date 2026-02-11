@@ -1,10 +1,283 @@
-JSplitPane tablesSplit = new JSplitPane(
-        JSplitPane.VERTICAL_SPLIT,
-        allocationScroll,
-        groupScroll
-);
+Great screenshot 👍 — this makes the requirement very clear.
+You want three clear behaviors, not just “locked vs unlocked”.
 
-// 🔥 Give more height to Group Summary
-tablesSplit.setDividerLocation(220);   // was 260
-tablesSplit.setResizeWeight(0.45);     // more space to bottom table
-tablesSplit.setOneTouchExpandable(true);
+Let’s restate it precisely and then I’ll give you exact code changes.
+
+
+---
+
+✅ REQUIRED BEHAVIOR (FINAL)
+
+1️⃣ Default categories (system-defined)
+
+🔒 Category name → NOT editable
+
+✏ Percentage → editable
+
+Visually marked as Default
+
+
+2️⃣ User-added categories
+
+✏ Category name → editable
+
+✏ Percentage → editable
+
+Visually marked as User
+
+
+3️⃣ UX clarity
+
+Lock icon should appear only next to category name
+
+Percentage column should never show lock icon
+
+Cursor & editor should behave correctly
+
+
+
+---
+
+🔴 Why your current UI is wrong
+
+Right now:
+
+You are applying the same renderer to both columns
+
+That makes percentage look locked, which is misleading
+
+Editing rules exist in the model, but UI doesn’t reflect them
+
+
+We’ll fix this cleanly.
+
+
+---
+
+✅ SOLUTION OVERVIEW
+
+We will:
+
+1. Lock editing per column (model change)
+
+
+2. Use different renderers for name vs percentage
+
+
+3. Show lock/edit icon ONLY in Category Name column
+
+
+
+No hacks. Clean Swing design.
+
+
+---
+
+1️⃣ CategoryTableModel (SMALL BUT IMPORTANT CHANGE)
+
+🔁 Replace isCellEditable(...) with this
+
+@Override
+public boolean isCellEditable(int rowIndex, int columnIndex) {
+    Category c = categories.get(rowIndex);
+
+    // Column 0 = Category Name
+    if (columnIndex == 0) {
+        // Name editable ONLY for user-added categories
+        return !c.isLocked();
+    }
+
+    // Column 1 = Percentage
+    // Percentage ALWAYS editable
+    return true;
+}
+
+✅ Default categories:
+
+Name ❌
+
+Percentage ✅
+
+
+✅ User categories:
+
+Name ✅
+
+Percentage ✅
+
+
+
+---
+
+2️⃣ CategoryStatusRenderer (FIXED – COLUMN-AWARE)
+
+🔁 Replace your existing CategoryStatusRenderer with this
+
+package com.fundsmanager.ui;
+
+import com.fundsmanager.model.Category;
+
+import javax.swing.*;
+import javax.swing.table.DefaultTableCellRenderer;
+import java.awt.*;
+
+public class CategoryStatusRenderer extends DefaultTableCellRenderer {
+
+    private final Icon lockIcon;
+    private final Icon editIcon;
+
+    public CategoryStatusRenderer() {
+        lockIcon = loadIcon("/icons/lock.png");
+        editIcon = loadIcon("/icons/edit.png");
+        setOpaque(true);
+    }
+
+    @Override
+    public Component getTableCellRendererComponent(
+            JTable table,
+            Object value,
+            boolean isSelected,
+            boolean hasFocus,
+            int row,
+            int column) {
+
+        super.getTableCellRendererComponent(
+                table, value, isSelected, hasFocus, row, column);
+
+        CategoryTableModel model =
+                (CategoryTableModel) table.getModel();
+        Category category = model.getCategories().get(row);
+
+        // Reset icon by default
+        setIcon(null);
+        setToolTipText(null);
+
+        // 🔥 ONLY Category Name column shows lock/edit icon
+        if (column == 0) {
+            if (category.isLocked()) {
+                setIcon(lockIcon);
+                setToolTipText("Default category (name locked)");
+            } else {
+                setIcon(editIcon);
+                setToolTipText("User category (editable)");
+            }
+        }
+
+        // Background styling
+        if (!isSelected) {
+            if (category.isLocked()) {
+                setBackground(new Color(245, 245, 245));
+            } else {
+                setBackground(Color.WHITE);
+            }
+        }
+
+        setForeground(Color.DARK_GRAY);
+        return this;
+    }
+
+    private Icon loadIcon(String path) {
+        try {
+            return new ImageIcon(
+                    CategoryStatusRenderer.class.getResource(path)
+            );
+        } catch (Exception e) {
+            return null;
+        }
+    }
+}
+
+✅ Result
+
+Lock icon appears only beside category name
+
+Percentage column looks clean & editable
+
+UI matches actual behavior
+
+
+
+---
+
+3️⃣ MainFrame (SMALL CHANGE – IMPORTANT)
+
+🔁 Update category table renderer attachment
+
+In createMainContent():
+
+categoryTable = new JTable(categoryTableModel);
+categoryTable.setRowHeight(28);
+
+// 🔥 Apply renderer ONLY to Category Name column
+CategoryStatusRenderer statusRenderer =
+        new CategoryStatusRenderer();
+
+categoryTable.getColumnModel()
+        .getColumn(0)
+        .setCellRenderer(statusRenderer);
+
+// Percentage column → default renderer
+
+❌ Do NOT apply renderer to column 1 anymore.
+
+
+---
+
+4️⃣ (OPTIONAL BUT NICE) Cursor feedback
+
+Add this to make it feel more professional:
+
+categoryTable.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+    @Override
+    public void mouseMoved(java.awt.event.MouseEvent e) {
+        int row = categoryTable.rowAtPoint(e.getPoint());
+        int col = categoryTable.columnAtPoint(e.getPoint());
+
+        if (row >= 0 && col == 0) {
+            Category c = categoryTableModel.getCategories().get(row);
+            categoryTable.setCursor(
+                    c.isLocked()
+                            ? Cursor.getDefaultCursor()
+                            : Cursor.getPredefinedCursor(Cursor.TEXT_CURSOR)
+            );
+        } else {
+            categoryTable.setCursor(Cursor.getDefaultCursor());
+        }
+    }
+});
+
+
+---
+
+🏆 FINAL UX RESULT (MATCHES YOUR SCREENSHOT GOAL)
+
+Category Name	Percentage
+
+🔒 Necessary Expenses	✏ 40.0
+🔒 Emergency Fund	✏ 10.0
+🔒 EMIs	✏ 15.0
+✏ Savings	✏ 10.0
+✏ Investments	✏ 10.0
+✏ Miscellaneous	✏ 5.0
+
+
+✔ Clear
+✔ Intuitive
+✔ No confusion
+✔ Finance-app quality
+
+
+---
+
+If you want next polish
+
+Inline badge instead of icon
+
+Tooltip explaining auto-balance
+
+Context menu (Rename / Delete)
+
+Column-level validation styling
+
+
+Just tell me 👍
