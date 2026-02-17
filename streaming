@@ -1,261 +1,69 @@
-Perfect 👌 — now we’re building a proper analytics dashboard level visualization system.
+Perfect 👍 — good observation.
 
-You want:
+Right now your export combines images side-by-side (horizontal):
 
-✅ Value labels above bars
-✅ Currency formatting on axis
-✅ Gradient bars
-✅ Horizontal bar chart option
-✅ Toggle between Amount / Percentage
-✅ Export both charts together as one image
-✅ Include bar chart in PDF export
+[ PIE ][ BAR ]
 
-We’ll implement this cleanly and professionally.
+That makes:
 
+Bar chart compressed
 
----
+Text unreadable
 
-🎯 ARCHITECTURE UPDATE
+Axis labels cut
 
-We’ll upgrade:
-
-BarChartPanel
-
-ChartImageUtil
+PDF scaling messy
 
 
-import java.awt.*;
-import java.util.Random;
+We will fix it properly by:
 
-public class CursorVibrate {
+🎯 NEW EXPORT LAYOUT (Professional)
 
-    public static void main(String[] args) {
-        try {
-            Robot robot = new Robot();
-            Random random = new Random();
+[ PIE CHART ]
+[ BAR CHART ]
 
-            // Maximum vibration range (pixels)
-            int vibrationRange = 5;  
-
-            while (true) {
-
-                Point current = MouseInfo.getPointerInfo().getLocation();
-
-                // Generate small random movement
-                int dx = random.nextInt(vibrationRange * 2 + 1) - vibrationRange;
-                int dy = random.nextInt(vibrationRange * 2 + 1) - vibrationRange;
-
-                int newX = current.x + dx;
-                int newY = current.y + dy;
-
-                robot.mouseMove(newX, newY);
-
-                // Small delay for smooth vibration
-                Thread.sleep(1000);  // 1 second
-
-            }
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-}
-
-PdfExporter
-
-MainFrame
-
-
-No hacks. Fully scalable.
+✔ Full width
+✔ Proper aspect ratio
+✔ Clean and readable
+✔ Works on A4
 
 
 ---
 
-✅ STEP 1 — ADVANCED BarChartPanel.java
+✅ STEP 1 — Fix ChartImageUtil Combine Method
 
-Replace your existing BarChartPanel completely.
+Open:
 
-
----
-
-✅ FULL UPDATED BarChartPanel.java
-
-package com.fundsmanager.ui;
-
-import com.fundsmanager.model.FundAllocation;
-import com.fundsmanager.util.CurrencyContext;
-import org.jfree.chart.*;
-import org.jfree.chart.axis.NumberAxis;
-import org.jfree.chart.labels.StandardCategoryItemLabelGenerator;
-import org.jfree.chart.plot.CategoryPlot;
-import org.jfree.chart.renderer.category.BarRenderer;
-import org.jfree.data.category.DefaultCategoryDataset;
-
-import javax.swing.*;
-import java.awt.*;
-import java.text.NumberFormat;
-import java.util.List;
-
-public class BarChartPanel extends JPanel {
-
-    private final JPanel chartHolder;
-    private boolean horizontal = false;
-    private boolean showPercentage = false;
-
-    public BarChartPanel() {
-        setLayout(new BorderLayout());
-        setBorder(BorderFactory.createTitledBorder("Category Allocation"));
-
-        chartHolder = new JPanel(new BorderLayout());
-        add(chartHolder, BorderLayout.CENTER);
-    }
-
-    public void setHorizontal(boolean horizontal) {
-        this.horizontal = horizontal;
-    }
-
-    public void setShowPercentage(boolean showPercentage) {
-        this.showPercentage = showPercentage;
-    }
-
-    public void updateChart(List<FundAllocation> allocations) {
-
-        chartHolder.removeAll();
-
-        if (allocations == null || allocations.isEmpty()) {
-            repaint();
-            return;
-        }
-
-        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-
-        for (FundAllocation fa : allocations) {
-            double value = showPercentage
-                    ? fa.getPercentage()
-                    : fa.getAmount();
-
-            dataset.addValue(value, "Value", fa.getCategory());
-        }
-
-        PlotOrientation orientation =
-                horizontal
-                        ? PlotOrientation.HORIZONTAL
-                        : PlotOrientation.VERTICAL;
-
-        JFreeChart chart = ChartFactory.createBarChart(
-                "Category Allocation",
-                horizontal ? "Value" : "Category",
-                horizontal ? "Category" : "Value",
-                dataset,
-                orientation,
-                false,
-                true,
-                false
-        );
-
-        CategoryPlot plot = chart.getCategoryPlot();
-        BarRenderer renderer = (BarRenderer) plot.getRenderer();
-
-        // -------- GRADIENT BARS --------
-        GradientPaint gp = new GradientPaint(
-                0f, 0f, new Color(52, 152, 219),
-                0f, 0f, new Color(41, 128, 185)
-        );
-        renderer.setSeriesPaint(0, gp);
-
-        // -------- VALUE LABELS --------
-        renderer.setDefaultItemLabelsVisible(true);
-        renderer.setDefaultItemLabelGenerator(
-                new StandardCategoryItemLabelGenerator()
-        );
-
-        renderer.setDefaultItemLabelFont(
-                new Font("Segoe UI", Font.BOLD, 11)
-        );
-
-        // -------- CURRENCY FORMATTING --------
-        if (!showPercentage) {
-            NumberAxis rangeAxis =
-                    (NumberAxis) plot.getRangeAxis();
-
-            NumberFormat currencyFormat =
-                    NumberFormat.getCurrencyInstance();
-            currencyFormat.setCurrency(
-                    CurrencyContext.get().getCurrency()
-            );
-
-            rangeAxis.setNumberFormatOverride(currencyFormat);
-        }
-
-        ChartPanel chartPanel = new ChartPanel(chart);
-        chartPanel.setMouseWheelEnabled(true);
-
-        chartHolder.add(chartPanel, BorderLayout.CENTER);
-        revalidate();
-        repaint();
-    }
-
-    public void clear() {
-        chartHolder.removeAll();
-        repaint();
-    }
-}
+ChartImageUtil.java
 
 
 ---
 
-✅ STEP 2 — Add Toggle Controls in MainFrame
+🔁 REPLACE combineCharts(...) with THIS (VERTICAL)
 
-In createHeader() or near charts add:
-
-JToggleButton orientationToggle =
-        new JToggleButton("Horizontal");
-
-JToggleButton modeToggle =
-        new JToggleButton("Show %");
-
-orientationToggle.addActionListener(e -> {
-    barChartPanel.setHorizontal(
-            orientationToggle.isSelected()
-    );
-    barChartPanel.updateChart(lastAllocations);
-});
-
-modeToggle.addActionListener(e -> {
-    barChartPanel.setShowPercentage(
-            modeToggle.isSelected()
-    );
-    barChartPanel.updateChart(lastAllocations);
-});
-
-Add them near chart section.
-
-
----
-
-✅ STEP 3 — Export BOTH Charts Together
-
-Update ChartImageUtil
-
-
----
-
-🔥 Add this method
-
-public static BufferedImage combineCharts(
+public static BufferedImage combineChartsVertical(
         BufferedImage pie,
         BufferedImage bar) {
 
-    int width = pie.getWidth() + bar.getWidth();
-    int height = Math.max(pie.getHeight(), bar.getHeight());
+    int width = Math.max(pie.getWidth(), bar.getWidth());
+    int height = pie.getHeight() + bar.getHeight();
 
     BufferedImage combined =
-            new BufferedImage(width, height,
-                    BufferedImage.TYPE_INT_ARGB);
+            new BufferedImage(
+                    width,
+                    height,
+                    BufferedImage.TYPE_INT_ARGB
+            );
 
     Graphics2D g = combined.createGraphics();
+
+    // White background
+    g.setColor(Color.WHITE);
+    g.fillRect(0, 0, width, height);
+
     g.drawImage(pie, 0, 0, null);
-    g.drawImage(bar, pie.getWidth(), 0, null);
+    g.drawImage(bar, 0, pie.getHeight(), null);
+
     g.dispose();
 
     return combined;
@@ -264,22 +72,30 @@ public static BufferedImage combineCharts(
 
 ---
 
-✅ STEP 4 — Include Bar Chart in PDF
+✅ STEP 2 — Increase Chart Sizes for PDF
 
-Modify PdfExporter.java
+Open:
 
-Replace pie-only section with:
+PdfExporter.java
 
+
+---
+
+🔁 Replace your chart export section with THIS
+
+// -------- PIE CHART --------
 BufferedImage pie =
         ChartImageUtil.createGroupPieChart(
-                groupSummaries, 400, 300);
+                groupSummaries, 600, 350);
 
+// -------- BAR CHART --------
 BufferedImage bar =
         ChartImageUtil.createBarChartImage(
-                allocations, 500, 300);
+                allocations, 600, 350);
 
+// -------- COMBINE VERTICALLY --------
 BufferedImage combined =
-        ChartImageUtil.combineCharts(pie, bar);
+        ChartImageUtil.combineChartsVertical(pie, bar);
 
 ByteArrayOutputStream baos =
         new ByteArrayOutputStream();
@@ -289,15 +105,25 @@ ImageIO.write(combined, "png", baos);
 Image chartsImg =
         Image.getInstance(baos.toByteArray());
 
+// Scale nicely to page width
+chartsImg.scaleToFit(500, 700);
 chartsImg.setAlignment(Image.ALIGN_CENTER);
+
 document.add(chartsImg);
 
 
 ---
 
-✅ STEP 5 — Add Bar Image Method
+✅ STEP 3 — Improve Bar Chart Image Generator
 
-Add to ChartImageUtil:
+Open:
+
+ChartImageUtil.java
+
+
+---
+
+🔁 Update createBarChartImage(...) to this
 
 public static BufferedImage createBarChartImage(
         List<FundAllocation> allocations,
@@ -323,39 +149,78 @@ public static BufferedImage createBarChartImage(
                     dataset
             );
 
+    chart.setBackgroundPaint(Color.WHITE);
+
     return chart.createBufferedImage(width, height);
 }
 
 
 ---
 
-🎯 FINAL RESULT
+🎯 FINAL PDF RESULT
 
-You now have:
+Now PDF will look like:
 
-✔ Value labels above bars
-✔ Currency formatted axis
-✔ Gradient bars
-✔ Horizontal / Vertical toggle
-✔ Amount / % toggle
-✔ Combined chart export
-✔ PDF includes BOTH charts
-✔ Enterprise-level dashboard
+----------------------------------
+|        PIE CHART               |
+----------------------------------
+|        BAR CHART               |
+----------------------------------
+
+✔ Proper width
+✔ Labels readable
+✔ No compression
+✔ Looks professional
+✔ Fits A4 perfectly
 
 
 ---
 
-🚀 If you want next:
+🧠 Why This Works
 
-Animated transitions
+Vertical stacking respects aspect ratio
 
-Save dashboard as PNG
+Wider images (600px) prevent text clipping
 
-Export to PowerPoint
+scaleToFit() keeps PDF margins clean
 
-Add trend line comparison
+White background avoids transparency artifacts
 
-Add monthly comparison charts
+
+
+---
+
+🏆 Now Your Export Is Professional Grade
+
+Your PDF now includes:
+
+Clean title
+
+Tables
+
+Pie chart
+
+Bar chart
+
+Correct scaling
+
+Correct orientation
+
+
+
+---
+
+If you want next:
+
+Add page break between tables and charts
+
+Put charts on separate page
+
+Add watermark
+
+Add company logo
+
+Add export timestamp
 
 
 Just tell me 👍
