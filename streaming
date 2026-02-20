@@ -1,226 +1,35 @@
-Perfect 👍 — good observation.
-
-Right now your export combines images side-by-side (horizontal):
-
-[ PIE ][ BAR ]
-
-That makes:
-
-Bar chart compressed
-
-Text unreadable
-
-Axis labels cut
-
-PDF scaling messy
-
-
-We will fix it properly by:
-
-🎯 NEW EXPORT LAYOUT (Professional)
-
-[ PIE CHART ]
-[ BAR CHART ]
-
-✔ Full width
-✔ Proper aspect ratio
-✔ Clean and readable
-✔ Works on A4
-
-
----
-
-✅ STEP 1 — Fix ChartImageUtil Combine Method
-
-Open:
-
-ChartImageUtil.java
-
-
----
-
-🔁 REPLACE combineCharts(...) with THIS (VERTICAL)
-
-public static BufferedImage combineChartsVertical(
-        BufferedImage pie,
-        BufferedImage bar) {
-
-    int width = Math.max(pie.getWidth(), bar.getWidth());
-    int height = pie.getHeight() + bar.getHeight();
-
-    BufferedImage combined =
-            new BufferedImage(
-                    width,
-                    height,
-                    BufferedImage.TYPE_INT_ARGB
-            );
-
-    Graphics2D g = combined.createGraphics();
-
-    // White background
-    g.setColor(Color.WHITE);
-    g.fillRect(0, 0, width, height);
-
-    g.drawImage(pie, 0, 0, null);
-    g.drawImage(bar, 0, pie.getHeight(), null);
-
-    g.dispose();
-
-    return combined;
-}
-
-
----
-
-✅ STEP 2 — Increase Chart Sizes for PDF
-
-Open:
-
-PdfExporter.java
-
-
----
-
-🔁 Replace your chart export section with THIS
-
-// -------- PIE CHART --------
-BufferedImage pie =
-        ChartImageUtil.createGroupPieChart(
-                groupSummaries, 600, 350);
-
-// -------- BAR CHART --------
-BufferedImage bar =
-        ChartImageUtil.createBarChartImage(
-                allocations, 600, 350);
-
-// -------- COMBINE VERTICALLY --------
-BufferedImage combined =
-        ChartImageUtil.combineChartsVertical(pie, bar);
-
-ByteArrayOutputStream baos =
-        new ByteArrayOutputStream();
-
-ImageIO.write(combined, "png", baos);
-
-Image chartsImg =
-        Image.getInstance(baos.toByteArray());
-
-// Scale nicely to page width
-chartsImg.scaleToFit(500, 700);
-chartsImg.setAlignment(Image.ALIGN_CENTER);
-
-document.add(chartsImg);
-
-
----
-
-✅ STEP 3 — Improve Bar Chart Image Generator
-
-Open:
-
-ChartImageUtil.java
-
-
----
-
-🔁 Update createBarChartImage(...) to this
-
-public static BufferedImage createBarChartImage(
-        List<FundAllocation> allocations,
-        int width,
-        int height) {
-
-    DefaultCategoryDataset dataset =
-            new DefaultCategoryDataset();
-
-    for (FundAllocation fa : allocations) {
-        dataset.addValue(
-                fa.getAmount(),
-                "Amount",
-                fa.getCategory()
-        );
-    }
-
-    JFreeChart chart =
-            ChartFactory.createBarChart(
-                    "Category Allocation",
-                    "Category",
-                    "Amount",
-                    dataset
-            );
-
-    chart.setBackgroundPaint(Color.WHITE);
-
-    return chart.createBufferedImage(width, height);
-}
-
-
----
-
-🎯 FINAL PDF RESULT
-
-Now PDF will look like:
-
-----------------------------------
-|        PIE CHART               |
-----------------------------------
-|        BAR CHART               |
-----------------------------------
-
-✔ Proper width
-✔ Labels readable
-✔ No compression
-✔ Looks professional
-✔ Fits A4 perfectly
-
-
----
-
-🧠 Why This Works
-
-Vertical stacking respects aspect ratio
-
-Wider images (600px) prevent text clipping
-
-scaleToFit() keeps PDF margins clean
-
-White background avoids transparency artifacts
-
-
-
----
-
-🏆 Now Your Export Is Professional Grade
-
-Your PDF now includes:
-
-Clean title
-
-Tables
-
-Pie chart
-
-Bar chart
-
-Correct scaling
-
-Correct orientation
-
-
-
----
-
-If you want next:
-
-Add page break between tables and charts
-
-Put charts on separate page
-
-Add watermark
-
-Add company logo
-
-Add export timestamp
-
-
-Just tell me 👍
+1. Purpose  
+The purpose of this document is to provide detailed steps for the users for creation, testing and invocation of BC&OR 
+Plan.  
+2. Prerequisites  
+If the Plan is prepared for the first time, soft copy of the previous year’s approved Plan may be updated in MS Excel 
+or Word format and kept ready as the data can be copied and pasted into the relevant fields of the portal.   
+3. Procedure  
+3.1 User Roles & Rights  
+BC & OR is a workflow-based system where users are pre-assigned a task based on their roles and rights in BC & OR. 
+No role creation is required for branches, CPCs and Learning Centres. However, for LHOs, AOs and RBOs Checker 
+and Controller roles have to be assigned by the Circle Admin as and when required as the heads will be having 
+dual responsibilities as Checker and Controller. The same for Corporate Centre Checker and Controller will be 
+assigned by ORMD Admin. Below is the summary of user roles and rights in the portal.  
+• Maker   
+1. Create BC & OR Plan  
+2. Create BC & OR Testing report  
+3. Create BC & OR Invocation report  
+• Checker  
+1. Approve/Reject BC & OR Plan  
+2. Approve/Reject BC & OR Testing report  
+3  
+3. Approve/Reject BC & OR Invocation report  
+• Alternate branch/office Checker  
+1. Approve/Reject BC & OR Plan  
+•  Controller  
+1. Approve/Reject BC & OR Plan  
+2. Approve/Reject BC & OR Testing report  
+3. Approve/Reject BC & OR Invocation report  
+ BC & OR Circle Admin  
+1. User Management for Circle Users 
+ BC & OR ORMD Admin  
+1. User Management for Corporate Centre Users 
+ BC & OR ORMD Super-Admin  
+1. View/Download MIS reports 
+2. Assigning roles to other Circle Admins and ORMD Admins
