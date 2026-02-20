@@ -1,35 +1,86 @@
-1. Purpose  
-The purpose of this document is to provide detailed steps for the users for creation, testing and invocation of BC&OR 
-Plan.  
-2. Prerequisites  
-If the Plan is prepared for the first time, soft copy of the previous year’s approved Plan may be updated in MS Excel 
-or Word format and kept ready as the data can be copied and pasted into the relevant fields of the portal.   
-3. Procedure  
-3.1 User Roles & Rights  
-BC & OR is a workflow-based system where users are pre-assigned a task based on their roles and rights in BC & OR. 
-No role creation is required for branches, CPCs and Learning Centres. However, for LHOs, AOs and RBOs Checker 
-and Controller roles have to be assigned by the Circle Admin as and when required as the heads will be having 
-dual responsibilities as Checker and Controller. The same for Corporate Centre Checker and Controller will be 
-assigned by ORMD Admin. Below is the summary of user roles and rights in the portal.  
-• Maker   
-1. Create BC & OR Plan  
-2. Create BC & OR Testing report  
-3. Create BC & OR Invocation report  
-• Checker  
-1. Approve/Reject BC & OR Plan  
-2. Approve/Reject BC & OR Testing report  
-3  
-3. Approve/Reject BC & OR Invocation report  
-• Alternate branch/office Checker  
-1. Approve/Reject BC & OR Plan  
-•  Controller  
-1. Approve/Reject BC & OR Plan  
-2. Approve/Reject BC & OR Testing report  
-3. Approve/Reject BC & OR Invocation report  
- BC & OR Circle Admin  
-1. User Management for Circle Users 
- BC & OR ORMD Admin  
-1. User Management for Corporate Centre Users 
- BC & OR ORMD Super-Admin  
-1. View/Download MIS reports 
-2. Assigning roles to other Circle Admins and ORMD Admins
+<mxfile host="app.diagrams.net">
+  <diagram name="BC_OR_UML">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- System Boundary -->
+        <mxCell id="system" value="BC &amp; OR Portal System" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="350" y="50" width="700" height="600" as="geometry"/>
+        </mxCell>
+
+        <!-- Actors -->
+        <mxCell id="maker" value="Maker" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="100" y="100" width="30" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="checker" value="Checker" style="shape=umlActor;" vertex="1" parent="1">
+          <mxGeometry x="100" y="200" width="30" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="altchecker" value="Alternate Checker" style="shape=umlActor;" vertex="1" parent="1">
+          <mxGeometry x="100" y="300" width="30" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="controller" value="Controller" style="shape=umlActor;" vertex="1" parent="1">
+          <mxGeometry x="100" y="400" width="30" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="circleadmin" value="Circle Admin" style="shape=umlActor;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="200" width="30" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ormdadmin" value="ORMD Admin" style="shape=umlActor;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="300" width="30" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="superadmin" value="ORMD Super Admin" style="shape=umlActor;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="400" width="30" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Use Cases -->
+        <mxCell id="uc1" value="Create BC &amp; OR Plan" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="system">
+          <mxGeometry x="200" y="100" width="200" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc2" value="Create Testing Report" style="ellipse;" vertex="1" parent="system">
+          <mxGeometry x="200" y="170" width="200" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc3" value="Create Invocation Report" style="ellipse;" vertex="1" parent="system">
+          <mxGeometry x="200" y="240" width="200" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc4" value="Approve/Reject Plan" style="ellipse;" vertex="1" parent="system">
+          <mxGeometry x="450" y="120" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc5" value="Approve/Reject Testing Report" style="ellipse;" vertex="1" parent="system">
+          <mxGeometry x="450" y="200" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc6" value="Approve/Reject Invocation Report" style="ellipse;" vertex="1" parent="system">
+          <mxGeometry x="450" y="280" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc7" value="Manage Circle Users" style="ellipse;" vertex="1" parent="system">
+          <mxGeometry x="450" y="360" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc8" value="Manage Corporate Users" style="ellipse;" vertex="1" parent="system">
+          <mxGeometry x="450" y="430" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc9" value="View/Download MIS Reports" style="ellipse;" vertex="1" parent="system">
+          <mxGeometry x="450" y="500" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc10" value="Assign Roles to Admins" style="ellipse;" vertex="1" parent="system">
+          <mxGeometry x="450" y="570" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
