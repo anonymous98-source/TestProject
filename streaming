@@ -1,228 +1,225 @@
-Perfect 🔥
-Now we’ll design a next-level, enterprise presentation-ready Mermaid workflow for BCOR Plan Creation.
+Great question 👌 — this is where you make your diagram look corporate-grade instead of default Mermaid styling.
 
-This will include:
+Since you're using Mermaid flowchart, you can improve it using config JSON and theme variables.
 
-✅ Phase-based grouping
-
-✅ Role swimlanes
-
-✅ System validations
-
-✅ Auto-fetch integrations (Branch Master, HRMS)
-
-✅ Business rules validation (MTPD ≤ RTO ≤ MPT)
-
-✅ Mandatory constraints
-
-✅ Submission control logic
-
-
-This is presentation-grade architecture flow, not basic.
+Below are the most important things you can add in config to make your BCOR workflow look professional and presentation-ready.
 
 
 ---
 
-🚀 BCOR Plan Creation – Advanced Activity Workflow (Enterprise Version)
+✅ 1️⃣ Basic Config Structure (JSON)
 
-flowchart TD
+Add this at the top (before the diagram):
 
-%% ========== START ==========
-Start((Maker Login))
-
-%% ========== STEP 1 ==========
-S1[Click +Plan → Create New Plan]
-
-%% ========== STEP 2 ==========
-subgraph Step2["Step 2: Branch Details"]
-    B1[Enter Branch/Office Code]
-    B2[System Auto-fetch from Branch Master]
-    B3[Enter No. of Staff]
-    B4[Enter Key Business Functions<br/>(Min 10 Characters)]
-    B5[Save & Next]
-end
-
-%% ========== STEP 3 ==========
-subgraph Step3["Step 3: Staff Contact Details"]
-    C1[Enter PF ID]
-    C2[System Fetch from HRMS]
-    C3[Enter Residential Address<br/>(Min 20 Characters, No Special Characters)]
-    C4[Save Each Row]
-    C5[Save & Next]
-end
-
-%% ========== STEP 4 ==========
-subgraph Step4["Step 4: Critical Contact Information"]
-
-    subgraph Govt["4.1 Emergency Services (Min 7 Mandatory)"]
-        G1[Fire / Police / Hospital / Electricity / Water]
-        G2[Fill Mandatory Fields (*)]
-    end
-
-    subgraph Bank["4.2 Bank Services (12 Mandatory Rows)"]
-        BK1[LHO / ZO / RO / DR / Network Provider]
-        BK2[Select Designation from Dropdown]
-    end
-
-    subgraph Vendors["4.3 Vendor Details (8 Mandatory Rows)"]
-        V1[Hardware / ATM / Desktop / AC / Plumbing]
-        V2[Enter AMC Start & Expiry Date]
-        V3[System Tracks AMC Expiry → Notification]
-    end
-
-    S4Save[Save & Next]
-end
-
-%% ========== STEP 5 ==========
-subgraph Step5["Step 5: Team Structure"]
-    T1[Enter 5 Team Details]
-    T2[Assign Multiple Members]
-    T3[Save Each Row]
-    T4[Preview Teams]
-    T5[Save & Next]
-end
-
-%% ========== STEP 6 ==========
-subgraph Step6["Step 6: Business Impact Analysis"]
-
-    BA1[Select Key Services (Min 5)]
-    BA2[Define Criticality: High/Medium/Low]
-    BA3[Add Dependencies]
-    BA4[Enter MTPD, RTO, MPT (Numeric Only)]
-    BA5{Validate:<br/>MTPD ≤ RTO ≤ MPT?}
-    BA6[Save & Next]
-
-end
-
-%% ========== STEP 7 ==========
-subgraph Step7["Step 7: Reciprocal Arrangement"]
-    R1[Enter Alternate Branch Code]
-    R2[Auto-fetch Branch Details]
-    R3[Enter Terminals & Reason]
-    R4[Save & Next]
-end
-
-%% ========== STEP 8 ==========
-subgraph Step8["Step 8: Risk & Challenges"]
-
-    CH1[Enter Challenges (Min 5)]
-    CH2[Add Risk Category]
-    CH3[Enter Remarks (Min 20 Characters)]
-    CH4[Save Each Challenge]
-    CH5[Click Validate]
-    CH6{All Mandatory<br/>Valid?}
-    CH7[Submit to Checker]
-
-end
-
-%% FLOW CONNECTIONS
-Start --> S1 --> B1 --> B2 --> B3 --> B4 --> B5
-B5 --> C1
-C1 --> C2 --> C3 --> C4 --> C5
-C5 --> G1
-G2 --> BK1 --> BK2 --> V1 --> V2 --> V3 --> S4Save
-S4Save --> T1 --> T2 --> T3 --> T4 --> T5
-T5 --> BA1 --> BA2 --> BA3 --> BA4 --> BA5
-
-BA5 -- No --> BA4
-BA5 -- Yes --> BA6
-BA6 --> R1 --> R2 --> R3 --> R4
-R4 --> CH1 --> CH2 --> CH3 --> CH4 --> CH5 --> CH6
-
-CH6 -- No --> CH1
-CH6 -- Yes --> CH7
-
-CH7 --> End((Plan Submitted to Checker))
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "primaryColor": "#0B3D91",
+    "primaryTextColor": "#ffffff",
+    "primaryBorderColor": "#062E6F",
+    "lineColor": "#1f2937",
+    "secondaryColor": "#E8F1FF",
+    "tertiaryColor": "#F5F7FA",
+    "fontFamily": "Segoe UI, Arial",
+    "fontSize": "16px"
+  },
+  "flowchart": {
+    "curve": "basis",
+    "nodeSpacing": 60,
+    "rankSpacing": 80,
+    "padding": 20,
+    "useMaxWidth": true
+  }
+}}%%
 
 
 ---
 
-🎯 Why This Is “Next Level”
+🎨 2️⃣ What Each Config Option Improves
 
-This diagram now includes:
+🔵 Theme Customization
 
-✅ External Integrations
+Property	Why Use It
 
-Branch Master
-
-HRMS
-
-AMC Notification Engine
-
-
-✅ Validation Rules Embedded
-
-Character length constraints
-
-Mandatory row requirements
-
-Numeric-only enforcement
-
-Business logic validation (MTPD ≤ RTO ≤ MPT)
-
-
-✅ Loop Handling
-
-Validation failure loops back
-
-Save-each-row enforcement
-
-Mandatory completion check
-
-
-✅ Enterprise Compliance Features
-
-Audit traceable validation step
-
-Controlled submission trigger
-
-System-driven notifications
+"theme": "base"	Allows full customization
+primaryColor	Main node color
+primaryTextColor	Text color
+primaryBorderColor	Border styling
+lineColor	Arrow color
+fontFamily	Professional typography
+fontSize	Better readability
 
 
 
 ---
 
-🎨 How to Present This Professionally
+📐 Layout Improvements
 
-During presentation:
+Inside "flowchart":
 
-Highlight integrations (HRMS, Branch Master)
+Option	Effect
 
-Emphasize validation control
-
-Explain business continuity compliance
-
-Show how system prevents invalid submissions
-
-Mention AMC notification automation as risk control
+"curve": "basis"	Smooth curved arrows
+"nodeSpacing": 60	Space between nodes
+"rankSpacing": 80	Space between rows
+"padding": 20	Internal spacing
+"useMaxWidth": true	Full width responsive
 
 
 
 ---
 
-💎 If You Want EVEN More Advanced
+🏢 3️⃣ Corporate Color Preset (Professional Banking Look)
 
-I can now generate:
+If this is for banking / compliance presentation:
 
-🔷 BPMN 2.0 Version (Enterprise Audit Standard)
+{
+  "theme": "base",
+  "themeVariables": {
+    "primaryColor": "#002147",
+    "primaryTextColor": "#ffffff",
+    "primaryBorderColor": "#00162e",
+    "secondaryColor": "#DCE6F1",
+    "tertiaryColor": "#F2F6FA",
+    "lineColor": "#444444",
+    "fontFamily": "Calibri, Segoe UI",
+    "fontSize": "17px"
+  }
+}
 
-🔷 Microservice Architecture version
+This gives:
 
-🔷 Database ER Diagram for Plan Schema
+Navy enterprise feel
 
-🔷 Complete Architecture Diagram (UI + Service + DB)
+Clean white text
 
-🔷 Corporate-grade PPT content with speaker notes
-
-🔷 Animated Presentation Flow explanation script
+Audit-ready appearance
 
 
-Tell me:
 
-Is this for
-1️⃣ Internal Review
-2️⃣ Audit / Compliance
-3️⃣ Senior Management Presentation
-4️⃣ Technical Architecture Review
+---
 
-I’ll tailor the final version accordingly 🚀
+🚀 4️⃣ Advanced Enhancements (Very Powerful)
+
+You can also add:
+
+{
+  "flowchart": {
+    "htmlLabels": false,
+    "diagramPadding": 20,
+    "wrap": true
+  }
+}
+
+Why?
+
+Option	Benefit
+
+htmlLabels: false	Avoid rendering bugs
+diagramPadding	Cleaner margins
+wrap: true	Text wraps properly
+
+
+
+---
+
+💎 5️⃣ Role-Based Color Styling (Highly Recommended)
+
+Instead of one color for all nodes, you can define custom classes inside your Mermaid:
+
+Example:
+
+classDef maker fill:#0B3D91,color:#fff,stroke:#062E6F;
+classDef system fill:#E8F1FF,color:#000,stroke:#0B3D91;
+classDef validation fill:#FFD966,color:#000,stroke:#B8860B;
+classDef decision fill:#F8CECC,color:#000,stroke:#B85450;
+
+Then apply:
+
+class Start,S1 maker;
+class B2,C2,V3 system;
+class BA5,CH6 decision;
+
+🔥 This makes:
+
+Maker actions → Blue
+
+System auto-fetch → Light Blue
+
+Validation → Yellow
+
+Decision → Red
+
+
+Very executive-presentation friendly.
+
+
+---
+
+🏆 6️⃣ Ultimate Polished Config (Best Version)
+
+Here is a final recommended config block:
+
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "primaryColor": "#0A2F5A",
+    "primaryTextColor": "#ffffff",
+    "primaryBorderColor": "#041C34",
+    "secondaryColor": "#E6EEF8",
+    "tertiaryColor": "#F4F6F9",
+    "lineColor": "#333333",
+    "fontFamily": "Segoe UI, Calibri, Arial",
+    "fontSize": "16px"
+  },
+  "flowchart": {
+    "curve": "basis",
+    "nodeSpacing": 60,
+    "rankSpacing": 90,
+    "padding": 25,
+    "useMaxWidth": true,
+    "wrap": true,
+    "htmlLabels": false
+  }
+}}%%
+
+
+---
+
+🎯 What This Will Improve Visually
+
+✅ Smooth arrows
+✅ Clean spacing
+✅ Professional typography
+✅ Enterprise colors
+✅ Clear visual hierarchy
+✅ Presentation-grade look
+
+
+---
+
+🚀 If You Want EVEN MORE
+
+I can help you:
+
+Add gradient styles
+
+Add clickable nodes (for interactive presentation)
+
+Add hover tooltips
+
+Add animation sequencing
+
+Convert to BPMN-style official audit diagram
+
+Make a fully styled “Management-ready” version
+
+
+Tell me: Are you presenting this in
+• PowerPoint
+• Confluence
+• GitHub
+• Internal Portal
+• Audit Deck
+
+I’ll tailor the config exactly for that platform 👌
