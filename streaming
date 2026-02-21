@@ -1,11 +1,230 @@
-3.5 Create BC & OR Invocation report  
-a. Login by Maker   
-Step 1: Click invocation button. Total disruption or partial disruption can be selected under “disruption type”. Select the start date and start 
-time of disruption as well as end date and end time. Maker needs to record disruptions occurred during the activity under all heads along 
-with impact tolerance category as per categories given under services & BIA head. Impact Tolerance needs to be filled in accordance with 
-the table at the bottom right. All the fields need to be mandatorily filled in order to move to the next stage. Click “Save and Next” to visit 
-next page.  
-21  
-Step 2: Resilience level needs to be selected based on depth of the disruption and its impact on operations. Validate and then click on 
-submit to send to Checker for review.  
-22 
+Excellent 👌
+Now we’ll create a proper UML (not just flowchart) for:
+
+📌 3.5 BC & OR Invocation Report Flow
+
+Since you asked for proper UML, I’ll give you:
+
+1. ✅ UML Activity Diagram (process-focused)
+
+
+2. ✅ UML Sequence Diagram (interaction-focused)
+
+
+3. ✅ Styled, presentation-ready Mermaid code
+
+
+4. ✅ Validation + Mandatory field enforcement
+
+
+5. ✅ Horizontal professional layout
+
+
+
+
+---
+
+1️⃣ UML Activity Diagram – Invocation Report Flow
+
+This represents the process lifecycle.
+
+%%{init: {
+  "theme": "base",
+  "flowchart": {
+    "curve": "basis",
+    "nodeSpacing": 80,
+    "rankSpacing": 120
+  }
+}}%%
+
+flowchart LR
+
+Start((Maker Login))
+End((Invocation Report Submitted))
+
+subgraph Phase1["Step 1: Disruption Details Entry"]
+
+    I1[Click Invocation Button]
+    I2[Select Disruption Type\n(Total / Partial)]
+    I3[Enter Start Date & Time]
+    I4[Enter End Date & Time]
+    I5[Record Disruptions Under All Heads]
+    I6[Select Impact Tolerance Category\n(As per Services & BIA)]
+    I7{All Mandatory Fields Filled?}
+
+end
+
+subgraph Phase2["Step 2: Resilience Assessment"]
+
+    I8[Select Resilience Level\n(Based on Depth & Impact)]
+    I9[Click Validate]
+    I10{Validation Successful?}
+
+end
+
+%% YES/NO Nodes
+YES1((YES))
+NO1((NO))
+YES2((YES))
+NO2((NO))
+
+%% Flow
+Start --> I1 --> I2 --> I3 --> I4 --> I5 --> I6 --> I7
+
+I7 --> YES1
+I7 --> NO1
+
+NO1 --> I2
+YES1 --> I8
+
+I8 --> I9 --> I10
+
+I10 --> YES2
+I10 --> NO2
+
+NO2 --> I8
+YES2 --> End
+
+%% Styling
+classDef phase1 fill:#1565C0,color:#ffffff,stroke:#0D47A1,stroke-width:2px;
+classDef phase2 fill:#EF6C00,color:#ffffff,stroke:#E65100,stroke-width:2px;
+classDef yesStyle fill:#2E7D32,color:#ffffff,stroke:#1B5E20,stroke-width:3px;
+classDef noStyle fill:#C62828,color:#ffffff,stroke:#8E0000,stroke-width:3px;
+
+class I1,I2,I3,I4,I5,I6,I7 phase1;
+class I8,I9,I10 phase2;
+
+class YES1,YES2 yesStyle;
+class NO1,NO2 noStyle;
+
+
+---
+
+🎯 What This UML Shows
+
+🔵 Step 1 – Disruption Capture
+
+Select type (Total / Partial)
+
+Capture start & end timestamps
+
+Record disruption across all heads
+
+Map to Impact Tolerance (linked with BIA)
+
+
+🟠 Step 2 – Resilience Evaluation
+
+Select resilience level
+
+Validate
+
+Submit to Checker
+
+
+🟢 Validation Loops
+
+Missing fields → return
+
+Invalid resilience selection → return
+
+
+
+---
+
+2️⃣ UML Sequence Diagram – Invocation Submission
+
+Now here’s the interaction model.
+
+sequenceDiagram
+    autonumber
+    actor Maker
+    participant System as BC & OR Portal
+    participant DB as Database
+    actor Checker
+
+    Maker->>System: Click Invocation
+    System-->>Maker: Display Invocation Form
+
+    Maker->>System: Enter Disruption Details
+    System->>System: Validate Mandatory Fields
+
+    alt Validation Failed
+        System-->>Maker: Show Error Messages
+    else Validation Success
+        System->>DB: Save Invocation Data
+        DB-->>System: Data Stored
+    end
+
+    Maker->>System: Select Resilience Level
+    Maker->>System: Click Validate & Submit
+
+    System->>System: Final Validation
+
+    alt Final Validation Failed
+        System-->>Maker: Return with Errors
+    else Final Validation Passed
+        System->>DB: Update Status = SUBMITTED
+        System->>Checker: Notify for Review
+        System-->>Maker: Submission Successful
+    end
+
+
+---
+
+🏢 Why This is Proper UML
+
+Diagram Type	Purpose
+
+Activity Diagram	Business process flow
+Sequence Diagram	System interaction
+Validation Loops	Governance control
+Submission Step	Workflow transition
+
+
+
+---
+
+🏆 Presentation Talking Points
+
+When presenting:
+
+Invocation is a real disruption event
+
+Linked to BIA impact tolerance
+
+Mandatory validation before submission
+
+Resilience level measures operational maturity
+
+Routed to Checker for governance review
+
+
+
+---
+
+🚀 Next Level Options
+
+I can now generate:
+
+🔷 Combined Master UML (Plan + Testing + Invocation)
+
+🔷 Full End-to-End Workflow with Approval Layer
+
+🔷 BPMN 2.0 Enterprise Diagram
+
+🔷 Architecture Diagram (UI → Service → DB → Notification Engine)
+
+🔷 RBAC Security UML
+
+🔷 Database ER Diagram for Invocation Entity
+
+
+Tell me your audience:
+
+Technical Review
+Audit / Compliance
+Senior Management
+Client Demo
+
+I’ll tailor the next diagram accordingly 🔥
