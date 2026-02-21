@@ -1,23 +1,25 @@
-3.4 Create BC & OR Testing report:  
-a. Login by Maker  
-Step 1: Click on the “Testing” button. Maker needs to create BC & OR testing report with the details of transactions conducted during the 
-activity at the alternate branch. Click “Save and Next” to visit next page.  
-18  
-19  
-  
-  
-  
-Step 2: Transactions happened during the BCOR Plan needs to be submitted. Multiple entries can be added. Each entry needs to be 
-saved first in order to move to the next transaction. Click “Save and Next” to visit next page.  
- 
-  
-  
-20  
-  
-Step 3: Post testing activity has to be recorded and also details of any issue faced during the activity needs to be entered under relevant 
-heads. Validate the same first and click on Submit to checker button. With this the entire details are submitted to the Checker.  
+Perfect 👌
+Now we’ll design the BC & OR Testing Report Flow in the same professional horizontal, phase-based, styled format — consistent with your Plan Creation diagram.
+
+This will include:
+
+✅ Horizontal layout (LR)
+
+✅ Maker → Validation → Submission
+
+✅ Multi-entry transaction loop
+
+✅ Validation control
+
+✅ Styled YES/NO nodes
+
+✅ Presentation-ready theme config
 
 
+
+---
+
+🚀 BC & OR Testing Report – Full Professional Mermaid Code
 
 %%{init: {
   "theme": "base",
@@ -32,7 +34,7 @@ heads. Validate the same first and click on Submit to checker button. With this 
   "flowchart": {
     "curve": "basis",
     "nodeSpacing": 80,
-    "rankSpacing": 130,
+    "rankSpacing": 120,
     "diagramPadding": 30,
     "useMaxWidth": true,
     "wrap": true,
@@ -43,86 +45,136 @@ heads. Validate the same first and click on Submit to checker button. With this 
 flowchart LR
 
 Start((Maker Login))
-End((Plan Submitted to Checker))
+End((Testing Report Submitted to Checker))
 
 %% ================= PHASE 1 =================
-subgraph Phase1["PHASE 1: Basic Setup"]
-    S1[Create New BCOR Plan]
-    S2[Enter Branch Code]
-    S3[Auto-fetch from Branch Master]
-    S4["Enter Staff Count & Key Business Functions\n(Min 10 Characters)"]
+subgraph Phase1["PHASE 1: Initiate Testing Report"]
+    T1[Click Testing Button]
+    T2["Enter Testing Details\n(Alternate Branch Activity)"]
+    T3[Save & Next]
 end
 
 %% ================= PHASE 2 =================
-subgraph Phase2["PHASE 2: Staff Information"]
-    S5[Enter PF ID]
-    S6[Auto-fetch from HRMS]
-    S7["Enter Residential Address\n(Min 20 Characters)"]
-    S8[Save Each Staff Row]
+subgraph Phase2["PHASE 2: Transaction Recording"]
+    T4["Enter Transaction Details\n(Multiple Entries Allowed)"]
+    T5[Save Each Entry]
+    T6{More Transactions?}
 end
 
 %% ================= PHASE 3 =================
-subgraph Phase3["PHASE 3: Critical Contacts"]
-    S9["Emergency Services\n(Min 7 Mandatory)"]
-    S10["Bank Contacts\n(12 Mandatory Rows)"]
-    S11["Vendor Details\n(8 Mandatory Rows)"]
-    S12[AMC Expiry Tracking & Notification]
-end
-
-%% ================= PHASE 4 =================
-subgraph Phase4["PHASE 4: Operational Planning"]
-    S13["Team Structure\n(Min 5 Teams)"]
-    S14["Business Impact Analysis\n(Min 5 Services)"]
-    S15["Enter MTPD, RTO, MPT\n(Numeric Only)"]
-    S16{MTPD ≤ RTO ≤ MPT ?}
-end
-
-%% ================= PHASE 5 =================
-subgraph Phase5["PHASE 5: Risk & Governance"]
-    S17[Reciprocal Arrangement]
-    S18["Risk & Challenges\n(Min 5 Entries)"]
-    S19[Click Validate]
-    S20{All Mandatory Fields Valid?}
+subgraph Phase3["PHASE 3: Post Testing & Issues"]
+    T7["Record Post Testing Activity"]
+    T8["Enter Issues Faced\n(Under Relevant Heads)"]
+    T9[Click Validate]
+    T10{All Mandatory Fields Valid?}
 end
 
 %% ================= YES / NO NODES =================
-NO1((NO))
 YES1((YES))
-NO2((NO))
+NO1((NO))
 YES2((YES))
+NO2((NO))
 
 %% ================= FLOW =================
-Start --> S1 --> S2 --> S3 --> S4
-S4 --> S5 --> S6 --> S7 --> S8
-S8 --> S9 --> S10 --> S11 --> S12
-S12 --> S13 --> S14 --> S15 --> S16
+Start --> T1 --> T2 --> T3
+T3 --> T4 --> T5 --> T6
 
-S16 --> NO1
-S16 --> YES1
-NO1 --> S15
-YES1 --> S17
+T6 --> YES1
+T6 --> NO1
 
-S17 --> S18 --> S19 --> S20
+YES1 --> T4
+NO1 --> T7
 
-S20 --> NO2
-S20 --> YES2
-NO2 --> S18
+T7 --> T8 --> T9 --> T10
+
+T10 --> YES2
+T10 --> NO2
+
+NO2 --> T8
 YES2 --> End
 
 %% ================= STYLING =================
 classDef phase1 fill:#0B3D91,color:#ffffff,stroke:#062E6F,stroke-width:2px;
 classDef phase2 fill:#1E88E5,color:#ffffff,stroke:#0D47A1,stroke-width:2px;
-classDef phase3 fill:#43A047,color:#ffffff,stroke:#1B5E20,stroke-width:2px;
-classDef phase4 fill:#FB8C00,color:#ffffff,stroke:#E65100,stroke-width:2px;
-classDef phase5 fill:#E53935,color:#ffffff,stroke:#B71C1C,stroke-width:2px;
+classDef phase3 fill:#E65100,color:#ffffff,stroke:#BF360C,stroke-width:2px;
 classDef yesStyle fill:#2E7D32,color:#ffffff,stroke:#1B5E20,stroke-width:3px;
 classDef noStyle fill:#C62828,color:#ffffff,stroke:#8E0000,stroke-width:3px;
 
-class S1,S2,S3,S4 phase1;
-class S5,S6,S7,S8 phase2;
-class S9,S10,S11,S12 phase3;
-class S13,S14,S15 phase4;
-class S17,S18,S19 phase5;
+class T1,T2,T3 phase1;
+class T4,T5,T6 phase2;
+class T7,T8,T9 phase3;
 
 class YES1,YES2 yesStyle;
 class NO1,NO2 noStyle;
+
+
+---
+
+🎯 What This Represents Clearly
+
+🔵 Phase 1 – Report Initiation
+
+Maker clicks Testing
+
+Enters alternate branch activity
+
+Saves and proceeds
+
+
+🔵 Phase 2 – Transaction Capture
+
+Multiple transaction entries allowed
+
+Each must be saved individually
+
+Loop continues until no more entries
+
+
+🔵 Phase 3 – Post Testing & Issues
+
+Record testing outcome
+
+Capture issues under relevant heads
+
+Validate before submission
+
+
+🟢 Green YES → Proceed
+
+🔴 Red NO → Loop Back
+
+
+---
+
+🏆 Presentation Benefits
+
+Clean horizontal flow
+
+Clear multi-entry loop
+
+Visible validation enforcement
+
+Governance-ready structure
+
+Consistent with Plan Creation diagram
+
+
+
+---
+
+If you want next step:
+
+I can now create:
+
+🔁 Combined Master Workflow (Plan + Testing + Invocation in one diagram)
+
+🏢 Swimlane version (Maker / System / Checker separation)
+
+📊 BPMN enterprise standard version
+
+🔐 Approval workflow (Maker → Checker → Controller)
+
+📄 Executive summary simplified slide version
+
+
+Tell me your next section: Invocation Flow? Combined Flow? Approval Flow? 🚀
