@@ -16,3 +16,14 @@ saved first in order to move to the next transaction. Click “Save and Next” 
   
 Step 3: Post testing activity has to be recorded and also details of any issue faced during the activity needs to be entered under relevant 
 heads. Validate the same first and click on Submit to checker button. With this the entire details are submitted to the Checker.  
+
+
+
+NO1((NO))
+YES1((YES))
+
+classDef yesStyle fill:#2E7D32,color:#ffffff,stroke:#1B5E20,stroke-width:2px;
+classDef noStyle fill:#E53935,color:#ffffff,stroke:#B71C1C,stroke-width:2px;
+
+class YES1 yesStyle;
+class NO1 noStyle;
