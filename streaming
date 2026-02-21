@@ -1,375 +1,66 @@
-Excellent 👌 Let’s make this presentation-ready, professional, and visually structured — not basic.
-
-Below you’ll get:
-
-1. 🎯 Enhanced Sequence Diagram (with autonumber + clear approval stages)
-
-
-2. 🏊 Swimlane Activity Diagram (role-based lanes)
-
-
-3. 🧩 Improved Class Diagram (with relationships, enums, composition)
-
-
-4. 📊 Ready-to-use Presentation Slide Structure
-
-
-5. 🎨 Styling improvements for Mermaid
-
-
-
-
----
-
-1️⃣ Professional Sequence Diagram (Plan Approval Flow)
-
-sequenceDiagram
-    autonumber
-    actor Maker
-    actor Checker
-    actor Controller
-    participant System as BC & OR Workflow Engine
-    participant DB as Database
-
-    Maker->>System: Create Plan (Draft)
-    System->>DB: Save Plan
-    DB-->>System: Plan Stored
-    System-->>Maker: Draft Saved
-
-    Maker->>System: Submit Plan
-    System->>DB: Update Status = SUBMITTED
-    System->>Checker: Notification Triggered
-
-    Checker->>System: Review Plan
-
-    alt Rejected by Checker
-        System->>DB: Update Status = REJECTED
-        System-->>Maker: Return with Remarks
-    else Approved by Checker
-        System->>DB: Update Status = CHECKER_APPROVED
-        System->>Controller: Forward for Final Approval
-    end
-
-    Controller->>System: Final Review
-
-    alt Rejected by Controller
-        System->>DB: Update Status = REJECTED
-        System-->>Maker: Return with Remarks
-    else Approved by Controller
-        System->>DB: Update Status = APPROVED
-        System-->>Maker: Plan Fully Approved
-    end
-
-✅ Improvements:
-
-Autonumbered steps
-
-Database interaction shown
-
-Clear status transitions
-
-Enterprise-level clarity
-
-
-
----
-
-2️⃣ Swimlane Activity Diagram (End-to-End Workflow)
-
-This version separates responsibilities by role.
-
-flowchart LR
-
-subgraph Maker
-    M1[Create Plan]
-    M2[Submit Plan]
-    M3[Modify Plan]
-end
-
-subgraph Checker
-    C1[Review Plan]
-    C2{Approve?}
-end
-
-subgraph Controller
-    CT1[Final Review]
-    CT2{Approve?}
-end
-
-subgraph System
-    S1[Update Status]
-    S2[Send Notification]
-end
-
-Start((Start)) --> M1
-M1 --> M2
-M2 --> S1
-S1 --> S2
-S2 --> C1
-
-C1 --> C2
-C2 -- Reject --> S1
-S1 --> M3
-M3 --> M2
-
-C2 -- Approve --> S1
-S1 --> CT1
-CT1 --> CT2
-
-CT2 -- Reject --> S1
-CT2 -- Approve --> End((Plan Approved))
-
-✅ Why this is better:
-
-Clear role segregation
-
-Workflow engine shown
-
-Loop handling included
-
-Presentation-friendly
-
-
-
----
-
-3️⃣ Enhanced Class Diagram (Enterprise Structured)
-
-classDiagram
-
-class User {
-    +Long userId
-    +String name
-    +Role role
-    +login()
-    +logout()
-}
-
-class Plan {
-    +Long planId
-    +String title
-    +PlanStatus status
-    +Date createdDate
-    +submit()
-    +update()
-}
-
-class TestingReport {
-    +Long reportId
-    +ReportStatus status
-}
-
-class InvocationReport {
-    +Long reportId
-    +ReportStatus status
-}
-
-class WorkflowEngine {
-    +submitPlan()
-    +approvePlan()
-    +rejectPlan()
-    +notifyUser()
-}
-
-class Role {
-    <<enumeration>>
-    MAKER
-    CHECKER
-    CONTROLLER
-    ADMIN
-    SUPER_ADMIN
-}
-
-class PlanStatus {
-    <<enumeration>>
-    DRAFT
-    SUBMITTED
-    CHECKER_APPROVED
-    APPROVED
-    REJECTED
-}
-
-User --> Role
-User "1" --> "*" Plan : creates
-Plan --> WorkflowEngine
-Plan --> TestingReport
-Plan --> InvocationReport
-
-✅ Improvements:
-
-Enum types
-
-Cardinality
-
-Workflow engine separation
-
-Clean OOP structure
-
-
-
----
-
-4️⃣ 📊 Presentation Structure (Slide-by-Slide)
-
-You can directly use this in PPT:
-
-
----
-
-Slide 1 – Title
-
-BC & OR Portal System
-Workflow & Architecture Overview
-
-
----
-
-Slide 2 – Problem Statement
-
-Need structured BC & OR Plan approval
-
-Role-based workflow
-
-Audit compliance
-
-MIS reporting
-
-
-
----
-
-Slide 3 – User Roles
-
-Maker
-
-Checker
-
-Controller
-
-Circle Admin
-
-ORMD Admin
-
-Super Admin
-
-
-(Insert Use Case Diagram)
-
-
----
-
-Slide 4 – Plan Approval Workflow
-
-(Insert Enhanced Sequence Diagram)
-
-Key Points:
-
-Multi-level approval
-
-Status-driven engine
-
-Notification-based routing
-
-
-
----
-
-Slide 5 – End-to-End Workflow
-
-(Insert Swimlane Activity Diagram)
-
-Explain:
-
-Role segregation
-
-Rejection loops
-
-Escalation model
-
-
-
----
-
-Slide 6 – System Architecture (Logical View)
-
-(Insert Class Diagram)
-
-Explain:
-
-User hierarchy
-
-Plan lifecycle
-
-Workflow Engine abstraction
-
-
-
----
-
-Slide 7 – Status Lifecycle
-
-DRAFT
-  ↓
-SUBMITTED
-  ↓
-CHECKER_APPROVED
-  ↓
-APPROVED
-  ↘ REJECTED (Back to Maker)
-
-
----
-
-Slide 8 – Governance & Controls
-
-Dual control approval
-
-Role-based access
-
-Audit trail capability
-
-MIS reporting
-
-
-
----
-
-5️⃣ Make It More Interactive (If You Present Live)
-
-During presentation:
-
-Animate status changes
-
-Show rejection loop visually
-
-Highlight role transitions
-
-Add color coding:
-
-
-Green → Approved
-Red → Rejected
-Blue → Submitted
-Gray → Draft
-
-
----
-
-If you want next level 🔥
-
-I can now generate:
-
-🎨 Architecture Diagram (3-Tier / Microservices Version)
-
-🗄 ER Diagram with database schema
-
-🏢 Enterprise Architecture View
-
-🔐 RBAC Security Model Diagram
-
-📄 Complete PPT content text ready for corporate presentation
-
-📦 Export-ready Mermaid-to-PDF structured doc
-
-
-Tell me: Is this for Internal Presentation, Audit, or Client Demo?
+3.3 Steps for creating new BCOR Plan  
+ 
+ 
+Step 1: Click on “+Plan” on the top menu. Then click on create new plan.  
+ 
+  
+ 
+  
+a. Login by Maker – Create BC OR plan 
+Step 2: Maker needs to input branch/office code. Rest of the details regarding branch/office and controller will be auto fetched by the 
+system from Branch Master. Any errors should be rectified in Branch Master. No. of staff and Key Business Functions (Min 10 Characters) 
+to be updated by the Maker. Click “Save and Next” to visit next page.  
+8  
+Step 3: On next page staff contact details need to be recorded. Maker needs to enter only PF ID of their staff members and click on the 
+search button (  ) and remaining details will be auto-fetched from HRMS except Address which needs to be manually entered. The 
+residential address needs to be updated by the Maker (Min 20 characters). Special characters are not permitted in the address field. 
+Maker needs to save each row by clicking on save button under action tab before proceeding to add next employee. Click “Save and 
+Next” to visit next page.  
+9  
+Step 4.1: It is preferable to keep an excel format with the details updated so that you can copy and paste. Saving is permitted only at 
+the end of the screen. So ensure to finish all details in one go.   
+Enter details of all the important services pertaining to branch like Fire, Police, Hospital, Electricity, Water and Health Department and 
+Disaster team, designation and their contact numbers. All mandatory fields (highlighted by *) need to filled. Minimum 7 services need to 
+be filled in this category. Maker is free to add more rows.  
+10  
+Step 4.2: Further details of all the important contact number of bank services pertaining to branches like Local Head Office, Zonal Office, 
+Regional Office, CDC Belapur, Disaster Recovery and Network Provider along with their name and contact numbers to be provided. 
+Details of all 12 rows need to be filled mandatorily in order to proceed. Please note to select appropriate designations from the drop-down. 
+User can click on the Info tab to get details of the designations applicable to the relevant office. 
+11  
+12  
+Step 4.3 Finally details pertaining to all the vendors related to bank need to be filled such as Hardware supply, Printer maintenance, ATM 
+services, Desktop, Consumables Supply, Air Conditioner, Electricity and Plumbing along with contact numbers. AMC start and expiry date, 
+if available, can be filled by maker. Providing AMC expiry date allows system to track the expiry of AMC and notification will be sent to 
+branch mail ID before expiry. Do not type NA in the fields if any service is not applicable but click the dialogue box. More rows can be 
+added if needed. All 8 fields needs to be filled in order to move to the next page.   
+13  
+Step 5:  Maker needs to input team details and role description as per the fields given. All 5 team details need to be filled. Multiple 
+members can be selected together in each row. Each row needs to be saved one by one. More rows can be added if needed. 
+Same members can be included in more than one team. Preview of all the added team members and description of all teams can be 
+checked by clicking on preview button. Once confirmed, click “Save and Next” to visit next page.  
+14  
+Step 6: Each service may be selected from the menu “Brief description of key services”. Record business impact analysis along with 
+criticality, business dependencies, disruption identification and impact tolerance. Minimum of 5 business services needs to be added in 
+order to move to the next page. Under each key service, more dependencies can be added by clicking “Add Dependency”. Details of 
+criticality needs to be filled as High, Medium and Low. Maximum tolerable period, recovery period and maximum permissible TAT needs 
+to be input. Only numerical values can be entered. Please note: Maximum Tolerable Period of Disruption (MTPD) should not be 
+more than Recovery Time Objective (RTO) and RTO should not be more than Maximum Permissible TAT (MPT). All fields need to 
+be filled in order to proceed forward. Service name can be entered only once. In case any service is not available in the dropdown list, 
+Maker can select other requirements from drop down and type the required service name. Click “Save and Next” to visit next page.  
+15  
+Step 7: Details of reciprocal arrangement identified for the branch/office to be entered. Alternate branch code needs to be filled and 
+remaining details will be auto-fetched. No. of terminals available and reason for selecting alternate branch needs to be filled by the 
+Maker. Click “Save and Next” to visit next page.  
+16  
+17  
+  
+Step 8: Mark the relevant challenges along with risk category and remarks. Save each challenge first and fill the next row. Minimum of 20 
+characters need to be filled in remarks in order to save. Minimum 5 challenges need to be filled. More challenges can be added. Once 
+all the challenges are saved, click on validate button. Once validated, Submit button will be visible for submission to checker. With this, 
+the entire details will be submitted to the checker.  
+ 
+  
+  
+  
+ 
