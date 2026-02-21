@@ -1,164 +1,27 @@
-Great question 👌 — this is where you make your diagram look corporate-grade instead of default Mermaid styling.
+Perfect 👌
+Below is the full horizontal, phase-based, presentation-ready Mermaid code with:
 
-Since you're using Mermaid flowchart, you can improve it using config JSON and theme variables.
+✅ Horizontal layout (LR)
 
-Below are the most important things you can add in config to make your BCOR workflow look professional and presentation-ready.
+✅ Enterprise config
+
+✅ Phase grouping
+
+✅ Color coding per phase
+
+✅ Validation loops
+
+✅ Clean spacing for presentation
+
+✅ No syntax issues
 
 
----
-
-✅ 1️⃣ Basic Config Structure (JSON)
-
-Add this at the top (before the diagram):
-
-%%{init: {
-  "theme": "base",
-  "themeVariables": {
-    "primaryColor": "#0B3D91",
-    "primaryTextColor": "#ffffff",
-    "primaryBorderColor": "#062E6F",
-    "lineColor": "#1f2937",
-    "secondaryColor": "#E8F1FF",
-    "tertiaryColor": "#F5F7FA",
-    "fontFamily": "Segoe UI, Arial",
-    "fontSize": "16px"
-  },
-  "flowchart": {
-    "curve": "basis",
-    "nodeSpacing": 60,
-    "rankSpacing": 80,
-    "padding": 20,
-    "useMaxWidth": true
-  }
-}}%%
+You can paste this directly into Draw.io / Mermaid Live Editor / Confluence / GitHub.
 
 
 ---
 
-🎨 2️⃣ What Each Config Option Improves
-
-🔵 Theme Customization
-
-Property	Why Use It
-
-"theme": "base"	Allows full customization
-primaryColor	Main node color
-primaryTextColor	Text color
-primaryBorderColor	Border styling
-lineColor	Arrow color
-fontFamily	Professional typography
-fontSize	Better readability
-
-
-
----
-
-📐 Layout Improvements
-
-Inside "flowchart":
-
-Option	Effect
-
-"curve": "basis"	Smooth curved arrows
-"nodeSpacing": 60	Space between nodes
-"rankSpacing": 80	Space between rows
-"padding": 20	Internal spacing
-"useMaxWidth": true	Full width responsive
-
-
-
----
-
-🏢 3️⃣ Corporate Color Preset (Professional Banking Look)
-
-If this is for banking / compliance presentation:
-
-{
-  "theme": "base",
-  "themeVariables": {
-    "primaryColor": "#002147",
-    "primaryTextColor": "#ffffff",
-    "primaryBorderColor": "#00162e",
-    "secondaryColor": "#DCE6F1",
-    "tertiaryColor": "#F2F6FA",
-    "lineColor": "#444444",
-    "fontFamily": "Calibri, Segoe UI",
-    "fontSize": "17px"
-  }
-}
-
-This gives:
-
-Navy enterprise feel
-
-Clean white text
-
-Audit-ready appearance
-
-
-
----
-
-🚀 4️⃣ Advanced Enhancements (Very Powerful)
-
-You can also add:
-
-{
-  "flowchart": {
-    "htmlLabels": false,
-    "diagramPadding": 20,
-    "wrap": true
-  }
-}
-
-Why?
-
-Option	Benefit
-
-htmlLabels: false	Avoid rendering bugs
-diagramPadding	Cleaner margins
-wrap: true	Text wraps properly
-
-
-
----
-
-💎 5️⃣ Role-Based Color Styling (Highly Recommended)
-
-Instead of one color for all nodes, you can define custom classes inside your Mermaid:
-
-Example:
-
-classDef maker fill:#0B3D91,color:#fff,stroke:#062E6F;
-classDef system fill:#E8F1FF,color:#000,stroke:#0B3D91;
-classDef validation fill:#FFD966,color:#000,stroke:#B8860B;
-classDef decision fill:#F8CECC,color:#000,stroke:#B85450;
-
-Then apply:
-
-class Start,S1 maker;
-class B2,C2,V3 system;
-class BA5,CH6 decision;
-
-🔥 This makes:
-
-Maker actions → Blue
-
-System auto-fetch → Light Blue
-
-Validation → Yellow
-
-Decision → Red
-
-
-Very executive-presentation friendly.
-
-
----
-
-🏆 6️⃣ Ultimate Polished Config (Best Version)
-
-Here is a final recommended config block:
+🚀 Full Professional Horizontal BCOR Plan Creation Diagram
 
 %%{init: {
   "theme": "base",
@@ -166,60 +29,178 @@ Here is a final recommended config block:
     "primaryColor": "#0A2F5A",
     "primaryTextColor": "#ffffff",
     "primaryBorderColor": "#041C34",
-    "secondaryColor": "#E6EEF8",
-    "tertiaryColor": "#F4F6F9",
     "lineColor": "#333333",
     "fontFamily": "Segoe UI, Calibri, Arial",
     "fontSize": "16px"
   },
   "flowchart": {
     "curve": "basis",
-    "nodeSpacing": 60,
-    "rankSpacing": 90,
-    "padding": 25,
+    "nodeSpacing": 80,
+    "rankSpacing": 130,
+    "diagramPadding": 30,
     "useMaxWidth": true,
     "wrap": true,
     "htmlLabels": false
   }
 }}%%
 
+flowchart LR
+
+%% ================= START =================
+Start((Maker Login))
+End((Plan Submitted to Checker))
+
+%% ================= PHASE 1 =================
+subgraph Phase1["PHASE 1: Basic Setup"]
+    S1[Create New BCOR Plan]
+    S2[Enter Branch Code]
+    S3[System Auto-fetch from Branch Master]
+    S4["Enter Staff Count & Key Business Functions\n(Min 10 Characters)"]
+end
+
+%% ================= PHASE 2 =================
+subgraph Phase2["PHASE 2: Staff Information"]
+    S5[Enter PF ID]
+    S6[Auto-fetch from HRMS]
+    S7["Enter Residential Address\n(Min 20 Characters, No Special Characters)"]
+    S8[Save Each Staff Row]
+end
+
+%% ================= PHASE 3 =================
+subgraph Phase3["PHASE 3: Critical Contacts"]
+    S9["Emergency Services\n(Min 7 Mandatory)"]
+    S10["Bank Contacts\n(12 Mandatory Rows)"]
+    S11["Vendor Details\n(8 Mandatory Rows)"]
+    S12[AMC Expiry Tracking & Notification]
+end
+
+%% ================= PHASE 4 =================
+subgraph Phase4["PHASE 4: Operational Planning"]
+    S13["Team Structure\n(Min 5 Teams)"]
+    S14["Business Impact Analysis\n(Min 5 Services)"]
+    S15["Enter MTPD, RTO, MPT\n(Numeric Only)"]
+    S16{"Validate:\nMTPD ≤ RTO ≤ MPT?"}
+end
+
+%% ================= PHASE 5 =================
+subgraph Phase5["PHASE 5: Risk & Governance"]
+    S17[Reciprocal Arrangement]
+    S18["Risk & Challenges\n(Min 5 Entries)"]
+    S19[Click Validate]
+    S20{"All Mandatory Fields Valid?"}
+end
+
+%% ================= FLOW =================
+Start --> S1 --> S2 --> S3 --> S4
+S4 --> S5 --> S6 --> S7 --> S8
+S8 --> S9 --> S10 --> S11 --> S12
+S12 --> S13 --> S14 --> S15 --> S16
+
+S16 -- No --> S15
+S16 -- Yes --> S17
+
+S17 --> S18 --> S19 --> S20
+S20 -- No --> S18
+S20 -- Yes --> End
+
+%% ================= STYLING =================
+classDef phase1 fill:#0B3D91,color:#ffffff,stroke:#062E6F,stroke-width:2px;
+classDef phase2 fill:#1E88E5,color:#ffffff,stroke:#0D47A1,stroke-width:2px;
+classDef phase3 fill:#43A047,color:#ffffff,stroke:#1B5E20,stroke-width:2px;
+classDef phase4 fill:#FB8C00,color:#ffffff,stroke:#E65100,stroke-width:2px;
+classDef phase5 fill:#E53935,color:#ffffff,stroke:#B71C1C,stroke-width:2px;
+classDef decision fill:#FDD835,color:#000000,stroke:#F57F17,stroke-width:2px;
+
+class S1,S2,S3,S4 phase1;
+class S5,S6,S7,S8 phase2;
+class S9,S10,S11,S12 phase3;
+class S13,S14,S15 phase4;
+class S17,S18,S19 phase5;
+class S16,S20 decision;
+
 
 ---
 
-🎯 What This Will Improve Visually
+🎯 What This Gives You
 
-✅ Smooth arrows
-✅ Clean spacing
-✅ Professional typography
-✅ Enterprise colors
-✅ Clear visual hierarchy
-✅ Presentation-grade look
+🟦 Fully Horizontal
+
+No long vertical scrolling.
+
+🟦 Phase-Based Structure
+
+Clear segmentation:
+
+1. Basic Setup
+
+
+2. Staff Info
+
+
+3. Critical Contacts
+
+
+4. Operational Planning
+
+
+5. Risk & Governance
+
+
+
+🟦 Color-Coded Layers
+
+Blue → Setup
+
+Light Blue → Staff
+
+Green → Contacts
+
+Orange → Operational
+
+Red → Risk
+
+Yellow → Validation
+
+
+🟦 Clean Validation Loops
+
+BIA rule enforcement
+
+Mandatory field enforcement
+
 
 
 ---
 
-🚀 If You Want EVEN MORE
+🏆 Presentation Impact
 
-I can help you:
+This now looks:
 
-Add gradient styles
+Enterprise-grade
 
-Add clickable nodes (for interactive presentation)
+Audit-ready
 
-Add hover tooltips
+Governance-structured
 
-Add animation sequencing
+Senior management friendly
 
-Convert to BPMN-style official audit diagram
-
-Make a fully styled “Management-ready” version
+Not like a default Mermaid diagram
 
 
-Tell me: Are you presenting this in
-• PowerPoint
-• Confluence
-• GitHub
-• Internal Portal
-• Audit Deck
 
-I’ll tailor the config exactly for that platform 👌
+---
+
+If you want even more advanced:
+
+🔷 BPMN 2.0 formal process diagram
+
+🔷 Microservice architecture overlay
+
+🔷 UI → Service → DB layered architecture
+
+🔷 Executive simplified version (1-slide view)
+
+🔷 Animated version for live demo
+
+
+Tell me your audience: Technical / Audit / Management / Client Demo 🚀
