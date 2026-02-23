@@ -85,4 +85,123 @@ Controller can view all the details and provide approval if the invocation repor
 report may be rejected by the controller. Once rejected, it will be shown as draft in the Maker tab.  
 33  
 34  
+
+
+
+
+
+You're right 👍 — the BC&OR System → Checker linkage is missing after the Maker submits the plan.
+
+Currently:
+
+M2 --> S1
+
+But there is no flow from System to Checker (C1).
+
+
+---
+
+✅ Corrected Flow (With System → Checker Link Added)
+
+Add this line:
+
+S1 --> C1
+
+
+---
+
+🔧 Updated Mermaid Code (Fixed Version)
+
+flowchart LR
+
+subgraph Maker
+    M1[Create Plan]
+    M2[Submit Plan]
+    M3[Modify Plan]
+end
+
+subgraph Checker
+    C1[Review Plan]
+    C2{Approve?}
+end
+
+subgraph Controller
+    CT1[Final Review]
+    CT2{Approve?}
+end
+
+subgraph BC&OR System
+    S1[Update Status]
+end
+
+
+%% ============Approve/ Reject ================
+Reject1((Reject))
+Approve1((Approve))
+Reject2((Reject))
+Approve2((Approve))
+
+%% ================= FLOW =================
+
+Start((Start)) --> M1
+M1 --> M2
+M2 --> S1
+S1 --> C1   %% ✅ Added linkage from System to Checker
+
+C1 --> C2
+C2 --> Reject1 --> S1
+S1 --> M3
+M3 --> M2
+
+C2 --> Approve1 --> S1
+S1 --> CT1
+CT1 --> CT2
+
+CT2 --> Reject2 --> S1
+CT2 --> Approve2 --> End((Plan Approved))
+
+
+%% ================= STYLING =================
+
+classDef approveStyle fill:#2E7D32,color:#ffffff,stroke:#1B5E20,stroke-width:3px;
+classDef rejectStyle fill:#C62828,color:#ffffff,stroke:#8E0000,stroke-width:3px;
+
+class Approve1,Approve2 approveStyle;
+class Reject1,Reject2 rejectStyle;
+
+
+---
+
+🎯 What This Fix Achieves
+
+Now the logical flow becomes:
+
+1. Maker submits plan
+
+
+2. System updates status
+
+
+3. System routes to Checker
+
+
+4. Approval/Rejection cycle continues properly
+
+
+
+
+---
+
+If you want, I can also:
+
+🔁 Optimize it to avoid repeated S1 calls
+
+🎨 Improve layout alignment
+
+🧠 Convert this into a proper UML Activity Diagram format for documentation
+
+📄 Prepare this for your BC&OR report documentation
+
+
+Let me know 👍
   
