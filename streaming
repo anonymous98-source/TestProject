@@ -1,59 +1,88 @@
-
-flowchart LR
-
-subgraph Maker
-    M1[Create Plan]
-    M2[Submit Plan]
-    M3[Modify Plan]
-end
-
-subgraph Checker
-    C1[Review Plan]
-    C2{Approve?}
-end
-
-subgraph Controller
-    CT1[Final Review]
-    CT2{Approve?}
-end
-
-subgraph BC&OR System
-    S1[Update Status]
-end
-
-
-
-
-%% ============Approve/ Reject ================
-Reject1((Reject))
-Approve1((Approve))
-Reject2((Reject))
-Approve2((Approve))
-
-%% ================= FLOW =================
-
-Start((Start)) --> M1
-M1 --> M2
-M2 --> S1
-
-
-C1 --> C2
-C2 --> Reject1 --> S1
-S1 --> M3
-M3 --> M2
-
-C2 --> Approve1 --> S1
-S1 --> CT1
-CT1 --> CT2
-
-CT2 --> Reject2 --> S1
-CT2 --> Approve2 --> End((Plan Approved))
-
-
-%% ================= STYLING =================
-
-classDef approveStyle fill:#2E7D32,color:#ffffff,stroke:#1B5E20,stroke-width:3px;
-classDef rejectStyle fill:#C62828,color:#ffffff,stroke:#8E0000,stroke-width:3px;
-
-class Approve1,Approve2 approveStyle;
-class Reject1,Reject2 rejectStyle;
+3.6 Login by Checker:  
+a. Approve/Reject BC & OR plan  
+Step 1: Click on “+Plan” and then “Pending as Branch Checker”. Checker can view all the details and provide approval if the Plan is in 
+order. In case of any discrepancies the plan may be rejected by the Checker. All 7 parts need to be verified before approving or rejecting.   
+23  
+Step 2: After verifying, the checker needs to approve or reject the plan. Rejecting the plan by Checker will put the plan on the tray of 
+Maker. The checker can put comments stating the reason for rejecting the proposal. Approving the plan leads to submission of the plan 
+to Alternate Branch/Office Checker. Once rejected, it will be shown as draft in the Maker tab.  
+24  
+25  
+  
+3.7 Login by Checker:  
+  
+a. Approve/Reject BC & OR Testing report  
+  
+Step 1: Click on “Testing” and then “Pending with Checker”. Checker can view all the details and provide approval if the testing is in order. 
+Save and Next to visit next page.  
+ 
+  
+  
+Step 2: After verifying all parts, the Checker needs to approve or reject the testing report. Rejecting the testing report by Checker will put 
+it on the tray of Maker. The Checker can put comments stating the reason for rejecting.  Approving the testing report leads to submission 
+of the same to the Controller.  Once rejected, it will be shown as draft in the Maker tab.  
+26  
+3.8 Login by Checker  
+a. Approve/Reject BC & OR Invocation report  
+Step 1: Click on “Invocation” and then “Pending with Checker”. Checker can view all the details and provide approval if the Invocation 
+Report and Resilience Matrix are in order. In case of any discrepancies, the same may be rejected by the Checker. Rejecting the report 
+by Checker will put it in the tray of Maker. The Checker can put comments stating the reason for rejecting the report.  Approving the 
+report leads to submission of Invocation Report to the Controller. Once rejected, it will be shown as draft in the Maker tab.  
+27  
+28  
+  
+ 
+  
+ 
+  
+  
+ 
+ 
+ 
+ 
+ 
+ 
+29  
+  
+3.9 Login by Alternate Branch/Office Checker:  
+  
+a. Approve/Reject BC & OR plan  
+  
+Step 1: Click on “+Plan” and then “Pending as Alternate Branch Checker” and provide approval if the Plan is in order. In case of any 
+discrepancies, the plan may be rejected by the Checker. All 7 parts need to be verified.   
+ 
+  
+  
+  
+  
+  
+  
+  
+Step 2: After verifying all 7 parts, the Checker needs to approve or reject the plan. Rejecting the plan by Alternate Branch/Office Checker 
+will put the plan in the tray of Maker. The Checker can put comments stating the reason for rejecting the plan.  Accepting the plan leads 
+to submission of plan to the Controller. Once rejected, it will be shown as draft in the Maker tab.  
+30  
+31  
+  
+3.10 Login by Controller  
+  
+a. Approve/Reject BC & OR plan  
+Controller can view all the details and provide approval if the Plan is in order. In case of any discrepancies the plan may also be rejected 
+by the Controller. All 7 parts need to be verified before approving/rejecting the plan. Once rejected, it will be shown as draft in the Maker 
+tab. 
+ 
+ 
+  
+ 
+  
+  
+b. Approve/Reject BC & OR Testing report  
+Controller can view all the details and provide approval if the testing report is in order.  
+In case of any discrepancies, the report may be rejected by the controller. Once rejected, it will be shown as draft in the Maker tab. 
+32  
+c. Approve/Reject BC & OR Invocation report  
+Controller can view all the details and provide approval if the invocation report is in order. In case of any discrepancies, the invocation 
+report may be rejected by the controller. Once rejected, it will be shown as draft in the Maker tab.  
+33  
+34  
+  
