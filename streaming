@@ -1,207 +1,209 @@
-3.6 Login by Checker:  
-a. Approve/Reject BC & OR plan  
-Step 1: Click on “+Plan” and then “Pending as Branch Checker”. Checker can view all the details and provide approval if the Plan is in 
-order. In case of any discrepancies the plan may be rejected by the Checker. All 7 parts need to be verified before approving or rejecting.   
-23  
-Step 2: After verifying, the checker needs to approve or reject the plan. Rejecting the plan by Checker will put the plan on the tray of 
-Maker. The checker can put comments stating the reason for rejecting the proposal. Approving the plan leads to submission of the plan 
-to Alternate Branch/Office Checker. Once rejected, it will be shown as draft in the Maker tab.  
-24  
-25  
-  
-3.7 Login by Checker:  
-  
-a. Approve/Reject BC & OR Testing report  
-  
-Step 1: Click on “Testing” and then “Pending with Checker”. Checker can view all the details and provide approval if the testing is in order. 
-Save and Next to visit next page.  
- 
-  
-  
-Step 2: After verifying all parts, the Checker needs to approve or reject the testing report. Rejecting the testing report by Checker will put 
-it on the tray of Maker. The Checker can put comments stating the reason for rejecting.  Approving the testing report leads to submission 
-of the same to the Controller.  Once rejected, it will be shown as draft in the Maker tab.  
-26  
-3.8 Login by Checker  
-a. Approve/Reject BC & OR Invocation report  
-Step 1: Click on “Invocation” and then “Pending with Checker”. Checker can view all the details and provide approval if the Invocation 
-Report and Resilience Matrix are in order. In case of any discrepancies, the same may be rejected by the Checker. Rejecting the report 
-by Checker will put it in the tray of Maker. The Checker can put comments stating the reason for rejecting the report.  Approving the 
-report leads to submission of Invocation Report to the Controller. Once rejected, it will be shown as draft in the Maker tab.  
-27  
-28  
-  
- 
-  
- 
-  
-  
- 
- 
- 
- 
- 
- 
-29  
-  
-3.9 Login by Alternate Branch/Office Checker:  
-  
-a. Approve/Reject BC & OR plan  
-  
-Step 1: Click on “+Plan” and then “Pending as Alternate Branch Checker” and provide approval if the Plan is in order. In case of any 
-discrepancies, the plan may be rejected by the Checker. All 7 parts need to be verified.   
- 
-  
-  
-  
-  
-  
-  
-  
-Step 2: After verifying all 7 parts, the Checker needs to approve or reject the plan. Rejecting the plan by Alternate Branch/Office Checker 
-will put the plan in the tray of Maker. The Checker can put comments stating the reason for rejecting the plan.  Accepting the plan leads 
-to submission of plan to the Controller. Once rejected, it will be shown as draft in the Maker tab.  
-30  
-31  
-  
-3.10 Login by Controller  
-  
-a. Approve/Reject BC & OR plan  
-Controller can view all the details and provide approval if the Plan is in order. In case of any discrepancies the plan may also be rejected 
-by the Controller. All 7 parts need to be verified before approving/rejecting the plan. Once rejected, it will be shown as draft in the Maker 
-tab. 
- 
- 
-  
- 
-  
-  
-b. Approve/Reject BC & OR Testing report  
-Controller can view all the details and provide approval if the testing report is in order.  
-In case of any discrepancies, the report may be rejected by the controller. Once rejected, it will be shown as draft in the Maker tab. 
-32  
-c. Approve/Reject BC & OR Invocation report  
-Controller can view all the details and provide approval if the invocation report is in order. In case of any discrepancies, the invocation 
-report may be rejected by the controller. Once rejected, it will be shown as draft in the Maker tab.  
-33  
-34  
+Excellent 👍
+Now this is a role-based approval governance workflow — so the correct UML approach is:
 
+We will create:
 
+1️⃣ UML Activity Diagram (Role-based Swimlane)
+2️⃣ UML Sequence Diagram (Approval Routing)
+3️⃣ Clean, enterprise horizontal layout
+4️⃣ Maker ↔ Checker ↔ Alternate Checker ↔ Controller transitions
+5️⃣ Proper rejection loops & tray behavior
 
-
-
-You're right 👍 — the BC&OR System → Checker linkage is missing after the Maker submits the plan.
-
-Currently:
-
-M2 --> S1
-
-But there is no flow from System to Checker (C1).
+This will represent Sections 3.6 to 3.10 professionally.
 
 
 ---
 
-✅ Corrected Flow (With System → Checker Link Added)
+✅ 1️⃣ UML ACTIVITY DIAGRAM (Role-Based Swimlane Model)
 
-Add this line:
+This shows user separation clearly.
 
-S1 --> C1
-
-
----
-
-🔧 Updated Mermaid Code (Fixed Version)
+%%{init: {
+  "theme": "base",
+  "flowchart": {
+    "curve": "basis",
+    "nodeSpacing": 70,
+    "rankSpacing": 120
+  }
+}}%%
 
 flowchart LR
 
+%% ===== MAKER LANE =====
 subgraph Maker
-    M1[Create Plan]
-    M2[Submit Plan]
-    M3[Modify Plan]
+    M1[Plan Submitted]
+    M2[Testing Submitted]
+    M3[Invocation Submitted]
+    M4[Receives Rejected Item as Draft]
 end
 
+%% ===== CHECKER LANE =====
 subgraph Checker
-    C1[Review Plan]
-    C2{Approve?}
+    C1[Review Plan (All 7 Parts)]
+    C2{Approve Plan?}
+    
+    C3[Review Testing Report]
+    C4{Approve Testing?}
+    
+    C5[Review Invocation Report]
+    C6{Approve Invocation?}
 end
 
+%% ===== ALT CHECKER =====
+subgraph Alternate_Checker
+    AC1[Review Plan (All 7 Parts)]
+    AC2{Approve Plan?}
+end
+
+%% ===== CONTROLLER =====
 subgraph Controller
-    CT1[Final Review]
-    CT2{Approve?}
+    CT1[Review Plan]
+    CT2{Approve Plan?}
+
+    CT3[Review Testing Report]
+    CT4{Approve Testing?}
+
+    CT5[Review Invocation Report]
+    CT6{Approve Invocation?}
 end
 
-subgraph BC&OR System
-    S1[Update Status]
-end
+%% ===== FLOW =====
 
-
-%% ============Approve/ Reject ================
-Reject1((Reject))
-Approve1((Approve))
-Reject2((Reject))
-Approve2((Approve))
-
-%% ================= FLOW =================
-
-Start((Start)) --> M1
-M1 --> M2
-M2 --> S1
-S1 --> C1   %% ✅ Added linkage from System to Checker
-
-C1 --> C2
-C2 --> Reject1 --> S1
-S1 --> M3
-M3 --> M2
-
-C2 --> Approve1 --> S1
-S1 --> CT1
+%% PLAN FLOW
+M1 --> C1 --> C2
+C2 -- No --> M4
+C2 -- Yes --> AC1
+AC1 --> AC2
+AC2 -- No --> M4
+AC2 -- Yes --> CT1
 CT1 --> CT2
+CT2 -- No --> M4
+CT2 -- Yes --> ApprovedPlan((Plan Approved))
 
-CT2 --> Reject2 --> S1
-CT2 --> Approve2 --> End((Plan Approved))
+%% TESTING FLOW
+M2 --> C3 --> C4
+C4 -- No --> M4
+C4 -- Yes --> CT3
+CT3 --> CT4
+CT4 -- No --> M4
+CT4 -- Yes --> ApprovedTesting((Testing Approved))
 
-
-%% ================= STYLING =================
-
-classDef approveStyle fill:#2E7D32,color:#ffffff,stroke:#1B5E20,stroke-width:3px;
-classDef rejectStyle fill:#C62828,color:#ffffff,stroke:#8E0000,stroke-width:3px;
-
-class Approve1,Approve2 approveStyle;
-class Reject1,Reject2 rejectStyle;
-
-
----
-
-🎯 What This Fix Achieves
-
-Now the logical flow becomes:
-
-1. Maker submits plan
-
-
-2. System updates status
-
-
-3. System routes to Checker
-
-
-4. Approval/Rejection cycle continues properly
-
-
+%% INVOCATION FLOW
+M3 --> C5 --> C6
+C6 -- No --> M4
+C6 -- Yes --> CT5
+CT5 --> CT6
+CT6 -- No --> M4
+CT6 -- Yes --> ApprovedInvocation((Invocation Approved))
 
 
 ---
 
-If you want, I can also:
+🎯 What This Clearly Shows
 
-🔁 Optimize it to avoid repeated S1 calls
+PLAN Approval Hierarchy
 
-🎨 Improve layout alignment
+Maker → Checker → Alternate Checker → Controller
 
-🧠 Convert this into a proper UML Activity Diagram format for documentation
+TESTING Approval Hierarchy
 
-📄 Prepare this for your BC&OR report documentation
+Maker → Checker → Controller
+
+INVOCATION Approval Hierarchy
+
+Maker → Checker → Controller
+
+Rejection Behavior
+
+Any rejection: → Returns to Maker
+→ Appears as Draft
+→ Comments recorded
 
 
-Let me know 👍
-  
+---
+
+✅ 2️⃣ UML SEQUENCE DIAGRAM – Approval Routing
+
+This shows interaction flow clearly.
+
+sequenceDiagram
+    autonumber
+    actor Maker
+    actor Checker
+    actor AltChecker
+    actor Controller
+    participant System
+
+    Maker->>System: Submit Plan
+    System->>Checker: Notify Plan Pending
+
+    Checker->>System: Approve / Reject
+
+    alt Rejected by Checker
+        System->>Maker: Return as Draft with Comments
+    else Approved by Checker
+        System->>AltChecker: Forward Plan
+    end
+
+    AltChecker->>System: Approve / Reject
+
+    alt Rejected by AltChecker
+        System->>Maker: Return as Draft
+    else Approved
+        System->>Controller: Forward Plan
+    end
+
+    Controller->>System: Final Approval / Reject
+
+    alt Rejected by Controller
+        System->>Maker: Return as Draft
+    else Approved
+        System->>Maker: Plan Approved Successfully
+    end
+
+
+---
+
+🏢 Governance Highlights You Can Explain
+
+✔ Multi-level verification
+✔ 7-part mandatory verification for plan
+✔ Controlled routing logic
+✔ Comment-based rejection
+✔ Draft rollback mechanism
+✔ Role-based access control
+
+
+---
+
+🔥 If You Want EVEN More Enterprise
+
+I can now generate:
+
+🔷 Unified Master Diagram (Plan + Testing + Invocation Combined)
+
+🔷 BPMN 2.0 Version (Audit Standard)
+
+🔷 Architecture Layer Diagram (UI → Service → Workflow Engine → DB)
+
+🔷 Status Lifecycle Diagram (Draft → Pending → Approved → Rejected)
+
+🔷 RBAC Security UML
+
+🔷 Database ER Diagram
+
+
+
+---
+
+🎯 Important Question
+
+Is this for:
+
+• Internal technical documentation
+• Audit compliance presentation
+• Senior management review
+• Client demo
+• Architecture discussion
+
+Tell me the audience and I will refine the final enterprise-grade version accordingly 🚀
