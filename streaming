@@ -1,58 +1,63 @@
-
 flowchart TD
 
-Start(("Start <br/> (Creation of new BCOR Plan)" ))
+Start(("Start \n (Creation of new BCOR Plan)"))
 End((Plan Submitted to Checker))
 
-
+%% ================= PHASE 1 =================
 subgraph Phase1["PHASE 1: Branch Details"]
     S1[Create New BCOR Plan]
     S2[Enter Branch Code]
     S3[Auto-fetch from Branch Master]
-    S4["Enter Staff Count & Key Business Functions<br/>(Min 10 Characters)"]
+    S4["Enter Staff Count & Key Business Functions\n(Min 10 Characters)"]
 end
 
-
+%% ================= PHASE 2 =================
 subgraph Phase2["PHASE 2: Staff Contact Number"]
     S5[Enter PF ID]
     S6[Auto-fetch from HRMS]
-    S7["Enter Residential Address<br/>(Min 20 Characters)"]
+    S7["Enter Residential Address\n(Min 20 Characters)"]
     S8[Save Each Staff Row]
 end
 
-
+%% ================= PHASE 3 =================
 subgraph Phase3["PHASE 3: Important Contact Number"]
-    S9["Emergency Services<br/>(Min 7 Mandatory)"]
-    S10["Bank Contacts<br/>(12 Mandatory Rows)"]
-    S11["Vendor Details<br/>(8 Mandatory Rows)"]
+    S9["Emergency Services\n(Min 7 Mandatory)"]
+    S10["Bank Contacts\n(12 Mandatory Rows)"]
+    S11["Vendor Details\n(8 Mandatory Rows)"]
     S12[AMC Expiry Tracking & Notification]
 end
 
+%% ================= PHASE 4 =================
 subgraph Phase4["PHASE 4: Team Details"]
-    S13["Team Structure<br/>(Min 5 Teams)"]
+    S13["Team Structure\n(Min 5 Teams)"]
 end
 
-subgraph Phase4["PHASE 4: Operational Planning"]
-     S14["Business Impact Analysis<br/>(Min 5 Services)"]
-    S15["Enter MTPD, RTO, MPT<br/>(Numeric Only)"]
+%% ================= PHASE 5 =================
+subgraph Phase5["PHASE 5: Business Impact Analysis"]
+    S14["Business Impact Analysis\n(Min 5 Services)"]
+    S15["Enter MTPD, RTO, MPT\n(Numeric Only)"]
     S16{MTPD ≤ RTO ≤ MPT ?}
 end
 
-
-subgraph Phase5["PHASE 5: Risk & Governance"]
+%% ================= PHASE 6 =================
+subgraph Phase6["PHASE 6: Reciprocal Arrangement"]
     S17[Reciprocal Arrangement]
-    S18["Risk & Challenges<br/>(Min 5 Entries)"]
+end
+
+%% ================= PHASE 7 =================
+subgraph Phase7["PHASE 7: Risk & Challenges"]
+    S18["Risk & Challenges\n(Min 5 Entries)"]
     S19[Click Validate]
     S20{All Mandatory Fields Valid?}
 end
 
-
+%% ================= YES / NO NODES =================
 NO1((NO))
 YES1((YES))
 NO2((NO))
 YES2((YES))
 
-
+%% ================= FLOW =================
 Start --> S1 --> S2 --> S3 --> S4
 S4 --> S5 --> S6 --> S7 --> S8
 S8 --> S9 --> S10 --> S11 --> S12
@@ -70,20 +75,24 @@ S20 --> YES2
 NO2 --> S18
 YES2 --> End
 
-
+%% ================= STYLING =================
 classDef phase1 fill:#0B3D91,color:#ffffff,stroke:#062E6F,stroke-width:2px;
 classDef phase2 fill:#1E88E5,color:#ffffff,stroke:#0D47A1,stroke-width:2px;
 classDef phase3 fill:#43A047,color:#ffffff,stroke:#1B5E20,stroke-width:2px;
 classDef phase4 fill:#FB8C00,color:#ffffff,stroke:#E65100,stroke-width:2px;
-classDef phase5 fill:#E53935,color:#ffffff,stroke:#B71C1C,stroke-width:2px;
+classDef phase5 fill:#8E24AA,color:#ffffff,stroke:#4A148C,stroke-width:2px;
+classDef phase6 fill:#00897B,color:#ffffff,stroke:#004D40,stroke-width:2px;
+classDef phase7 fill:#E53935,color:#ffffff,stroke:#B71C1C,stroke-width:2px;
 classDef yesStyle fill:#2E7D32,color:#ffffff,stroke:#1B5E20,stroke-width:3px;
 classDef noStyle fill:#C62828,color:#ffffff,stroke:#8E0000,stroke-width:3px;
 
 class S1,S2,S3,S4 phase1;
 class S5,S6,S7,S8 phase2;
 class S9,S10,S11,S12 phase3;
-class S13,S14,S15 phase4;
-class S17,S18,S19 phase5;
+class S13 phase4;
+class S14,S15 phase5;
+class S17 phase6;
+class S18,S19 phase7;
 
 class YES1,YES2 yesStyle;
 class NO1,NO2 noStyle;
