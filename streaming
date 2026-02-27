@@ -1,209 +1,89 @@
-Excellent 👍
-Now this is a role-based approval governance workflow — so the correct UML approach is:
 
-We will create:
+flowchart TD
 
-1️⃣ UML Activity Diagram (Role-based Swimlane)
-2️⃣ UML Sequence Diagram (Approval Routing)
-3️⃣ Clean, enterprise horizontal layout
-4️⃣ Maker ↔ Checker ↔ Alternate Checker ↔ Controller transitions
-5️⃣ Proper rejection loops & tray behavior
-
-This will represent Sections 3.6 to 3.10 professionally.
+Start(("Start <br/> (Creation of new BCOR Plan)" ))
+End((Plan Submitted to Checker))
 
 
----
-
-✅ 1️⃣ UML ACTIVITY DIAGRAM (Role-Based Swimlane Model)
-
-This shows user separation clearly.
-
-%%{init: {
-  "theme": "base",
-  "flowchart": {
-    "curve": "basis",
-    "nodeSpacing": 70,
-    "rankSpacing": 120
-  }
-}}%%
-
-flowchart LR
-
-%% ===== MAKER LANE =====
-subgraph Maker
-    M1[Plan Submitted]
-    M2[Testing Submitted]
-    M3[Invocation Submitted]
-    M4[Receives Rejected Item as Draft]
+subgraph Phase1["PHASE 1: Branch Details"]
+    S1[Create New BCOR Plan]
+    S2[Enter Branch Code]
+    S3[Auto-fetch from Branch Master]
+    S4["Enter Staff Count & Key Business Functions<br/>(Min 10 Characters)"]
 end
 
-%% ===== CHECKER LANE =====
-subgraph Checker
-    C1[Review Plan (All 7 Parts)]
-    C2{Approve Plan?}
-    
-    C3[Review Testing Report]
-    C4{Approve Testing?}
-    
-    C5[Review Invocation Report]
-    C6{Approve Invocation?}
+
+subgraph Phase2["PHASE 2: Staff Contact Number"]
+    S5[Enter PF ID]
+    S6[Auto-fetch from HRMS]
+    S7["Enter Residential Address<br/>(Min 20 Characters)"]
+    S8[Save Each Staff Row]
 end
 
-%% ===== ALT CHECKER =====
-subgraph Alternate_Checker
-    AC1[Review Plan (All 7 Parts)]
-    AC2{Approve Plan?}
+
+subgraph Phase3["PHASE 3: Important Contact Number"]
+    S9["Emergency Services<br/>(Min 7 Mandatory)"]
+    S10["Bank Contacts<br/>(12 Mandatory Rows)"]
+    S11["Vendor Details<br/>(8 Mandatory Rows)"]
+    S12[AMC Expiry Tracking & Notification]
 end
 
-%% ===== CONTROLLER =====
-subgraph Controller
-    CT1[Review Plan]
-    CT2{Approve Plan?}
-
-    CT3[Review Testing Report]
-    CT4{Approve Testing?}
-
-    CT5[Review Invocation Report]
-    CT6{Approve Invocation?}
+subgraph Phase4["PHASE 4: Team Details"]
+    S13["Team Structure<br/>(Min 5 Teams)"]
 end
 
-%% ===== FLOW =====
-
-%% PLAN FLOW
-M1 --> C1 --> C2
-C2 -- No --> M4
-C2 -- Yes --> AC1
-AC1 --> AC2
-AC2 -- No --> M4
-AC2 -- Yes --> CT1
-CT1 --> CT2
-CT2 -- No --> M4
-CT2 -- Yes --> ApprovedPlan((Plan Approved))
-
-%% TESTING FLOW
-M2 --> C3 --> C4
-C4 -- No --> M4
-C4 -- Yes --> CT3
-CT3 --> CT4
-CT4 -- No --> M4
-CT4 -- Yes --> ApprovedTesting((Testing Approved))
-
-%% INVOCATION FLOW
-M3 --> C5 --> C6
-C6 -- No --> M4
-C6 -- Yes --> CT5
-CT5 --> CT6
-CT6 -- No --> M4
-CT6 -- Yes --> ApprovedInvocation((Invocation Approved))
+subgraph Phase4["PHASE 4: Operational Planning"]
+     S14["Business Impact Analysis<br/>(Min 5 Services)"]
+    S15["Enter MTPD, RTO, MPT<br/>(Numeric Only)"]
+    S16{MTPD ≤ RTO ≤ MPT ?}
+end
 
 
----
-
-🎯 What This Clearly Shows
-
-PLAN Approval Hierarchy
-
-Maker → Checker → Alternate Checker → Controller
-
-TESTING Approval Hierarchy
-
-Maker → Checker → Controller
-
-INVOCATION Approval Hierarchy
-
-Maker → Checker → Controller
-
-Rejection Behavior
-
-Any rejection: → Returns to Maker
-→ Appears as Draft
-→ Comments recorded
+subgraph Phase5["PHASE 5: Risk & Governance"]
+    S17[Reciprocal Arrangement]
+    S18["Risk & Challenges<br/>(Min 5 Entries)"]
+    S19[Click Validate]
+    S20{All Mandatory Fields Valid?}
+end
 
 
----
-
-✅ 2️⃣ UML SEQUENCE DIAGRAM – Approval Routing
-
-This shows interaction flow clearly.
-
-sequenceDiagram
-    autonumber
-    actor Maker
-    actor Checker
-    actor AltChecker
-    actor Controller
-    participant System
-
-    Maker->>System: Submit Plan
-    System->>Checker: Notify Plan Pending
-
-    Checker->>System: Approve / Reject
-
-    alt Rejected by Checker
-        System->>Maker: Return as Draft with Comments
-    else Approved by Checker
-        System->>AltChecker: Forward Plan
-    end
-
-    AltChecker->>System: Approve / Reject
-
-    alt Rejected by AltChecker
-        System->>Maker: Return as Draft
-    else Approved
-        System->>Controller: Forward Plan
-    end
-
-    Controller->>System: Final Approval / Reject
-
-    alt Rejected by Controller
-        System->>Maker: Return as Draft
-    else Approved
-        System->>Maker: Plan Approved Successfully
-    end
+NO1((NO))
+YES1((YES))
+NO2((NO))
+YES2((YES))
 
 
----
+Start --> S1 --> S2 --> S3 --> S4
+S4 --> S5 --> S6 --> S7 --> S8
+S8 --> S9 --> S10 --> S11 --> S12
+S12 --> S13 --> S14 --> S15 --> S16
 
-🏢 Governance Highlights You Can Explain
+S16 --> NO1
+S16 --> YES1
+NO1 --> S15
+YES1 --> S17
 
-✔ Multi-level verification
-✔ 7-part mandatory verification for plan
-✔ Controlled routing logic
-✔ Comment-based rejection
-✔ Draft rollback mechanism
-✔ Role-based access control
+S17 --> S18 --> S19 --> S20
 
-
----
-
-🔥 If You Want EVEN More Enterprise
-
-I can now generate:
-
-🔷 Unified Master Diagram (Plan + Testing + Invocation Combined)
-
-🔷 BPMN 2.0 Version (Audit Standard)
-
-🔷 Architecture Layer Diagram (UI → Service → Workflow Engine → DB)
-
-🔷 Status Lifecycle Diagram (Draft → Pending → Approved → Rejected)
-
-🔷 RBAC Security UML
-
-🔷 Database ER Diagram
+S20 --> NO2
+S20 --> YES2
+NO2 --> S18
+YES2 --> End
 
 
+classDef phase1 fill:#0B3D91,color:#ffffff,stroke:#062E6F,stroke-width:2px;
+classDef phase2 fill:#1E88E5,color:#ffffff,stroke:#0D47A1,stroke-width:2px;
+classDef phase3 fill:#43A047,color:#ffffff,stroke:#1B5E20,stroke-width:2px;
+classDef phase4 fill:#FB8C00,color:#ffffff,stroke:#E65100,stroke-width:2px;
+classDef phase5 fill:#E53935,color:#ffffff,stroke:#B71C1C,stroke-width:2px;
+classDef yesStyle fill:#2E7D32,color:#ffffff,stroke:#1B5E20,stroke-width:3px;
+classDef noStyle fill:#C62828,color:#ffffff,stroke:#8E0000,stroke-width:3px;
 
----
+class S1,S2,S3,S4 phase1;
+class S5,S6,S7,S8 phase2;
+class S9,S10,S11,S12 phase3;
+class S13,S14,S15 phase4;
+class S17,S18,S19 phase5;
 
-🎯 Important Question
-
-Is this for:
-
-• Internal technical documentation
-• Audit compliance presentation
-• Senior management review
-• Client demo
-• Architecture discussion
-
-Tell me the audience and I will refine the final enterprise-grade version accordingly 🚀
+class YES1,YES2 yesStyle;
+class NO1,NO2 noStyle;
