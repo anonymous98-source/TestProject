@@ -313,3 +313,15 @@ public class AccessCheckerApp extends JFrame {
                 new AccessCheckerApp().setVisible(true));
     }
 }
+
+
+
+@echo off
+echo Killing all running Java processes...
+
+taskkill /F /IM java.exe
+taskkill /F /IM javaw.exe
+taskkill /F /IM javaws.exe
+
+echo All Java processes terminated.
+pause
