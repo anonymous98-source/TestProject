@@ -71,4 +71,353 @@ class YES1,YES2 yesStyle;
 class NO1,NO2 noStyle;
 
 
+package sbi.bcor.helpers;
+
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.SecureRandom;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.UUID;
+
+import javax.crypto.BadPaddingException;
+import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import lombok.extern.slf4j.Slf4j;
+import sbi.bcor.constants.BcorConstants;
+import sbi.bcor.entity.User;
+import sbi.bcor.exceptions.BcorException;
+import sbi.bcor.exceptions.ResourceNotFoundException;
+import sbi.bcor.models.EISEncReq;
+import sbi.bcor.models.EISEncRes;
+import sbi.bcor.models.EISFetchPFReq;
+import sbi.bcor.models.EmployeeInfo;
+
+@Slf4j
+@Component
+public class EisUtil {
+    @Autowired
+    private RestTemplate restTemplate;
+    @Autowired
+    private ObjectMapper mapper;
+
+    private static final String AES_ALGO = "AES";
+    private static final String AES_CIPHER = "AES/CBC/PKCS5Padding";
+//    private static final String AES_CIPHER = "AES/GCM/NoPadding";
+    private static final String ENCODING = "UTF-8";
+    private static final String RSA_ALGO = "RSA/ECB/OAEPPadding";
+
+    @Value("${eis.url.fetchpf}")
+    private String pfUrl;
+    @Value("${eis.sourceid}")
+    private String sourceId;
+    @Value("${eis.certpath}")
+    private String certPath;
+
+//    @Value("${eis.private.alias}")
+    @Value("${server.ssl.key-alias}")
+    private String privateKeyForEis;
+    /** Application keystore path. */
+    @Value("${server.ssl.key-store}")
+    private String keystorePath;
+
+    /** Application keystore type. */
+    @Value("${server.ssl.key-store-type}")
+    private String keystoreType;
+
+    /** Application keystore password. */
+    @Value("${server.ssl.key-store-password}")
+    private String keystoretoken;
+
+    public static String getRandomSalt() {
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    public EmployeeInfo getEmpolyeeDetails(String pf) throws Exception {
+
+        EmployeeInfo pfDetails = null;
+        EISFetchPFReq plainReq = new EISFetchPFReq(pf, sourceId);
+        String plainjson = CryptoUtil.getPlainJson(plainReq);
+
+        String decryptedPfDetails = processEISRequest(pfUrl, plainjson);
+        EmployeeInfo user = mapper.readValue(decryptedPfDetails, EmployeeInfo.class);
+        log.debug("Non-Sensitive data : {Name: {}, PfId: {}}" , user.getName(), user.getPfId()); //added after observation by ISD
+        if (decryptedPfDetails != null && !decryptedPfDetails.isEmpty()) {
+            // Gson g = new Gson();
+            // pfDetails = g.fromJson(decryptedPfDetails, EmployeeInfo.class);
+            try {
+                pfDetails = mapper.readValue(decryptedPfDetails, EmployeeInfo.class);
+            } catch (JsonMappingException e) {
+                log.error("{}", e.getMessage());
+                throw new BcorException("Unable to fetch details of " + pf + ". Error in EIS Service");
+
+            } catch (JsonProcessingException e) {
+                log.error("{}", e.getMessage());
+                throw new BcorException("Unable to fetch details of " + pf + ". Error in EIS Service");
+            }
+//            log.debug("getAccountInfo response is as", pfDetails);
+            if (pfDetails.getResponseStatus().equalsIgnoreCase("1")) {
+                throw new ResourceNotFoundException(pfDetails.getErrorDesc() + " Hint: Maybe it is an incorrect PF");
+            }
+        }
+        return pfDetails;
+    }
+
+    private String processEISRequest(String url, String plianjson) throws Exception {
+        String aesKey = EisUtil.getRandomSalt();
+//        System.err.println("aesKey " + aesKey);
+        String encryptedPayload = EisUtil.encryptPayload(plianjson, aesKey);
+        // System.err.println(encryptedPayload);
+        PrivateKey pk = CryptoUtil.getPrivatekey(keystorePath, keystoretoken, privateKeyForEis);
+        String digitalSign = CryptoUtil.sign(plianjson, pk);
+        String requestReferance = getReferanceNo();
+        EISEncReq eisReq = new EISEncReq(digitalSign, requestReferance, encryptedPayload);
+        String encryptedjson = CryptoUtil.getPlainJson(eisReq);
+        // System.out.println(encryptedjson);
+        PublicKey publicKey = getEISPublicKey();
+        // System.err.println("PublicKey :: "+ publicKey);
+        String accesstoken = EisUtil.encryptAccessToken(aesKey, publicKey);
+//        log.info("access token after encryption :: {}",accesstoken);
+        try {
+            String responeString = sendReqToEIS(encryptedjson, url, accesstoken);
+            log.debug("requestReferance {} {} {} response is as {}", requestReferance, aesKey, accesstoken, responeString);
+            System.out.println("responeString"+responeString);  //added after observation by ISD
+            if (responeString != null && !responeString.isEmpty()) {
+                // Gson g = new Gson();
+                // EISEncRes resp = g.fromJson(responeString, EISEncRes.class);
+                EISEncRes resp = mapper.readValue(responeString, EISEncRes.class);
+                String encryptedResponse = resp.getRESPONSE();
+                System.err.println(encryptedResponse + " " + aesKey );
+                String decryptedResponse = EisUtil.decryptPayload(encryptedResponse, aesKey);               
+                return decryptedResponse;
+            } else {
+                log.error("EIS Request failed : request is {}", eisReq);
+                throw new BcorException("EIS Down unable to fetch details from EIS");
+            }
+        } catch (RestClientException rs) {
+            log.error("EIS Request failed : request is {}", eisReq);
+            log.error("sendReqToEIS error while getting response {} cause is {} ", rs.getMessage(), rs.getCause());
+            log.error("sendReqToEIS Exception while getting response from EIS {}", rs.fillInStackTrace());
+            throw new BcorException("EIS service Error: " + rs.getMessage());
+        }
+
+    }
+    
+    public static String encryptPayload(String plainText, String secretKey) {
+        String encryptedText = null;
+        IvParameterSpec iv;
+        SecretKey secretKeyObject;
+        try {
+            byte[] plainTextByte = plainText.getBytes();
+            byte[] keybyte = secretKey.getBytes(ENCODING);
+            byte[] ivKey = Arrays.copyOf(keybyte, 16);
+            iv = new IvParameterSpec(ivKey);
+            secretKeyObject = new SecretKeySpec(keybyte, AES_ALGO);
+            Cipher cipher = Cipher.getInstance(AES_CIPHER);
+            cipher.init(Cipher.ENCRYPT_MODE, secretKeyObject, iv);
+            byte[] encryptedByte = cipher.doFinal(plainTextByte);
+            encryptedText = Base64.getEncoder().encodeToString(encryptedByte);
+
+        } catch (UnsupportedEncodingException | NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException
+                | InvalidAlgorithmParameterException
+                | IllegalBlockSizeException | BadPaddingException e) {
+            // throw new SbiCryptoException(e.getMessage());
+            log.error("{}", e.getMessage());
+        }
+        return encryptedText;
+    }
+
+//    public static String encryptPayload(String plainText, String secretKey) {
+//        String encryptedText = null;
+//        GCMParameterSpec iv;
+//        SecretKey secretKeyObject;
+//        try {
+//            byte[] plainTextByte = plainText.getBytes();
+//            byte[] keybyte = secretKey.getBytes(ENCODING);
+//            byte[] ivKey = Arrays.copyOf(keybyte, 16);
+//            iv = new GCMParameterSpec(32, ivKey);
+//            secretKeyObject = new SecretKeySpec(keybyte, AES_ALGO);
+//            Cipher cipher = Cipher.getInstance(AES_CIPHER);
+//            cipher.init(Cipher.ENCRYPT_MODE, secretKeyObject, iv);
+//            byte[] encryptedByte = cipher.doFinal(plainTextByte);
+//            encryptedText = Base64.getEncoder().encodeToString(encryptedByte);
+//
+//        } catch (UnsupportedEncodingException | NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException
+//                | InvalidAlgorithmParameterException
+//                | IllegalBlockSizeException | BadPaddingException e) {
+//            // throw new SbiCryptoException(e.getMessage());
+//            log.error("{}", e.getMessage());
+//        }
+//        return encryptedText;
+//    }
+    
+//    public static String encryptPayload(String plainText, String secretKey) {
+//    	
+//    	byte[] keyBytes = new byte[32];
+//    	new SecureRandom().nextBytes(keyBytes);
+//    	
+//    	SecretKeySpec key = new SecretKeySpec(keyBytes, AES_ALGO);
+    	
+//        String encryptedText = null;
+//        IvParameterSpec iv;
+//        SecretKey secretKeyObject;
+//        try {
+//            byte[] plainTextByte = plainText.getBytes();
+//            byte[] keybyte = secretKey.getBytes(ENCODING);
+//            byte[] ivKey = Arrays.copyOf(keybyte, 16);
+//            iv = new IvParameterSpec(ivKey);
+//            secretKeyObject = new SecretKeySpec(keybyte, AES_ALGO);
+//            Cipher cipher = Cipher.getInstance(AES_CIPHER);
+//            cipher.init(Cipher.ENCRYPT_MODE, secretKeyObject, iv);
+//            byte[] encryptedByte = cipher.doFinal(plainTextByte);
+//            encryptedText = Base64.getEncoder().encodeToString(encryptedByte);
+//
+//        } catch (UnsupportedEncodingException | NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException
+//                | InvalidAlgorithmParameterException
+//                | IllegalBlockSizeException | BadPaddingException e) {
+//            // throw new SbiCryptoException(e.getMessage());
+//            log.error("{}", e.getMessage());
+//        }
+//        return encryptedText;
+//        return key.toString();
+//    }
+
+    public static String decryptPayload(String encryptedText, String secretKey) {
+
+        String decryptedText = null;
+        IvParameterSpec iv;
+        try {
+            byte[] encryptedTextByte = Base64.getDecoder().decode(encryptedText);
+            byte[] keybyte = secretKey.getBytes(ENCODING);
+            byte[] ivKey = Arrays.copyOf(keybyte, 16);
+            iv = new IvParameterSpec(ivKey);
+            SecretKey secretKeyObject = new SecretKeySpec(keybyte, AES_ALGO);
+
+            Cipher cipher = Cipher.getInstance(AES_CIPHER);
+            cipher.init(Cipher.DECRYPT_MODE, secretKeyObject, iv);
+            byte[] decryptedByte = cipher.doFinal(encryptedTextByte);
+            decryptedText = new String(decryptedByte);
+
+        } catch (IOException | NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException
+                | InvalidAlgorithmParameterException | IllegalBlockSizeException | BadPaddingException e) {
+            // throw new SbiCryptoException(e.getMessage());
+            log.error("{}", e.getMessage());
+        }
+        return decryptedText;
+    }
+
+    public static String encryptAccessToken(String msg, PublicKey publicKey) {
+        try {
+            Cipher cipher = Cipher.getInstance(RSA_ALGO);
+            cipher.init(Cipher.ENCRYPT_MODE, publicKey);
+            return Base64.getEncoder().encodeToString(cipher.doFinal(msg.getBytes(ENCODING)));
+        } catch (InvalidKeyException e) {
+            throw new RuntimeException("InvalidKeyException", e);
+        } catch (IllegalBlockSizeException e) {
+            throw new RuntimeException("IllegalBlockSizeException", e);
+        } catch (BadPaddingException e) {
+            throw new RuntimeException("BadPaddingException", e);
+        } catch (UnsupportedEncodingException e) {
+            throw new RuntimeException("UnsupportedEncodingException", e);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("NoSuchAlgorithmException", e);
+        } catch (NoSuchPaddingException e) {
+            throw new RuntimeException("NoSuchPaddingException", e);
+        }
+    }
+
+    private static String getReferanceNo() {
+        // Format : SBI-XX-YY-DDD-hh-MM-sss-NNNNNNNN
+        StringBuffer str = new StringBuffer();
+        str.append(BcorConstants.BANK_SHORT_CODE + BcorConstants.EIS_SOURCE_ID);
+        LocalDateTime now = LocalDateTime.now();
+        DateTimeFormatter format = DateTimeFormatter.ofPattern("yyDDDHHmmssSSS");
+        String formatDateTime = now.format(format);
+        if (EISRefNoCount.getCount() > 99999) {
+            EISRefNoCount.setCount(0);
+        }
+        EISRefNoCount.setCount(EISRefNoCount.getCount() + 1);
+        str.append(formatDateTime);
+        str.append(StringUtils.leftPad(String.valueOf(EISRefNoCount.getCount()), 6, "0"));
+
+        return str.toString();
+    }
+
+    private PublicKey getEISPublicKey() {
+        try {
+            return CryptoUtil
+                    .getPublicKey(new ClassPathResource(certPath).getInputStream());
+        } catch (IOException e) {
+            log.error("IOException error while {} cause is {} ", e.getMessage(), e.fillInStackTrace());
+        } catch (Exception e) {
+            log.error("Exception error while {} cause is {} ", e.getMessage(), e.fillInStackTrace());
+        }
+        return null;
+    }
+
+    private String sendReqToEIS(String encryptedData, String url, String accessToken) throws RestClientException {
+        log.debug("***{EIS}*** URL  is >> {} ", url);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        // System.err.println("Access token :: " +accessToken);
+        headers.set(BcorConstants.EIS_HEADER, accessToken);
+        // prepare the request
+        HttpEntity<String> entity = new HttpEntity<String>(encryptedData.toString(), headers);
+        ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
+        
+        log.debug("response code >> {} ", resp.getStatusCode());
+        if (resp.getStatusCode() != HttpStatus.OK) {
+            log.error("***{EIS}*** request failed >> {} ", resp.getBody());
+            return BcorConstants.BLANK;
+        }
+        return resp.getBody();
+    }
+}
+
+final class EISRefNoCount {
+
+    private static long count;
+
+    public static long getCount() {
+        return count;
+    }
+
+    public static void setCount(long count) {
+        EISRefNoCount.count = count;
+    }
+
+}
+
+
 Unauthorized: 401 Unauthorized: "{"RESPONSE_STATUS":"2","ERROR_CODE":"SI412","ERROR_DESCRIPTION":"Unauthorized : AES decryption Failed!!"}"
