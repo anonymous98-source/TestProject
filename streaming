@@ -1,461 +1,418 @@
-Perfect — now we have official EIS spec, so I can pinpoint your exact issue.
-
-👉 Your current code is completely mismatched with spec — that’s why you're getting:
-
-Unauthorized : AES decryption Failed!!
+Perfect — let’s go deep and practical, so you understand what you’re doing + why, not just commands.
 
 
 ---
 
-🚨 EXACT PROBLEMS IN YOUR CODE
+🧠 Big Picture (What you’re achieving)
 
-❌ 1. Wrong AES Mode
+Right now your app likely connects like this:
 
-You are using:
+App → Oracle DB (TCP, NOT encrypted ❌)
 
-AES/CBC/PKCS5Padding
+After this setup:
 
-👉 But EIS requires:
+App → Oracle Wallet → Oracle DB (TCPS, encrypted ✅)
 
-AES/GCM/NoPadding  ✅
-
-
----
-
-❌ 2. Wrong IV logic
-
-You are doing:
-
-byte[] ivKey = Arrays.copyOf(keybyte, 16);
-
-👉 But spec says:
-
-IV = First 12 bytes of secret key ❗
+👉 Oracle Wallet = trust store + SSL configuration for Oracle client
 
 
 ---
 
-❌ 3. Wrong AES Key usage
+🔧 STEP-BY-STEP (Detailed Explanation)
 
-You are:
 
-String aesKey = UUID...
+---
 
-👉 Spec clearly says:
+✅ STEP 1: Create Wallet Directory
 
-32 character plain text key (256-bit)
+mkdir -p /opt/oracle/wallet
+cd /opt/oracle/wallet
 
-✔ Means:
+🔍 What this does:
 
-EXACT 32 chars
+Creates a folder to store:
 
-NOT UUID with hyphens removed blindly (can work but risky encoding)
+Certificates
 
-MUST be used as raw bytes (not random length issues)
+Wallet files
+
+
+
+🧠 Why:
+
+Oracle client needs a secure location to read SSL config
 
 
 
 ---
 
-❌ 4. GCM Tag missing
+✅ STEP 2: Create Wallet
 
-GCM needs:
+orapki wallet create -wallet /opt/oracle/wallet -pwd MyWallet@123 -auto_login
 
-Tag length = 16 bytes
+🔍 What happens:
 
-Your code doesn’t handle GCM at all ❌
+This creates 2 files:
+
+File	Purpose
+
+ewallet.p12	Main encrypted wallet
+cwallet.sso	Auto-login wallet (no password needed at runtime)
+
 
 
 ---
 
-✅ CORRECT IMPLEMENTATION (AS PER EIS)
+🧠 Why this is needed:
 
-🔥 Step 1: Generate 32-char key
+Oracle uses wallet instead of Java truststore
 
-public static String generateAESKey() {
-    String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    StringBuilder key = new StringBuilder(32);
-    SecureRandom random = new SecureRandom();
+It stores:
 
-    for (int i = 0; i < 32; i++) {
-        key.append(chars.charAt(random.nextInt(chars.length())));
-    }
-    return key.toString(); // EXACT 32 chars
-}
+Trusted certificates
+
+SSL config
+
+
 
 
 ---
 
-🔥 Step 2: AES GCM Encryption (CRITICAL FIX)
+⚠️ Important:
 
-public static String encryptPayload(String plainText, String secretKey) {
-    try {
-        byte[] keyBytes = secretKey.getBytes(StandardCharsets.UTF_8);
+-auto_login is critical for servers
 
-        // IV = first 12 bytes of key
-        byte[] iv = Arrays.copyOfRange(keyBytes, 0, 12);
+Without it → app will fail (needs password)
 
-        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-
-        SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
-        GCMParameterSpec gcmSpec = new GCMParameterSpec(128, iv); // 16 bytes tag
-
-        cipher.init(Cipher.ENCRYPT_MODE, keySpec, gcmSpec);
-
-        byte[] encryptedBytes = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
-
-        return Base64.getEncoder().encodeToString(encryptedBytes);
-
-    } catch (Exception e) {
-        throw new RuntimeException("Encryption failed", e);
-    }
-}
 
 
 ---
 
-🔥 Step 3: AES GCM Decryption
+✅ STEP 3: Get Certificates (VERY IMPORTANT)
 
-public static String decryptPayload(String encryptedText, String secretKey) {
-    try {
-        byte[] keyBytes = secretKey.getBytes(StandardCharsets.UTF_8);
+👉 You need from DBA/network team:
 
-        byte[] iv = Arrays.copyOfRange(keyBytes, 0, 12);
+Server certificate
 
-        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+Intermediate certificate
 
-        SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
-        GCMParameterSpec gcmSpec = new GCMParameterSpec(128, iv);
+Root certificate
 
-        cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec);
 
-        byte[] decodedBytes = Base64.getDecoder().decode(encryptedText);
+🔍 Example files:
 
-        return new String(cipher.doFinal(decodedBytes), StandardCharsets.UTF_8);
-
-    } catch (Exception e) {
-        throw new RuntimeException("Decryption failed", e);
-    }
-}
+server-cert.pem
+intermediate.pem
+root.pem
 
 
 ---
 
-🔥 Step 4: RSA Encryption (AccessToken)
+🧠 Why:
 
-Your existing code is almost correct, just ensure:
+SSL works on trust chain:
 
-Cipher cipher = Cipher.getInstance("RSA/ECB/OAEPPadding");
+Your App → trusts Root → validates DB certificate
 
-✔ This matches spec ✅
-
-
----
-
-🔥 Step 5: Digital Signature
-
-Must be:
-
-SHA256withRSA
-
-Make sure your CryptoUtil.sign() uses:
-
-Signature.getInstance("SHA256withRSA")
+If missing → ❌ connection fails
 
 
 ---
 
-✅ FINAL FLOW (MATCH THIS EXACTLY)
+✅ STEP 4: Add Certificates to Wallet
 
-1. Generate 32-char key
+Add root cert:
 
+orapki wallet add -wallet /opt/oracle/wallet -trusted_cert -cert root.pem -pwd MyWallet@123
 
-2. Encrypt payload using AES/GCM + IV = first 12 bytes
+Add intermediate:
 
+orapki wallet add -wallet /opt/oracle/wallet -trusted_cert -cert intermediate.pem -pwd MyWallet@123
 
-3. Sign plain JSON using SHA256withRSA
+Add server cert (if provided):
 
-
-4. Encrypt AES key using RSA OAEP
-
-
-5. Send:
-
-
-
-{
-  "REQUEST_REFERENCE_NUMBER": "...",
-  "REQUEST": "Base64(AES-GCM encrypted)",
-  "DIGI_SIGN": "Base64(signature)"
-}
-
-Header:
-
-AccessToken: Base64(RSA encrypted AES key)
+orapki wallet add -wallet /opt/oracle/wallet -trusted_cert -cert server-cert.pem -pwd MyWallet@123
 
 
 ---
 
-🔥 WHY YOUR ERROR IS HAPPENING
+🔍 What happens:
 
-EIS is doing:
+Certificates get stored inside wallet
 
-1. Decrypt AccessToken → gets AES key ✅
-2. Uses AES-GCM to decrypt REQUEST ❌ (your data is CBC)
-
-👉 Result:
-
-AES decryption Failed!!
 
 
 ---
 
-✅ QUICK FIX SUMMARY
+🧠 Why:
 
-👉 Change ONLY these 3 things and it will work:
+Oracle must trust the DB server
 
-✔ Use AES/GCM/NoPadding
-✔ IV = first 12 bytes of key
-✔ Key = EXACT 32 characters
+Without this → SSL handshake fails
+
 
 
 ---
 
-🚀 If you want
+✅ STEP 5: Verify Wallet
+
+orapki wallet display -wallet /opt/oracle/wallet
+
+🔍 Output should show:
+
+Trusted Certificates ✔
+
+
+
+---
+
+🧠 Why:
+
+Ensures wallet is correctly populated
+
+
+
+---
+
+✅ STEP 6: Configure sqlnet.ora
+
+📍 Location:
+
+$ORACLE_HOME/network/admin/sqlnet.ora
+
+Add:
+
+WALLET_LOCATION = (SOURCE = (METHOD = FILE) (METHOD_DATA = (DIRECTORY = /opt/oracle/wallet)))
+SSL_CLIENT_AUTHENTICATION = FALSE
+
+
+---
+
+🔍 What this does:
+
+Setting	Meaning
+
+WALLET_LOCATION	Where wallet is stored
+SSL_CLIENT_AUTHENTICATION = FALSE	No client cert needed
+
+
+
+---
+
+🧠 Why:
+
+Tells Oracle client: 👉 “Use this wallet for SSL connections”
+
+
+
+---
+
+✅ STEP 7: Configure tnsnames.ora
+
+📍 Same directory:
+
+MYDB_TCPS =
+  (DESCRIPTION =
+    (ADDRESS = (PROTOCOL = TCPS)(HOST = your-db-host)(PORT = 2484))
+    (CONNECT_DATA =
+      (SERVICE_NAME = your_service)
+    )
+  )
+
+
+---
+
+🔍 Key part:
+
+PROTOCOL = TCPS
+
+
+---
+
+🧠 Why:
+
+TCPS = TCP + SSL encryption
+
+Without this → still insecure
+
+
+
+---
+
+✅ STEP 8: Test Connection (CRITICAL STEP)
+
+sqlplus username/password@MYDB_TCPS
+
+
+---
+
+🔍 What happens:
+
+Oracle client:
+
+1. Reads wallet
+
+
+2. Loads certificates
+
+
+3. Establishes SSL connection
+
+
+
+
+
+---
+
+🧠 Why:
+
+This confirms: ✔ Wallet correct
+✔ Certificates valid
+✔ DB supports TCPS
+
+
+
+---
+
+✅ STEP 9: Use in Spring Boot
+
+Option 1 (Preferred)
+
+spring.datasource.url=jdbc:oracle:thin:@MYDB_TCPS
+
+
+---
+
+Option 2 (Direct TCPS)
+
+spring.datasource.url=jdbc:oracle:thin:@(DESCRIPTION=
+ (ADDRESS=(PROTOCOL=tcps)(HOST=host)(PORT=2484))
+ (CONNECT_DATA=(SERVICE_NAME=service))
+)
+
+
+---
+
+🧠 What happens:
+
+App uses Oracle client config
+
+Wallet is automatically picked
+
+
+
+---
+
+⚠️ COMMON ERRORS (DETAILED)
+
+
+---
+
+❌ ORA-29024 (Certificate issue)
+
+Cause:
+
+Missing root/intermediate cert
+
+
+Fix:
+
+👉 Add full chain again
+
+
+---
+
+❌ PKIX Path Building Failed (Java issue)
+
+Cause:
+
+JVM doesn’t trust cert
+
+
+Fix:
+
+keytool -import -trustcacerts -alias oracleDB \
+-file root.pem \
+-keystore $JAVA_HOME/lib/security/cacerts
+
+
+---
+
+❌ Handshake Failure
+
+Cause:
+
+TLS mismatch OR DB not configured for TCPS
+
+
+👉 Ask DBA:
+
+“Is TCPS enabled on port 2484?”
+
+
+
+---
+
+🧪 How Auditor Thinks
+
+They will check:
+
+Check	Expected
+
+Protocol	TCPS
+Port	2484
+Encryption	Enabled
+Certificates	Valid
+
+
+
+---
+
+🚀 Final Simplified Flow
+
+1. Create wallet
+
+
+2. Add certificates
+
+
+3. Configure sqlnet
+
+
+4. Use TCPS in connection
+
+
+5. Test
+
+
+6. Plug into app
+
+
+
+
+---
+
+💬 Real Talk (Important for you)
+
+👉 80% of failures happen because:
+
+DBA didn’t give proper certificates
+
+TCPS not enabled on DB
+
+
+
+---
+
+🔥 If you want next step
 
 I can:
 
-Fix your entire EisUtil class (production-ready)
+Give you exact setup for your Linux server
 
-Validate your CryptoUtil
+Help debug errors you get
 
-Give Postman test payload
+Provide Spring Boot + Oracle SSL working example
 
 
-Just say: "fix full class" 👍
-
-
-
-
-package sbi.bcor.helpers;
-
-import java.nio.charset.StandardCharsets;
-import java.security.*;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
-import javax.crypto.Cipher;
-import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
-
-import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.http.*;
-import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestTemplate;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import lombok.extern.slf4j.Slf4j;
-import sbi.bcor.constants.BcorConstants;
-import sbi.bcor.models.*;
-
-@Slf4j
-@Component
-public class EisUtil {
-
-    @Autowired
-    private RestTemplate restTemplate;
-
-    @Autowired
-    private ObjectMapper mapper;
-
-    private static final String AES_GCM = "AES/GCM/NoPadding";
-    private static final String RSA_ALGO = "RSA/ECB/OAEPPadding";
-
-    @Value("${eis.url.fetchpf}")
-    private String pfUrl;
-
-    @Value("${eis.sourceid}")
-    private String sourceId;
-
-    @Value("${eis.certpath}")
-    private String certPath;
-
-    @Value("${server.ssl.key-alias}")
-    private String privateKeyAlias;
-
-    @Value("${server.ssl.key-store}")
-    private String keystorePath;
-
-    @Value("${server.ssl.key-store-password}")
-    private String keystorePassword;
-
-    // ================= AES KEY =================
-    public static String generateAESKey() {
-        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        StringBuilder key = new StringBuilder(32);
-        SecureRandom random = new SecureRandom();
-
-        for (int i = 0; i < 32; i++) {
-            key.append(chars.charAt(random.nextInt(chars.length())));
-        }
-        return key.toString(); // EXACT 32 chars
-    }
-
-    // ================= AES ENCRYPT =================
-    public static String encryptPayload(String plainText, String secretKey) {
-        try {
-            byte[] keyBytes = secretKey.getBytes(StandardCharsets.UTF_8);
-
-            // IV = first 12 bytes
-            byte[] iv = Arrays.copyOfRange(keyBytes, 0, 12);
-
-            Cipher cipher = Cipher.getInstance(AES_GCM);
-            SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
-            GCMParameterSpec spec = new GCMParameterSpec(128, iv);
-
-            cipher.init(Cipher.ENCRYPT_MODE, keySpec, spec);
-
-            byte[] encrypted = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
-
-            return Base64.getEncoder().encodeToString(encrypted);
-
-        } catch (Exception e) {
-            throw new RuntimeException("AES Encryption Failed", e);
-        }
-    }
-
-    // ================= AES DECRYPT =================
-    public static String decryptPayload(String encryptedText, String secretKey) {
-        try {
-            byte[] keyBytes = secretKey.getBytes(StandardCharsets.UTF_8);
-            byte[] iv = Arrays.copyOfRange(keyBytes, 0, 12);
-
-            Cipher cipher = Cipher.getInstance(AES_GCM);
-            SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
-            GCMParameterSpec spec = new GCMParameterSpec(128, iv);
-
-            cipher.init(Cipher.DECRYPT_MODE, keySpec, spec);
-
-            byte[] decoded = Base64.getDecoder().decode(encryptedText);
-
-            return new String(cipher.doFinal(decoded), StandardCharsets.UTF_8);
-
-        } catch (Exception e) {
-            throw new RuntimeException("AES Decryption Failed", e);
-        }
-    }
-
-    // ================= RSA ENCRYPT (ACCESS TOKEN) =================
-    public static String encryptAccessToken(String aesKey, PublicKey publicKey) {
-        try {
-            Cipher cipher = Cipher.getInstance(RSA_ALGO);
-            cipher.init(Cipher.ENCRYPT_MODE, publicKey);
-            return Base64.getEncoder().encodeToString(
-                    cipher.doFinal(aesKey.getBytes(StandardCharsets.UTF_8))
-            );
-        } catch (Exception e) {
-            throw new RuntimeException("RSA Encryption Failed", e);
-        }
-    }
-
-    // ================= MAIN CALL =================
-    public String processEISRequest(String url, String plainJson) throws Exception {
-
-        // Step 1: AES key
-        String aesKey = generateAESKey();
-
-        // Step 2: Encrypt payload
-        String encryptedPayload = encryptPayload(plainJson, aesKey);
-
-        // Step 3: Sign
-        PrivateKey privateKey = CryptoUtil.getPrivatekey(keystorePath, keystorePassword, privateKeyAlias);
-        String digitalSign = CryptoUtil.sign(plainJson, privateKey);
-
-        // Step 4: Encrypt AES key with RSA
-        PublicKey publicKey = getEISPublicKey();
-        String accessToken = encryptAccessToken(aesKey, publicKey);
-
-        // Step 5: Prepare request
-        String reference = getReferanceNo();
-
-        EISEncReq request = new EISEncReq(digitalSign, reference, encryptedPayload);
-        String requestJson = mapper.writeValueAsString(request);
-
-        // Step 6: Call API
-        String response = sendReqToEIS(requestJson, url, accessToken);
-
-        if (response == null || response.isEmpty()) {
-            throw new RuntimeException("EIS returned empty response");
-        }
-
-        EISEncRes resp = mapper.readValue(response, EISEncRes.class);
-
-        // Step 7: Decrypt response
-        return decryptPayload(resp.getRESPONSE(), aesKey);
-    }
-
-    // ================= PUBLIC KEY =================
-    private PublicKey getEISPublicKey() {
-        try {
-            return CryptoUtil.getPublicKey(new ClassPathResource(certPath).getInputStream());
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to load EIS public key", e);
-        }
-    }
-
-    // ================= API CALL =================
-    private String sendReqToEIS(String body, String url, String accessToken) {
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set(BcorConstants.EIS_HEADER, accessToken);
-
-        HttpEntity<String> entity = new HttpEntity<>(body, headers);
-
-        ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
-
-        if (resp.getStatusCode() != HttpStatus.OK) {
-            throw new RuntimeException("EIS Error: " + resp.getBody());
-        }
-
-        return resp.getBody();
-    }
-
-    // ================= REF NUMBER =================
-    private static String getReferanceNo() {
-        StringBuilder str = new StringBuilder();
-        str.append(BcorConstants.BANK_SHORT_CODE + BcorConstants.EIS_SOURCE_ID);
-
-        LocalDateTime now = LocalDateTime.now();
-        DateTimeFormatter format = DateTimeFormatter.ofPattern("yyDDDHHmmssSSS");
-
-        str.append(now.format(format));
-
-        if (EISRefNoCount.getCount() > 99999) {
-            EISRefNoCount.setCount(0);
-        }
-
-        EISRefNoCount.setCount(EISRefNoCount.getCount() + 1);
-
-        str.append(StringUtils.leftPad(String.valueOf(EISRefNoCount.getCount()), 6, "0"));
-
-        return str.toString();
-    }
-}
-
-// ================= COUNTER =================
-final class EISRefNoCount {
-    private static long count;
-
-    public static long getCount() {
-        return count;
-    }
-
-    public static void setCount(long count) {
-        EISRefNoCount.count = count;
-    }
-}
+Just tell me 👍
