@@ -1,17 +1,222 @@
-CurrencyItem inr = null;
-        for (CurrencyItem item : CurrencyProvider.loadAll()) {
-            if ("INR".equals(item.getCode())) {
-                inr = item;
-                break;
-            }
+package sbi.bcor.helpers;
+
+import java.nio.charset.StandardCharsets;
+import java.security.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.*;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestTemplate;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import lombok.extern.slf4j.Slf4j;
+import sbi.bcor.constants.BcorConstants;
+import sbi.bcor.models.*;
+
+@Slf4j
+@Component
+public class EisUtil {
+
+    @Autowired
+    private RestTemplate restTemplate;
+
+    @Autowired
+    private ObjectMapper mapper;
+
+    private static final String AES_GCM = "AES/GCM/NoPadding";
+    private static final String RSA_ALGO = "RSA/ECB/OAEPPadding";
+
+    @Value("${eis.url.fetchpf}")
+    private String pfUrl;
+
+    @Value("${eis.sourceid}")
+    private String sourceId;
+
+    @Value("${eis.certpath}")
+    private String certPath;
+
+    @Value("${server.ssl.key-alias}")
+    private String privateKeyAlias;
+
+    @Value("${server.ssl.key-store}")
+    private String keystorePath;
+
+    @Value("${server.ssl.key-store-password}")
+    private String keystorePassword;
+
+    // ================= AES KEY =================
+    public static String generateAESKey() {
+        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        StringBuilder key = new StringBuilder(32);
+        SecureRandom random = new SecureRandom();
+
+        for (int i = 0; i < 32; i++) {
+            key.append(chars.charAt(random.nextInt(chars.length())));
         }
-        if (inr != null) {
-            currencyCombo.setSelectedItem(inr);
-            CurrencyContext.set(inr);
+        return key.toString(); // EXACT 32 chars
+    }
+
+    // ================= AES ENCRYPT =================
+    public static String encryptPayload(String plainText, String secretKey) {
+        try {
+            byte[] keyBytes = secretKey.getBytes(StandardCharsets.UTF_8);
+
+            // IV = first 12 bytes
+            byte[] iv = Arrays.copyOfRange(keyBytes, 0, 12);
+
+            Cipher cipher = Cipher.getInstance(AES_GCM);
+            SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
+            GCMParameterSpec spec = new GCMParameterSpec(128, iv);
+
+            cipher.init(Cipher.ENCRYPT_MODE, keySpec, spec);
+
+            byte[] encrypted = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
+
+            return Base64.getEncoder().encodeToString(encrypted);
+
+        } catch (Exception e) {
+            throw new RuntimeException("AES Encryption Failed", e);
+        }
+    }
+
+    // ================= AES DECRYPT =================
+    public static String decryptPayload(String encryptedText, String secretKey) {
+        try {
+            byte[] keyBytes = secretKey.getBytes(StandardCharsets.UTF_8);
+            byte[] iv = Arrays.copyOfRange(keyBytes, 0, 12);
+
+            Cipher cipher = Cipher.getInstance(AES_GCM);
+            SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
+            GCMParameterSpec spec = new GCMParameterSpec(128, iv);
+
+            cipher.init(Cipher.DECRYPT_MODE, keySpec, spec);
+
+            byte[] decoded = Base64.getDecoder().decode(encryptedText);
+
+            return new String(cipher.doFinal(decoded), StandardCharsets.UTF_8);
+
+        } catch (Exception e) {
+            throw new RuntimeException("AES Decryption Failed", e);
+        }
+    }
+
+    // ================= RSA ENCRYPT (ACCESS TOKEN) =================
+    public static String encryptAccessToken(String aesKey, PublicKey publicKey) {
+        try {
+            Cipher cipher = Cipher.getInstance(RSA_ALGO);
+            cipher.init(Cipher.ENCRYPT_MODE, publicKey);
+            return Base64.getEncoder().encodeToString(
+                    cipher.doFinal(aesKey.getBytes(StandardCharsets.UTF_8))
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("RSA Encryption Failed", e);
+        }
+    }
+
+    // ================= MAIN CALL =================
+    public String processEISRequest(String url, String plainJson) throws Exception {
+
+        // Step 1: AES key
+        String aesKey = generateAESKey();
+
+        // Step 2: Encrypt payload
+        String encryptedPayload = encryptPayload(plainJson, aesKey);
+
+        // Step 3: Sign
+        PrivateKey privateKey = CryptoUtil.getPrivatekey(keystorePath, keystorePassword, privateKeyAlias);
+        String digitalSign = CryptoUtil.sign(plainJson, privateKey);
+
+        // Step 4: Encrypt AES key with RSA
+        PublicKey publicKey = getEISPublicKey();
+        String accessToken = encryptAccessToken(aesKey, publicKey);
+
+        // Step 5: Prepare request
+        String reference = getReferanceNo();
+
+        EISEncReq request = new EISEncReq(digitalSign, reference, encryptedPayload);
+        String requestJson = mapper.writeValueAsString(request);
+
+        // Step 6: Call API
+        String response = sendReqToEIS(requestJson, url, accessToken);
+
+        if (response == null || response.isEmpty()) {
+            throw new RuntimeException("EIS returned empty response");
         }
 
-        currencyCombo.addActionListener(_ -> {
-            CurrencyContext.set((CurrencyItem) currencyCombo.getSelectedItem());
-            allocationTable.repaint();
-            groupSummaryTable.repaint();
-        });
+        EISEncRes resp = mapper.readValue(response, EISEncRes.class);
+
+        // Step 7: Decrypt response
+        return decryptPayload(resp.getRESPONSE(), aesKey);
+    }
+
+    // ================= PUBLIC KEY =================
+    private PublicKey getEISPublicKey() {
+        try {
+            return CryptoUtil.getPublicKey(new ClassPathResource(certPath).getInputStream());
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to load EIS public key", e);
+        }
+    }
+
+    // ================= API CALL =================
+    private String sendReqToEIS(String body, String url, String accessToken) {
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set(BcorConstants.EIS_HEADER, accessToken);
+
+        HttpEntity<String> entity = new HttpEntity<>(body, headers);
+
+        ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
+
+        if (resp.getStatusCode() != HttpStatus.OK) {
+            throw new RuntimeException("EIS Error: " + resp.getBody());
+        }
+
+        return resp.getBody();
+    }
+
+    // ================= REF NUMBER =================
+    private static String getReferanceNo() {
+        StringBuilder str = new StringBuilder();
+        str.append(BcorConstants.BANK_SHORT_CODE + BcorConstants.EIS_SOURCE_ID);
+
+        LocalDateTime now = LocalDateTime.now();
+        DateTimeFormatter format = DateTimeFormatter.ofPattern("yyDDDHHmmssSSS");
+
+        str.append(now.format(format));
+
+        if (EISRefNoCount.getCount() > 99999) {
+            EISRefNoCount.setCount(0);
+        }
+
+        EISRefNoCount.setCount(EISRefNoCount.getCount() + 1);
+
+        str.append(StringUtils.leftPad(String.valueOf(EISRefNoCount.getCount()), 6, "0"));
+
+        return str.toString();
+    }
+}
+
+// ================= COUNTER =================
+final class EISRefNoCount {
+    private static long count;
+
+    public static long getCount() {
+        return count;
+    }
+
+    public static void setCount(long count) {
+        EISRefNoCount.count = count;
+    }
+}
