@@ -1,236 +1,109 @@
-Good—now we can actually build something worth showing in interviews, not just a Swing demo 😄
-We’ll do this like a real application with structure, separation of concerns, and extensibility.
+Alright 😄—time to turn this from “college project UI” into something that actually feels like a developer tool you’d use daily.
+
+We’ll upgrade your app in 3 layers:
+
+1. Features (CRUD + Search)
+
+
+2. UI polish (layout, UX, interactions)
+
+
+3. Professional touches (structure, logging, config)
+
+
+
+Follow step-by-step—don’t skip.
 
 
 ---
 
-🧱 Phase 1: Project Foundation (Production Style)
-
-🎯 Goal
-
-Build Snippet Manager module inside your Developer Workbench
+🚀 Phase 2: Real Features + Professional UI
 
 
 ---
 
-📁 Step 1: Create Project Structure (VERY IMPORTANT)
+🧠 Step 1: Upgrade DAO (Add UPDATE + SEARCH)
 
-In IntelliJ IDEA Community Edition create a new project:
+📄 Update SnippetDAO.java
 
-dev-workbench
+Add these methods:
 
-Now create packages:
+public void update(Snippet snippet) {
+    String sql = "UPDATE snippet SET title=?, code=? WHERE id=?";
 
-com.devworkbench
- ├── config
- ├── db
- ├── model
- ├── dao
- ├── service
- ├── ui
- │    ├── main
- │    └── snippet
- └── util
+    try (Connection conn = DBConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
 
-👉 This is clean layered architecture (like Spring Boot)
+        ps.setString(1, snippet.getTitle());
+        ps.setString(2, snippet.getCode());
+        ps.setInt(3, snippet.getId());
+        ps.executeUpdate();
 
-
----
-
-⚙️ Step 2: Database Configuration Class
-
-📄 config/DBConfig.java
-
-package com.devworkbench.config;
-
-public class DBConfig {
-    public static final String JDBC_URL = "jdbc:h2:file:C:/dev-tools/h2/devworkbench";
-    public static final String USER = "sa";
-    public static final String PASSWORD = "";
-}
-
-
----
-
-🔌 Step 3: DB Connection Utility
-
-📄 db/DBConnection.java
-
-package com.devworkbench.db;
-
-import com.devworkbench.config.DBConfig;
-
-import java.sql.Connection;
-import java.sql.DriverManager;
-
-public class DBConnection {
-
-    private static Connection connection;
-
-    public static Connection getConnection() {
-        try {
-            if (connection == null || connection.isClosed()) {
-                connection = DriverManager.getConnection(
-                        DBConfig.JDBC_URL,
-                        DBConfig.USER,
-                        DBConfig.PASSWORD
-                );
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return connection;
+    } catch (Exception e) {
+        e.printStackTrace();
     }
 }
 
-👉 Singleton-style connection (simple but effective for desktop app)
+public List<Snippet> search(String keyword) {
+    List<Snippet> list = new ArrayList<>();
+    String sql = "SELECT * FROM snippet WHERE LOWER(title) LIKE ?";
 
+    try (Connection conn = DBConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
 
----
+        ps.setString(1, "%" + keyword.toLowerCase() + "%");
+        ResultSet rs = ps.executeQuery();
 
-🧾 Step 4: Create Model (Entity)
-
-📄 model/Snippet.java
-
-package com.devworkbench.model;
-
-public class Snippet {
-    private int id;
-    private String title;
-    private String code;
-
-    public Snippet() {}
-
-    public Snippet(int id, String title, String code) {
-        this.id = id;
-        this.title = title;
-        this.code = code;
-    }
-
-    public Snippet(String title, String code) {
-        this.title = title;
-        this.code = code;
-    }
-
-    public int getId() { return id; }
-    public void setId(int id) { this.id = id; }
-
-    public String getTitle() { return title; }
-    public void setTitle(String title) { this.title = title; }
-
-    public String getCode() { return code; }
-    public void setCode(String code) { this.code = code; }
-}
-
-
----
-
-🗄️ Step 5: DAO Layer (REAL DB OPERATIONS)
-
-📄 dao/SnippetDAO.java
-
-package com.devworkbench.dao;
-
-import com.devworkbench.db.DBConnection;
-import com.devworkbench.model.Snippet;
-
-import java.sql.*;
-import java.util.ArrayList;
-import java.util.List;
-
-public class SnippetDAO {
-
-    public void save(Snippet snippet) {
-        String sql = "INSERT INTO snippet(title, code) VALUES (?, ?)";
-
-        try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, snippet.getTitle());
-            ps.setString(2, snippet.getCode());
-            ps.executeUpdate();
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    public List<Snippet> findAll() {
-        List<Snippet> list = new ArrayList<>();
-        String sql = "SELECT * FROM snippet";
-
-        try (Connection conn = DBConnection.getConnection();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-
-            while (rs.next()) {
-                Snippet s = new Snippet(
-                        rs.getInt("id"),
-                        rs.getString("title"),
-                        rs.getString("code")
-                );
-                list.add(s);
-            }
-
-        } catch (Exception e) {
-            e.printStackTrace();
+        while (rs.next()) {
+            list.add(new Snippet(
+                    rs.getInt("id"),
+                    rs.getString("title"),
+                    rs.getString("code")
+            ));
         }
 
-        return list;
+    } catch (Exception e) {
+        e.printStackTrace();
     }
 
-    public void delete(int id) {
-        String sql = "DELETE FROM snippet WHERE id=?";
-
-        try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setInt(1, id);
-            ps.executeUpdate();
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
+    return list;
 }
 
 
 ---
 
-🧠 Step 6: Service Layer (Clean Abstraction)
+🧠 Step 2: Update Service Layer
 
-📄 service/SnippetService.java
+📄 SnippetService.java
 
-package com.devworkbench.service;
+public void updateSnippet(int id, String title, String code) {
+    dao.update(new Snippet(id, title, code));
+}
 
-import com.devworkbench.dao.SnippetDAO;
-import com.devworkbench.model.Snippet;
-
-import java.util.List;
-
-public class SnippetService {
-
-    private final SnippetDAO dao = new SnippetDAO();
-
-    public void addSnippet(String title, String code) {
-        dao.save(new Snippet(title, code));
-    }
-
-    public List<Snippet> getAllSnippets() {
-        return dao.findAll();
-    }
-
-    public void deleteSnippet(int id) {
-        dao.delete(id);
-    }
+public List<Snippet> searchSnippets(String keyword) {
+    return dao.search(keyword);
 }
 
 
 ---
 
-🖥️ Step 7: Build UI (Swing – Real Layout)
+🎨 Step 3: Upgrade UI (THIS IS WHERE MAGIC HAPPENS)
 
-📄 ui/snippet/SnippetPanel.java
+We’ll transform your UI:
+
+Split layout (form + table)
+
+Add search bar
+
+Add edit/delete buttons
+
+Add row selection behavior
+
+
+
+---
+
+📄 Replace SnippetPanel.java with THIS:
 
 package com.devworkbench.ui.snippet;
 
@@ -238,6 +111,7 @@ import com.devworkbench.model.Snippet;
 import com.devworkbench.service.SnippetService;
 
 import javax.swing.*;
+import javax.swing.event.ListSelectionEvent;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.util.List;
@@ -246,57 +120,110 @@ public class SnippetPanel extends JPanel {
 
     private JTextField titleField;
     private JTextArea codeArea;
+    private JTextField searchField;
     private JTable table;
     private DefaultTableModel tableModel;
 
     private final SnippetService service = new SnippetService();
 
-    public SnippetPanel() {
-        setLayout(new BorderLayout());
+    private int selectedId = -1;
 
-        // Top panel (input)
-        JPanel inputPanel = new JPanel(new GridLayout(3, 1));
+    public SnippetPanel() {
+        setLayout(new BorderLayout(10, 10));
+
+        // 🔍 Top Search Panel
+        JPanel topPanel = new JPanel(new BorderLayout());
+        searchField = new JTextField();
+        JButton searchBtn = new JButton("Search");
+
+        topPanel.add(searchField, BorderLayout.CENTER);
+        topPanel.add(searchBtn, BorderLayout.EAST);
+
+        add(topPanel, BorderLayout.NORTH);
+
+        // 🧾 Form Panel
+        JPanel formPanel = new JPanel(new BorderLayout(5, 5));
 
         titleField = new JTextField();
-        codeArea = new JTextArea(5, 20);
+        codeArea = new JTextArea(10, 20);
 
-        JButton saveBtn = new JButton("Save Snippet");
+        formPanel.add(new JLabel("Title:"), BorderLayout.NORTH);
+        formPanel.add(titleField, BorderLayout.CENTER);
+        formPanel.add(new JScrollPane(codeArea), BorderLayout.SOUTH);
 
-        inputPanel.add(new JLabel("Title:"));
-        inputPanel.add(titleField);
-        inputPanel.add(new JScrollPane(codeArea));
-        inputPanel.add(saveBtn);
+        // 🎛️ Buttons
+        JPanel buttonPanel = new JPanel();
+        JButton saveBtn = new JButton("Save");
+        JButton updateBtn = new JButton("Update");
+        JButton deleteBtn = new JButton("Delete");
+        JButton clearBtn = new JButton("Clear");
 
-        add(inputPanel, BorderLayout.NORTH);
+        buttonPanel.add(saveBtn);
+        buttonPanel.add(updateBtn);
+        buttonPanel.add(deleteBtn);
+        buttonPanel.add(clearBtn);
 
-        // Table
+        // 📊 Table
         tableModel = new DefaultTableModel(new String[]{"ID", "Title", "Code"}, 0);
         table = new JTable(tableModel);
 
-        add(new JScrollPane(table), BorderLayout.CENTER);
+        JScrollPane tableScroll = new JScrollPane(table);
 
-        // Button action
+        // 🧩 Split Pane (Modern UI Feel)
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
+                formPanel, tableScroll);
+
+        splitPane.setDividerLocation(300);
+
+        add(splitPane, BorderLayout.CENTER);
+        add(buttonPanel, BorderLayout.SOUTH);
+
+        // 🔗 Actions
         saveBtn.addActionListener(e -> saveSnippet());
+        updateBtn.addActionListener(e -> updateSnippet());
+        deleteBtn.addActionListener(e -> deleteSnippet());
+        clearBtn.addActionListener(e -> clearForm());
+        searchBtn.addActionListener(e -> search());
+
+        table.getSelectionModel().addListSelectionListener(this::onRowSelect);
 
         loadData();
     }
 
     private void saveSnippet() {
-        String title = titleField.getText();
-        String code = codeArea.getText();
-
-        service.addSnippet(title, code);
-
-        titleField.setText("");
-        codeArea.setText("");
-
+        service.addSnippet(titleField.getText(), codeArea.getText());
+        clearForm();
         loadData();
     }
 
-    private void loadData() {
-        tableModel.setRowCount(0);
+    private void updateSnippet() {
+        if (selectedId != -1) {
+            service.updateSnippet(selectedId, titleField.getText(), codeArea.getText());
+            clearForm();
+            loadData();
+        }
+    }
 
-        List<Snippet> list = service.getAllSnippets();
+    private void deleteSnippet() {
+        if (selectedId != -1) {
+            service.deleteSnippet(selectedId);
+            clearForm();
+            loadData();
+        }
+    }
+
+    private void search() {
+        String keyword = searchField.getText();
+        List<Snippet> list = service.searchSnippets(keyword);
+        refreshTable(list);
+    }
+
+    private void loadData() {
+        refreshTable(service.getAllSnippets());
+    }
+
+    private void refreshTable(List<Snippet> list) {
+        tableModel.setRowCount(0);
 
         for (Snippet s : list) {
             tableModel.addRow(new Object[]{
@@ -306,95 +233,91 @@ public class SnippetPanel extends JPanel {
             });
         }
     }
-}
 
-
----
-
-🏠 Step 8: Main App Window
-
-📄 ui/main/MainFrame.java
-
-package com.devworkbench.ui.main;
-
-import com.devworkbench.ui.snippet.SnippetPanel;
-
-import javax.swing.*;
-
-public class MainFrame extends JFrame {
-
-    public MainFrame() {
-        setTitle("Developer Workbench");
-        setSize(800, 600);
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-
-        JTabbedPane tabbedPane = new JTabbedPane();
-        tabbedPane.add("Snippets", new SnippetPanel());
-
-        add(tabbedPane);
+    private void clearForm() {
+        titleField.setText("");
+        codeArea.setText("");
+        selectedId = -1;
+        table.clearSelection();
     }
 
-    public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> {
-            new MainFrame().setVisible(true);
-        });
+    private void onRowSelect(ListSelectionEvent e) {
+        int row = table.getSelectedRow();
+        if (row >= 0) {
+            selectedId = (int) tableModel.getValueAt(row, 0);
+            titleField.setText((String) tableModel.getValueAt(row, 1));
+            codeArea.setText((String) tableModel.getValueAt(row, 2));
+        }
     }
 }
 
 
 ---
 
-▶️ Step 9: Run Application
+✨ Step 4: Make UI Look Professional (IMPORTANT)
 
-Run:
+Add this in MainFrame.java constructor BEFORE UI loads:
 
-MainFrame.java
+try {
+    UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+} catch (Exception e) {
+    e.printStackTrace();
+}
 
-
----
-
-🎉 What You Just Built (Not a Toy)
-
-You now have:
-
-✅ Layered architecture (like Spring Boot)
-✅ Persistent DB (H2)
-✅ Working UI (Swing)
-✅ CRUD operations
-✅ Modular design (extensible)
+👉 This makes it look like native Windows app instead of ugly default Swing
 
 
 ---
 
-🚀 Next Level (We’ll Do Next)
+🎯 What You Just Added
 
-In next step, we’ll upgrade this into real production quality:
+Now your app has:
 
-✨ Search + filtering
+✅ Add / Edit / Delete
+✅ Search functionality
+✅ Table selection → auto-fill form
+✅ Split layout (modern feel)
+✅ Cleaner UX
+✅ Real workflow like tools (Postman/JIRA style)
 
-✨ Update/edit snippet
 
-✨ Delete button in UI
+---
 
-✨ Better UI (split panes, styling)
+🚀 Next-Level Upgrades (Tell me and I’ll guide)
 
-✨ Logging instead of printStackTrace
+Now we can go next tier (this is where it becomes 🔥):
 
-✨ Exception handling layer
+💎 Advanced Features:
 
-✨ Config file instead of hardcoding DB path
+Syntax highlighting (like IDE)
+
+Dark theme (developer style)
+
+Export snippets to file
+
+Copy-to-clipboard button
+
+Tag system (Java, SQL, React…)
+
+Keyboard shortcuts (Ctrl+S, Ctrl+F)
+
+JSON formatter panel (for API module)
 
 
 
 ---
 
-👉 Your Turn
+👉 Your Task
 
-Run this and tell me:
+Run this upgraded version and tell me:
 
-UI working?
+UI improved?
 
-Data saving + loading?
+CRUD working smoothly?
+
+Search working?
 
 
-If yes → next we level this up to senior-level project quality (this is where most people fail in interviews 😄)
+Then I’ll help you add:
+
+👉 Dark theme + syntax highlighting (this will make it look INSANE 🔥)
