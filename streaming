@@ -1,222 +1,223 @@
-package sbi.bcor.helpers;
+Perfect—that actually helps a lot. With IntelliJ IDEA Community Edition + Windows 11 + corporate network restrictions, we’ll keep everything offline-friendly and simple.
 
-import java.nio.charset.StandardCharsets;
-import java.security.*;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
-import javax.crypto.Cipher;
-import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
+We’ll avoid anything that needs external downloads after this step.
 
-import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.http.*;
-import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestTemplate;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+---
 
-import lombok.extern.slf4j.Slf4j;
-import sbi.bcor.constants.BcorConstants;
-import sbi.bcor.models.*;
+✅ Step-by-Step: Setup H2 on Windows (Corporate Safe)
 
-@Slf4j
-@Component
-public class EisUtil {
+📥 Step 1: Download (If site is blocked)
 
-    @Autowired
-    private RestTemplate restTemplate;
+If the official H2 site is blocked, use one of these options:
 
-    @Autowired
-    private ObjectMapper mapper;
+Option A (Preferred)
 
-    private static final String AES_GCM = "AES/GCM/NoPadding";
-    private static final String RSA_ALGO = "RSA/ECB/OAEPPadding";
+Ask your colleague to share:
 
-    @Value("${eis.url.fetchpf}")
-    private String pfUrl;
+h2-2.x.x.jar file
 
-    @Value("${eis.sourceid}")
-    private String sourceId;
 
-    @Value("${eis.certpath}")
-    private String certPath;
+Option B
 
-    @Value("${server.ssl.key-alias}")
-    private String privateKeyAlias;
+Download from Maven Central: 👉 https://repo1.maven.org/maven2/com/h2database/h2/
 
-    @Value("${server.ssl.key-store}")
-    private String keystorePath;
+Download latest .jar (example: h2-2.2.224.jar)
 
-    @Value("${server.ssl.key-store-password}")
-    private String keystorePassword;
+👉 This usually works even on restricted networks.
 
-    // ================= AES KEY =================
-    public static String generateAESKey() {
-        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        StringBuilder key = new StringBuilder(32);
-        SecureRandom random = new SecureRandom();
 
-        for (int i = 0; i < 32; i++) {
-            key.append(chars.charAt(random.nextInt(chars.length())));
-        }
-        return key.toString(); // EXACT 32 chars
-    }
+---
 
-    // ================= AES ENCRYPT =================
-    public static String encryptPayload(String plainText, String secretKey) {
+📁 Step 2: Place JAR in a Fixed Location
+
+Create a folder:
+
+C:\dev-tools\h2\
+
+Put the jar there:
+
+C:\dev-tools\h2\h2-2.2.224.jar
+
+
+---
+
+▶️ Step 3: Run H2 Console
+
+Open Command Prompt:
+
+cd C:\dev-tools\h2
+java -jar h2-2.2.224.jar
+
+👉 You should see:
+
+“H2 Console available at http://localhost:8082”
+
+
+
+---
+
+🌐 Step 4: Open Console
+
+Open browser manually:
+
+http://localhost:8082
+
+
+---
+
+🔐 Step 5: Login Settings (IMPORTANT)
+
+Use this (best for our app):
+
+JDBC URL: jdbc:h2:file:C:/dev-tools/h2/devworkbench
+User: sa
+Password: (leave empty)
+
+👉 This creates a persistent database file (not temporary)
+
+
+---
+
+🧪 Step 6: Verify Setup
+
+Run:
+
+CREATE TABLE snippet (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(255),
+    code CLOB
+);
+
+SELECT * FROM snippet;
+
+If no errors → ✅ Done
+
+
+---
+
+🧠 Important for Corporate Environment
+
+No server install needed ✔
+
+No admin rights needed ✔
+
+Works offline ✔
+
+No ports except localhost ✔
+
+
+👉 Safe for corporate machines
+
+
+---
+
+⚙️ Step 7: Setup in IntelliJ (NO Maven Needed)
+
+Since network may block dependencies, we’ll go manual JAR setup.
+
+Add H2 JAR to Project:
+
+1. Open your project in IntelliJ IDEA Community Edition
+
+
+2. Go to:
+
+File → Project Structure → Libraries
+
+
+3. Click + → Java
+
+
+4. Select:
+
+C:\dev-tools\h2\h2-2.2.224.jar
+
+
+5. Apply → OK
+
+
+
+
+---
+
+🧱 Step 8: Test DB Connection (Java Code)
+
+Create a test class:
+
+import java.sql.Connection;
+import java.sql.DriverManager;
+
+public class TestDB {
+    public static void main(String[] args) {
         try {
-            byte[] keyBytes = secretKey.getBytes(StandardCharsets.UTF_8);
-
-            // IV = first 12 bytes
-            byte[] iv = Arrays.copyOfRange(keyBytes, 0, 12);
-
-            Cipher cipher = Cipher.getInstance(AES_GCM);
-            SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
-            GCMParameterSpec spec = new GCMParameterSpec(128, iv);
-
-            cipher.init(Cipher.ENCRYPT_MODE, keySpec, spec);
-
-            byte[] encrypted = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
-
-            return Base64.getEncoder().encodeToString(encrypted);
-
-        } catch (Exception e) {
-            throw new RuntimeException("AES Encryption Failed", e);
-        }
-    }
-
-    // ================= AES DECRYPT =================
-    public static String decryptPayload(String encryptedText, String secretKey) {
-        try {
-            byte[] keyBytes = secretKey.getBytes(StandardCharsets.UTF_8);
-            byte[] iv = Arrays.copyOfRange(keyBytes, 0, 12);
-
-            Cipher cipher = Cipher.getInstance(AES_GCM);
-            SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
-            GCMParameterSpec spec = new GCMParameterSpec(128, iv);
-
-            cipher.init(Cipher.DECRYPT_MODE, keySpec, spec);
-
-            byte[] decoded = Base64.getDecoder().decode(encryptedText);
-
-            return new String(cipher.doFinal(decoded), StandardCharsets.UTF_8);
-
-        } catch (Exception e) {
-            throw new RuntimeException("AES Decryption Failed", e);
-        }
-    }
-
-    // ================= RSA ENCRYPT (ACCESS TOKEN) =================
-    public static String encryptAccessToken(String aesKey, PublicKey publicKey) {
-        try {
-            Cipher cipher = Cipher.getInstance(RSA_ALGO);
-            cipher.init(Cipher.ENCRYPT_MODE, publicKey);
-            return Base64.getEncoder().encodeToString(
-                    cipher.doFinal(aesKey.getBytes(StandardCharsets.UTF_8))
+            Connection conn = DriverManager.getConnection(
+                "jdbc:h2:file:C:/dev-tools/h2/devworkbench",
+                "sa",
+                ""
             );
+            System.out.println("Connected to H2 DB!");
         } catch (Exception e) {
-            throw new RuntimeException("RSA Encryption Failed", e);
+            e.printStackTrace();
         }
-    }
-
-    // ================= MAIN CALL =================
-    public String processEISRequest(String url, String plainJson) throws Exception {
-
-        // Step 1: AES key
-        String aesKey = generateAESKey();
-
-        // Step 2: Encrypt payload
-        String encryptedPayload = encryptPayload(plainJson, aesKey);
-
-        // Step 3: Sign
-        PrivateKey privateKey = CryptoUtil.getPrivatekey(keystorePath, keystorePassword, privateKeyAlias);
-        String digitalSign = CryptoUtil.sign(plainJson, privateKey);
-
-        // Step 4: Encrypt AES key with RSA
-        PublicKey publicKey = getEISPublicKey();
-        String accessToken = encryptAccessToken(aesKey, publicKey);
-
-        // Step 5: Prepare request
-        String reference = getReferanceNo();
-
-        EISEncReq request = new EISEncReq(digitalSign, reference, encryptedPayload);
-        String requestJson = mapper.writeValueAsString(request);
-
-        // Step 6: Call API
-        String response = sendReqToEIS(requestJson, url, accessToken);
-
-        if (response == null || response.isEmpty()) {
-            throw new RuntimeException("EIS returned empty response");
-        }
-
-        EISEncRes resp = mapper.readValue(response, EISEncRes.class);
-
-        // Step 7: Decrypt response
-        return decryptPayload(resp.getRESPONSE(), aesKey);
-    }
-
-    // ================= PUBLIC KEY =================
-    private PublicKey getEISPublicKey() {
-        try {
-            return CryptoUtil.getPublicKey(new ClassPathResource(certPath).getInputStream());
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to load EIS public key", e);
-        }
-    }
-
-    // ================= API CALL =================
-    private String sendReqToEIS(String body, String url, String accessToken) {
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set(BcorConstants.EIS_HEADER, accessToken);
-
-        HttpEntity<String> entity = new HttpEntity<>(body, headers);
-
-        ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
-
-        if (resp.getStatusCode() != HttpStatus.OK) {
-            throw new RuntimeException("EIS Error: " + resp.getBody());
-        }
-
-        return resp.getBody();
-    }
-
-    // ================= REF NUMBER =================
-    private static String getReferanceNo() {
-        StringBuilder str = new StringBuilder();
-        str.append(BcorConstants.BANK_SHORT_CODE + BcorConstants.EIS_SOURCE_ID);
-
-        LocalDateTime now = LocalDateTime.now();
-        DateTimeFormatter format = DateTimeFormatter.ofPattern("yyDDDHHmmssSSS");
-
-        str.append(now.format(format));
-
-        if (EISRefNoCount.getCount() > 99999) {
-            EISRefNoCount.setCount(0);
-        }
-
-        EISRefNoCount.setCount(EISRefNoCount.getCount() + 1);
-
-        str.append(StringUtils.leftPad(String.valueOf(EISRefNoCount.getCount()), 6, "0"));
-
-        return str.toString();
     }
 }
 
-// ================= COUNTER =================
-final class EISRefNoCount {
-    private static long count;
+Run it → You should see:
 
-    public static long getCount() {
-        return count;
-    }
+Connected to H2 DB!
 
-    public static void setCount(long count) {
-        EISRefNoCount.count = count;
-    }
-}
+
+---
+
+✅ Now You Are Ready
+
+You now have:
+
+H2 running locally ✔
+
+Persistent DB ✔
+
+IntelliJ setup ✔
+
+Java connection working ✔
+
+
+
+---
+
+🚀 NEXT: Let’s Start Building the App
+
+Now we move to:
+
+🔥 Phase 1 – Developer Workbench Foundation
+
+We’ll build:
+
+1. Project structure (MVC)
+
+
+2. DB connection utility
+
+
+3. First module → Snippet Manager UI (Swing)
+
+
+
+
+---
+
+👉 Before I proceed, confirm this:
+
+Did your DB connection test run successfully?
+
+If yes → I’ll give you:
+
+Clean project structure
+
+First Swing screen (real UI, not theory)
+
+CRUD operations wired to H2
+
+
+We’ll build this like a real production app, not a toy.
