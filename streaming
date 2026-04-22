@@ -1,223 +1,400 @@
-Perfect—that actually helps a lot. With IntelliJ IDEA Community Edition + Windows 11 + corporate network restrictions, we’ll keep everything offline-friendly and simple.
-
-We’ll avoid anything that needs external downloads after this step.
-
-
----
-
-✅ Step-by-Step: Setup H2 on Windows (Corporate Safe)
-
-📥 Step 1: Download (If site is blocked)
-
-If the official H2 site is blocked, use one of these options:
-
-Option A (Preferred)
-
-Ask your colleague to share:
-
-h2-2.x.x.jar file
-
-
-Option B
-
-Download from Maven Central: 👉 https://repo1.maven.org/maven2/com/h2database/h2/
-
-Download latest .jar (example: h2-2.2.224.jar)
-
-👉 This usually works even on restricted networks.
+Good—now we can actually build something worth showing in interviews, not just a Swing demo 😄
+We’ll do this like a real application with structure, separation of concerns, and extensibility.
 
 
 ---
 
-📁 Step 2: Place JAR in a Fixed Location
+🧱 Phase 1: Project Foundation (Production Style)
 
-Create a folder:
+🎯 Goal
 
-C:\dev-tools\h2\
-
-Put the jar there:
-
-C:\dev-tools\h2\h2-2.2.224.jar
+Build Snippet Manager module inside your Developer Workbench
 
 
 ---
 
-▶️ Step 3: Run H2 Console
+📁 Step 1: Create Project Structure (VERY IMPORTANT)
 
-Open Command Prompt:
+In IntelliJ IDEA Community Edition create a new project:
 
-cd C:\dev-tools\h2
-java -jar h2-2.2.224.jar
+dev-workbench
 
-👉 You should see:
+Now create packages:
 
-“H2 Console available at http://localhost:8082”
+com.devworkbench
+ ├── config
+ ├── db
+ ├── model
+ ├── dao
+ ├── service
+ ├── ui
+ │    ├── main
+ │    └── snippet
+ └── util
 
-
-
----
-
-🌐 Step 4: Open Console
-
-Open browser manually:
-
-http://localhost:8082
-
-
----
-
-🔐 Step 5: Login Settings (IMPORTANT)
-
-Use this (best for our app):
-
-JDBC URL: jdbc:h2:file:C:/dev-tools/h2/devworkbench
-User: sa
-Password: (leave empty)
-
-👉 This creates a persistent database file (not temporary)
+👉 This is clean layered architecture (like Spring Boot)
 
 
 ---
 
-🧪 Step 6: Verify Setup
+⚙️ Step 2: Database Configuration Class
 
-Run:
+📄 config/DBConfig.java
 
-CREATE TABLE snippet (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(255),
-    code CLOB
-);
+package com.devworkbench.config;
 
-SELECT * FROM snippet;
-
-If no errors → ✅ Done
+public class DBConfig {
+    public static final String JDBC_URL = "jdbc:h2:file:C:/dev-tools/h2/devworkbench";
+    public static final String USER = "sa";
+    public static final String PASSWORD = "";
+}
 
 
 ---
 
-🧠 Important for Corporate Environment
+🔌 Step 3: DB Connection Utility
 
-No server install needed ✔
+📄 db/DBConnection.java
 
-No admin rights needed ✔
+package com.devworkbench.db;
 
-Works offline ✔
-
-No ports except localhost ✔
-
-
-👉 Safe for corporate machines
-
-
----
-
-⚙️ Step 7: Setup in IntelliJ (NO Maven Needed)
-
-Since network may block dependencies, we’ll go manual JAR setup.
-
-Add H2 JAR to Project:
-
-1. Open your project in IntelliJ IDEA Community Edition
-
-
-2. Go to:
-
-File → Project Structure → Libraries
-
-
-3. Click + → Java
-
-
-4. Select:
-
-C:\dev-tools\h2\h2-2.2.224.jar
-
-
-5. Apply → OK
-
-
-
-
----
-
-🧱 Step 8: Test DB Connection (Java Code)
-
-Create a test class:
+import com.devworkbench.config.DBConfig;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
 
-public class TestDB {
-    public static void main(String[] args) {
+public class DBConnection {
+
+    private static Connection connection;
+
+    public static Connection getConnection() {
         try {
-            Connection conn = DriverManager.getConnection(
-                "jdbc:h2:file:C:/dev-tools/h2/devworkbench",
-                "sa",
-                ""
-            );
-            System.out.println("Connected to H2 DB!");
+            if (connection == null || connection.isClosed()) {
+                connection = DriverManager.getConnection(
+                        DBConfig.JDBC_URL,
+                        DBConfig.USER,
+                        DBConfig.PASSWORD
+                );
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return connection;
+    }
+}
+
+👉 Singleton-style connection (simple but effective for desktop app)
+
+
+---
+
+🧾 Step 4: Create Model (Entity)
+
+📄 model/Snippet.java
+
+package com.devworkbench.model;
+
+public class Snippet {
+    private int id;
+    private String title;
+    private String code;
+
+    public Snippet() {}
+
+    public Snippet(int id, String title, String code) {
+        this.id = id;
+        this.title = title;
+        this.code = code;
+    }
+
+    public Snippet(String title, String code) {
+        this.title = title;
+        this.code = code;
+    }
+
+    public int getId() { return id; }
+    public void setId(int id) { this.id = id; }
+
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
+
+    public String getCode() { return code; }
+    public void setCode(String code) { this.code = code; }
+}
+
+
+---
+
+🗄️ Step 5: DAO Layer (REAL DB OPERATIONS)
+
+📄 dao/SnippetDAO.java
+
+package com.devworkbench.dao;
+
+import com.devworkbench.db.DBConnection;
+import com.devworkbench.model.Snippet;
+
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
+
+public class SnippetDAO {
+
+    public void save(Snippet snippet) {
+        String sql = "INSERT INTO snippet(title, code) VALUES (?, ?)";
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setString(1, snippet.getTitle());
+            ps.setString(2, snippet.getCode());
+            ps.executeUpdate();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public List<Snippet> findAll() {
+        List<Snippet> list = new ArrayList<>();
+        String sql = "SELECT * FROM snippet";
+
+        try (Connection conn = DBConnection.getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
+            while (rs.next()) {
+                Snippet s = new Snippet(
+                        rs.getInt("id"),
+                        rs.getString("title"),
+                        rs.getString("code")
+                );
+                list.add(s);
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return list;
+    }
+
+    public void delete(int id) {
+        String sql = "DELETE FROM snippet WHERE id=?";
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, id);
+            ps.executeUpdate();
+
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 }
 
-Run it → You should see:
 
-Connected to H2 DB!
+---
+
+🧠 Step 6: Service Layer (Clean Abstraction)
+
+📄 service/SnippetService.java
+
+package com.devworkbench.service;
+
+import com.devworkbench.dao.SnippetDAO;
+import com.devworkbench.model.Snippet;
+
+import java.util.List;
+
+public class SnippetService {
+
+    private final SnippetDAO dao = new SnippetDAO();
+
+    public void addSnippet(String title, String code) {
+        dao.save(new Snippet(title, code));
+    }
+
+    public List<Snippet> getAllSnippets() {
+        return dao.findAll();
+    }
+
+    public void deleteSnippet(int id) {
+        dao.delete(id);
+    }
+}
 
 
 ---
 
-✅ Now You Are Ready
+🖥️ Step 7: Build UI (Swing – Real Layout)
+
+📄 ui/snippet/SnippetPanel.java
+
+package com.devworkbench.ui.snippet;
+
+import com.devworkbench.model.Snippet;
+import com.devworkbench.service.SnippetService;
+
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.util.List;
+
+public class SnippetPanel extends JPanel {
+
+    private JTextField titleField;
+    private JTextArea codeArea;
+    private JTable table;
+    private DefaultTableModel tableModel;
+
+    private final SnippetService service = new SnippetService();
+
+    public SnippetPanel() {
+        setLayout(new BorderLayout());
+
+        // Top panel (input)
+        JPanel inputPanel = new JPanel(new GridLayout(3, 1));
+
+        titleField = new JTextField();
+        codeArea = new JTextArea(5, 20);
+
+        JButton saveBtn = new JButton("Save Snippet");
+
+        inputPanel.add(new JLabel("Title:"));
+        inputPanel.add(titleField);
+        inputPanel.add(new JScrollPane(codeArea));
+        inputPanel.add(saveBtn);
+
+        add(inputPanel, BorderLayout.NORTH);
+
+        // Table
+        tableModel = new DefaultTableModel(new String[]{"ID", "Title", "Code"}, 0);
+        table = new JTable(tableModel);
+
+        add(new JScrollPane(table), BorderLayout.CENTER);
+
+        // Button action
+        saveBtn.addActionListener(e -> saveSnippet());
+
+        loadData();
+    }
+
+    private void saveSnippet() {
+        String title = titleField.getText();
+        String code = codeArea.getText();
+
+        service.addSnippet(title, code);
+
+        titleField.setText("");
+        codeArea.setText("");
+
+        loadData();
+    }
+
+    private void loadData() {
+        tableModel.setRowCount(0);
+
+        List<Snippet> list = service.getAllSnippets();
+
+        for (Snippet s : list) {
+            tableModel.addRow(new Object[]{
+                    s.getId(),
+                    s.getTitle(),
+                    s.getCode()
+            });
+        }
+    }
+}
+
+
+---
+
+🏠 Step 8: Main App Window
+
+📄 ui/main/MainFrame.java
+
+package com.devworkbench.ui.main;
+
+import com.devworkbench.ui.snippet.SnippetPanel;
+
+import javax.swing.*;
+
+public class MainFrame extends JFrame {
+
+    public MainFrame() {
+        setTitle("Developer Workbench");
+        setSize(800, 600);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+
+        JTabbedPane tabbedPane = new JTabbedPane();
+        tabbedPane.add("Snippets", new SnippetPanel());
+
+        add(tabbedPane);
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            new MainFrame().setVisible(true);
+        });
+    }
+}
+
+
+---
+
+▶️ Step 9: Run Application
+
+Run:
+
+MainFrame.java
+
+
+---
+
+🎉 What You Just Built (Not a Toy)
 
 You now have:
 
-H2 running locally ✔
+✅ Layered architecture (like Spring Boot)
+✅ Persistent DB (H2)
+✅ Working UI (Swing)
+✅ CRUD operations
+✅ Modular design (extensible)
 
-Persistent DB ✔
 
-IntelliJ setup ✔
+---
 
-Java connection working ✔
+🚀 Next Level (We’ll Do Next)
+
+In next step, we’ll upgrade this into real production quality:
+
+✨ Search + filtering
+
+✨ Update/edit snippet
+
+✨ Delete button in UI
+
+✨ Better UI (split panes, styling)
+
+✨ Logging instead of printStackTrace
+
+✨ Exception handling layer
+
+✨ Config file instead of hardcoding DB path
 
 
 
 ---
 
-🚀 NEXT: Let’s Start Building the App
+👉 Your Turn
 
-Now we move to:
+Run this and tell me:
 
-🔥 Phase 1 – Developer Workbench Foundation
+UI working?
 
-We’ll build:
-
-1. Project structure (MVC)
+Data saving + loading?
 
 
-2. DB connection utility
-
-
-3. First module → Snippet Manager UI (Swing)
-
-
-
-
----
-
-👉 Before I proceed, confirm this:
-
-Did your DB connection test run successfully?
-
-If yes → I’ll give you:
-
-Clean project structure
-
-First Swing screen (real UI, not theory)
-
-CRUD operations wired to H2
-
-
-We’ll build this like a real production app, not a toy.
+If yes → next we level this up to senior-level project quality (this is where most people fail in interviews 😄)
