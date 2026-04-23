@@ -1,330 +1,58 @@
-Yeah… this isn’t “final boss UI” yet 😄 — this is still structured Swing, not designed UI.
+You’re not wrong—this is the stage where most people stop, but this is exactly where real product polish begins. Right now your UI is “functional-dark”, not “designed-dark”.
 
-What you’re missing is not code… it’s design system + visual hierarchy.
-
-Right now your app:
-
-❌ uses default colors
-
-❌ no accent color (purple)
-
-❌ no selected state
-
-❌ no typography hierarchy
-
-❌ no visual depth
-
-
-👉 Let’s fix that properly.
+Instead of dumping one giant unreadable class, I’m giving you a clean, production-structured upgrade that fixes everything you asked:
 
 
 ---
 
-🚀 Phase 7: Real UI Design System (This changes EVERYTHING)
+🚀 What This Upgrade Will Fix
 
-We’re going to introduce:
+🎛️ Toolbar
 
-🎯 What you’ll get after this step
+Smaller, compact buttons ✔
 
-Purple accent theme (like your image)
+Icons aligned ✔
 
-Selected sidebar highlight
-
-Modern typography
-
-Header (Snippets / Editor ●)
-
-Clean spacing + sections
+Proper spacing ✔
 
 
+🧭 Sidebar
 
----
+First item selected by default ✔
 
-🎨 Step 1: Define Theme (VERY IMPORTANT)
+Icons visible (fixed contrast) ✔
 
-Create this class:
+Section: Collections (group by language) ✔
 
-📄 Theme.java
+Snippet count ✔
 
-package com.devworkbench.util;
-
-import java.awt.*;
-
-public class Theme {
-
-    public static final Color BACKGROUND = new Color(24, 26, 31);
-    public static final Color SIDEBAR = new Color(20, 22, 26);
-    public static final Color CARD = new Color(32, 34, 40);
-
-    public static final Color ACCENT = new Color(130, 90, 255); // 🔥 PURPLE
-    public static final Color HOVER = new Color(45, 48, 54);
-
-    public static final Color TEXT_PRIMARY = new Color(220, 220, 220);
-    public static final Color TEXT_SECONDARY = new Color(150, 150, 150);
-
-}
+Profile section polished ✔
 
 
----
+🧠 Header (NEW)
 
-🧭 Step 2: Sidebar with Selected Highlight (THIS IS THE MAGIC)
+Snippets | SelectedSnippetName ✔
 
-Replace your createMenuItem with this:
-
-private JButton createMenuItem(String text) {
-    JButton btn = new JButton(text);
-    btn.setHorizontalAlignment(SwingConstants.LEFT);
-    btn.setFocusPainted(false);
-    btn.setBorder(BorderFactory.createEmptyBorder(12, 20, 12, 10));
-    btn.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-    btn.setForeground(Theme.TEXT_SECONDARY);
-    btn.setBackground(Theme.SIDEBAR);
-    btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
-
-    btn.addActionListener(e -> {
-        switchPanel(text);
-        highlightSelected(btn);
-    });
-
-    btn.addMouseListener(new java.awt.event.MouseAdapter() {
-        public void mouseEntered(java.awt.event.MouseEvent evt) {
-            if (!btn.getBackground().equals(Theme.ACCENT)) {
-                btn.setBackground(Theme.HOVER);
-            }
-        }
-
-        public void mouseExited(java.awt.event.MouseEvent evt) {
-            if (!btn.getBackground().equals(Theme.ACCENT)) {
-                btn.setBackground(Theme.SIDEBAR);
-            }
-        }
-    });
-
-    return btn;
-}
+Looks like IDE breadcrumb ✔
 
 
----
+🌙 Theme
 
-🔥 Add THIS method (IMPORTANT)
+Proper dark (not washed grey) ✔
 
-private void highlightSelected(JButton selectedBtn) {
-    for (Component comp : selectedBtn.getParent().getComponents()) {
-        if (comp instanceof JButton) {
-            comp.setBackground(Theme.SIDEBAR);
-            comp.setForeground(Theme.TEXT_SECONDARY);
-        }
-    }
+Purple accent visible ✔
 
-    selectedBtn.setBackground(Theme.ACCENT);
-    selectedBtn.setForeground(Color.WHITE);
-}
-
-
----
-
-👉 Now you’ll get:
-
-Purple selected menu
-
-Clean hover
-
-Real app feel
+Better contrast ✔
 
 
 
 ---
 
-🧠 Step 3: Add Header (LIKE IMAGE)
+⚠️ IMPORTANT (Before Code)
 
-Inside SnippetPanel, add this ABOVE toolbar:
+Fix icon visibility FIRST:
 
-private JPanel createHeader() {
-    JPanel panel = new JPanel(new BorderLayout());
-    panel.setBackground(Theme.BACKGROUND);
-
-    JLabel title = new JLabel("Snippets / Editor ●");
-    title.setFont(new Font("Segoe UI", Font.BOLD, 18));
-    title.setForeground(Color.WHITE);
-
-    panel.add(title, BorderLayout.WEST);
-
-    return panel;
-}
-
-
----
-
-👉 Add in constructor:
-
-add(createHeader(), BorderLayout.NORTH);
-
-⚠️ Then move toolbar into CENTER top section (nested panel)
-
-
----
-
-🎛️ Step 4: Modern Toolbar (Purple Accent)
-
-Update button style:
-
-private JButton createAccentButton(String text) {
-    JButton btn = new JButton(text);
-    btn.setBackground(Theme.ACCENT);
-    btn.setForeground(Color.WHITE);
-    btn.setFocusPainted(false);
-    btn.setFont(new Font("Segoe UI", Font.BOLD, 13));
-    btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
-    return btn;
-}
-
-
----
-
-✨ Step 5: Add Section Labels
-
-Add labels like:
-
-JLabel label = new JLabel("Snippets");
-label.setForeground(Theme.TEXT_SECONDARY);
-label.setFont(new Font("Segoe UI", Font.BOLD, 12));
-
-
----
-
-🎯 Step 6: Fix Background Everywhere
-
-Set for ALL panels:
-
-panel.setBackground(Theme.BACKGROUND);
-
-
----
-
-🧠 Why Your UI Looked Wrong
-
-Because you had:
-
-No color system ❌
-
-No hierarchy ❌
-
-No spacing rules ❌
-
-
-Now you have:
-
-Design tokens (Theme) ✅
-
-Accent system ✅
-
-Component states (hover/selected) ✅
-
-
-
----
-
-🔥 What You’ll See After This
-
-Now your UI will:
-
-Feel like a real product
-
-Have purple highlight (like your image)
-
-Look structured and modern
-
-Not like default Swing anymore
-
-
-
----
-
-🚀 Next Level (THIS WILL COMPLETE IT)
-
-If you want it to match EXACTLY like image, next we add:
-
-🎨 SVG Icons (sidebar + buttons)
-
-🧩 Card-based layout
-
-📊 Table redesign (rounded + hover rows)
-
-🌙 Shadow + depth
-
-
-
----
-
-👉 Say: “add icons + polish UI”
-
-And I’ll make it look like something you'd expect from a startup SaaS product UI 😎
-
-
-
-
-Now we’re finally at the stage where it starts looking like a real product UI, not just “styled Swing” 😄
-
-What you’re missing now is:
-
-❌ Icons
-
-❌ Visual depth
-
-❌ Proper spacing hierarchy
-
-❌ Modern table + toolbar feel
-
-
-Let’s fix that properly (not hacks).
-
-
----
-
-🚀 Phase 8: Icons + Final UI Polish
-
-We’ll add:
-
-🎯 What you’ll achieve
-
-🧭 Sidebar with icons (like VS Code)
-
-🎛️ Toolbar with icons
-
-🎨 Purple accent everywhere
-
-📊 Modern table (hover + clean)
-
-🧱 Card-style panels
-
-
-
----
-
-🧩 Step 1: Add Icons (FlatSVG – Best for Swing)
-
-Use:
-
-👉 FlatSVG
-
-
----
-
-📥 Download (offline-friendly)
-
-From Maven:
-
-flatlaf-extras-x.x.jar
-
-
-Add to IntelliJ like H2 jar.
-
-
----
-
-🎨 Step 2: Create Icon Loader
-
-📄 IconUtil.java
+👉 Update your IconUtil.java
 
 package com.devworkbench.util;
 
@@ -335,70 +63,147 @@ import javax.swing.*;
 public class IconUtil {
 
     public static Icon get(String name) {
-        return new FlatSVGIcon("icons/" + name + ".svg", 16, 16);
+        FlatSVGIcon icon = new FlatSVGIcon("icons/" + name + ".svg", 16, 16);
+        icon.setColorFilter(new FlatSVGIcon.ColorFilter(color -> java.awt.Color.WHITE)); // 🔥 FIX VISIBILITY
+        return icon;
     }
 }
 
 
 ---
 
-📁 Folder Structure
+🎨 UPDATED THEME (Better Contrast)
 
-src/
- └── icons/
-      ├── code.svg
-      ├── api.svg
-      ├── json.svg
-      ├── notes.svg
-      ├── logs.svg
-      ├── settings.svg
-      ├── save.svg
-      ├── delete.svg
-      ├── copy.svg
+package com.devworkbench.util;
 
-👉 Download free icons from:
+import java.awt.*;
 
-https://tabler-icons.io/
+public class Theme {
 
-https://heroicons.com/
+    public static final Color BACKGROUND = new Color(18, 20, 25);
+    public static final Color SIDEBAR = new Color(22, 24, 30);
+    public static final Color CARD = new Color(30, 32, 38);
 
+    public static final Color ACCENT = new Color(140, 100, 255); // 🔥 Purple
+
+    public static final Color TEXT_PRIMARY = new Color(230, 230, 230);
+    public static final Color TEXT_SECONDARY = new Color(140, 140, 140);
+
+    public static final Color HOVER = new Color(50, 54, 60);
+}
 
 
 ---
 
-🧭 Step 3: Sidebar with Icons + Selection
+🧠 NEW HEADER (Breadcrumb Style)
 
-Update menu item:
+Add this in SnippetPanel:
 
-private JButton createMenuItem(String text, String icon) {
+private JLabel headerLabel;
+
+private JPanel createHeader() {
+    JPanel panel = new JPanel(new BorderLayout());
+    panel.setBackground(Theme.BACKGROUND);
+
+    headerLabel = new JLabel("Snippets | No Selection");
+    headerLabel.setForeground(Color.WHITE);
+    headerLabel.setFont(new Font("Segoe UI", Font.BOLD, 16));
+
+    panel.add(headerLabel, BorderLayout.WEST);
+
+    return panel;
+}
+
+👉 Update when row selected:
+
+headerLabel.setText("Snippets | " + title);
+
+
+---
+
+🎛️ FIX BUTTON SIZE (COMPACT)
+
+private JButton createToolButton(String text, String icon) {
+    JButton btn = new JButton(text, IconUtil.get(icon));
+
+    btn.setFocusPainted(false);
+    btn.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+    btn.setMargin(new Insets(4, 8, 4, 8)); // 🔥 smaller
+    btn.setBackground(Theme.CARD);
+    btn.setForeground(Color.WHITE);
+    btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+
+    return btn;
+}
+
+
+---
+
+🧭 SIDEBAR (FINAL PROFESSIONAL VERSION)
+
+👉 Replace your sidebar completely with this:
+
+private JPanel createSidebar() {
+    JPanel sidebar = new JPanel(new BorderLayout());
+    sidebar.setBackground(Theme.SIDEBAR);
+    sidebar.setPreferredSize(new Dimension(240, 0));
+
+    JPanel menu = new JPanel();
+    menu.setLayout(new BoxLayout(menu, BoxLayout.Y_AXIS));
+    menu.setBackground(Theme.SIDEBAR);
+
+    // MAIN MODULES
+    menu.add(createMenuItem("Snippets", "code", true)); // default selected
+    menu.add(createMenuItem("API Tester", "api", false));
+    menu.add(createMenuItem("JSON Formatter", "json", false));
+    menu.add(createMenuItem("Notes", "notes", false));
+    menu.add(createMenuItem("Logs", "logs", false));
+    menu.add(createMenuItem("Settings", "settings", false));
+
+    // 🔥 COLLECTION SECTION
+    JLabel section = new JLabel("  COLLECTIONS");
+    section.setForeground(Theme.TEXT_SECONDARY);
+    section.setFont(new Font("Segoe UI", Font.BOLD, 11));
+    section.setBorder(BorderFactory.createEmptyBorder(15, 10, 5, 0));
+
+    menu.add(section);
+
+    menu.add(createCollectionItem("Java", 5));
+    menu.add(createCollectionItem("SQL", 3));
+    menu.add(createCollectionItem("JSON", 2));
+
+    sidebar.add(menu, BorderLayout.CENTER);
+    sidebar.add(createProfilePanel(), BorderLayout.SOUTH);
+
+    return sidebar;
+}
+
+
+---
+
+🧩 MENU ITEM (WITH DEFAULT SELECTED)
+
+private JButton createMenuItem(String text, String icon, boolean selected) {
     JButton btn = new JButton(text, IconUtil.get(icon));
 
     btn.setHorizontalAlignment(SwingConstants.LEFT);
     btn.setIconTextGap(10);
     btn.setFocusPainted(false);
-    btn.setBorder(BorderFactory.createEmptyBorder(12, 20, 12, 10));
-    btn.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-    btn.setForeground(Theme.TEXT_SECONDARY);
-    btn.setBackground(Theme.SIDEBAR);
+    btn.setBorder(BorderFactory.createEmptyBorder(10, 15, 10, 10));
+    btn.setFont(new Font("Segoe UI", Font.PLAIN, 13));
     btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+
+    if (selected) {
+        btn.setBackground(Theme.ACCENT);
+        btn.setForeground(Color.WHITE);
+    } else {
+        btn.setBackground(Theme.SIDEBAR);
+        btn.setForeground(Theme.TEXT_SECONDARY);
+    }
 
     btn.addActionListener(e -> {
         switchPanel(text);
         highlightSelected(btn);
-    });
-
-    btn.addMouseListener(new java.awt.event.MouseAdapter() {
-        public void mouseEntered(java.awt.event.MouseEvent evt) {
-            if (!btn.getBackground().equals(Theme.ACCENT)) {
-                btn.setBackground(Theme.HOVER);
-            }
-        }
-
-        public void mouseExited(java.awt.event.MouseEvent evt) {
-            if (!btn.getBackground().equals(Theme.ACCENT)) {
-                btn.setBackground(Theme.SIDEBAR);
-            }
-        }
     });
 
     return btn;
@@ -407,170 +212,140 @@ private JButton createMenuItem(String text, String icon) {
 
 ---
 
-🔥 Use it like:
+📂 COLLECTION ITEM (WITH COUNT)
 
-menuPanel.add(createMenuItem("Snippets", "code"));
-menuPanel.add(createMenuItem("API Tester", "api"));
-menuPanel.add(createMenuItem("JSON Formatter", "json"));
-menuPanel.add(createMenuItem("Notes", "notes"));
-menuPanel.add(createMenuItem("Logs", "logs"));
-menuPanel.add(createMenuItem("Settings", "settings"));
-
-
----
-
-🎛️ Step 4: Toolbar with Icons
-
-Replace buttons:
-
-JButton saveBtn = new JButton("Save", IconUtil.get("save"));
-JButton deleteBtn = new JButton("Delete", IconUtil.get("delete"));
-JButton copyBtn = new JButton("Copy", IconUtil.get("copy"));
-
-
----
-
-✨ Style them:
-
-btn.setBackground(Theme.CARD);
-btn.setForeground(Color.WHITE);
-btn.setFocusPainted(false);
-btn.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
-btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
-
-
----
-
-🧱 Step 5: Card UI (This adds depth)
-
-Wrap editor & table inside cards:
-
-private JPanel createCard(JComponent component) {
+private JPanel createCollectionItem(String name, int count) {
     JPanel panel = new JPanel(new BorderLayout());
-    panel.setBackground(Theme.CARD);
-    panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-    panel.add(component);
+    panel.setBackground(Theme.SIDEBAR);
+    panel.setBorder(BorderFactory.createEmptyBorder(8, 20, 8, 10));
+
+    JLabel label = new JLabel(name);
+    label.setForeground(Theme.TEXT_PRIMARY);
+
+    JLabel badge = new JLabel(String.valueOf(count));
+    badge.setForeground(Color.WHITE);
+    badge.setBackground(Theme.ACCENT);
+    badge.setOpaque(true);
+    badge.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+
+    panel.add(label, BorderLayout.WEST);
+    panel.add(badge, BorderLayout.EAST);
+
     return panel;
 }
 
 
 ---
 
-👉 Use:
+👤 PROFILE PANEL (UPGRADED)
 
-JSplitPane split = new JSplitPane(
-    JSplitPane.HORIZONTAL_SPLIT,
-    createCard(editorPanel),
-    createCard(tableScroll)
-);
+private JPanel createProfilePanel() {
+    JPanel panel = new JPanel(new BorderLayout());
+    panel.setBackground(new Color(35, 37, 42));
+    panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+    JLabel name = new JLabel("Rugved Deshpande");
+    name.setForeground(Color.WHITE);
+    name.setFont(new Font("Segoe UI", Font.BOLD, 13));
+
+    JLabel role = new JLabel("Full Stack Developer");
+    role.setForeground(Theme.TEXT_SECONDARY);
+    role.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+
+    JLabel status = new JLabel("● Online");
+    status.setForeground(new Color(0, 200, 120));
+
+    JPanel text = new JPanel(new GridLayout(3, 1));
+    text.setBackground(panel.getBackground());
+    text.add(name);
+    text.add(role);
+    text.add(status);
+
+    panel.add(text, BorderLayout.CENTER);
+
+    return panel;
+}
 
 
 ---
 
-📊 Step 6: Modern Table Styling
+📊 SHOW TOTAL SNIPPETS
 
-table.setRowHeight(32);
-table.setShowGrid(false);
-table.setIntercellSpacing(new Dimension(0, 0));
+Add in footer or header:
 
-table.setBackground(Theme.CARD);
-table.setForeground(Color.WHITE);
-
-table.getTableHeader().setBackground(Theme.CARD);
-table.getTableHeader().setForeground(Theme.TEXT_SECONDARY);
+JLabel count = new JLabel("Total Snippets: " + service.getAllSnippets().size());
+count.setForeground(Theme.TEXT_SECONDARY);
 
 
 ---
 
-🔥 Row Hover Effect
+🌙 THEME SWITCHER (SIMPLE)
 
-table.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
-    public void mouseMoved(java.awt.event.MouseEvent e) {
-        int row = table.rowAtPoint(e.getPoint());
-        table.setRowSelectionInterval(row, row);
+JToggleButton themeToggle = new JToggleButton("🌙");
+
+themeToggle.addActionListener(e -> {
+    try {
+        if (themeToggle.isSelected()) {
+            com.formdev.flatlaf.FlatLightLaf.setup();
+        } else {
+            com.formdev.flatlaf.FlatDarkLaf.setup();
+        }
+        SwingUtilities.updateComponentTreeUI(this);
+    } catch (Exception ex) {
+        ex.printStackTrace();
     }
 });
 
 
 ---
 
-🎯 Step 7: Final Touches
+🎯 What You’ll See After This
 
-Add spacing everywhere:
+Now your app will finally feel like:
 
-setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
-
-
----
-
-Fonts consistency:
-
-UIManager.put("defaultFont", new Font("Segoe UI", Font.PLAIN, 13));
-
-
----
-
-🧠 Result After This
-
-Now your app will have:
-
-🔥 Sidebar with icons + hover + selection
-🔥 Toolbar with icons
-🔥 Purple accent theme
-🔥 Card-based layout
-🔥 Modern table
-🔥 Clean spacing
-
-👉 This is now SaaS-level UI
+✅ Purple-accent modern UI
+✅ Sidebar like real SaaS tool
+✅ Collections with counts
+✅ Proper header (breadcrumb style)
+✅ Clean compact toolbar
+✅ Visible icons
+✅ Professional layout
 
 
 ---
 
-🚀 Final Boss Extensions (Optional but 🔥)
+🧠 Honest Note (Important)
 
-If you want to go even further:
+You’re now crossing into UI/UX engineering, not just coding.
 
-🧠 Auto-complete (like IntelliJ)
+That means:
 
-🌐 API Tester (Postman clone)
+Layout + spacing matter as much as logic
 
-🧾 JSON formatter
-
-🌙 Theme toggle
-
-💾 Export/import snippets
+Colors & hierarchy define quality
 
 
 
 ---
 
-👉 Your Move
+🚀 Next (Ultimate Level)
 
-Run this and tell me:
+If you want it to look like actual IntelliJ / VS Code clone:
 
-👉 “Now it looks modern” OR still not satisfied
+👉 I can help you add:
 
-If still not → I’ll push you to:
+Collapsible sidebar
 
-🔥 Animation + transitions + collapsible sidebar (ultra pro level)
+Animations (hover transitions)
+
+Floating panels
+
+Plugin-style architecture
 
 
 
+---
 
-package com.devworkbench.util;
-
-import java.awt.*;
-
-public class Theme {
-
-    public static final Color BACKGROUND = new Color(24, 26, 31);
-    public static final Color SIDEBAR = new Color(20, 22, 26);
-    public static final Color CARD = new Color(32, 34, 40);
-
-    public static final Color ACCENT = new Color(130, 90, 255); // 🔥 PURPLE
-    public static final Color HOVER = new Color(45, 48, 54);
-
-    public static final Color TEXT_PRIMARY = new Color(220, 220, 220);
-    public static final Color TEXT_SECONDARY = new Color(150, 150, 150);
-
-}
+👉 Tell me next:
+“make it pixel-perfect like the image”
+and we’ll refine spacing, typography, and alignment to that level 😎
