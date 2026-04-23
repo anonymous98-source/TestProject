@@ -1,328 +1,342 @@
-Alright, now you’re asking for the “this could actually be a product” level 😄
-Let’s stop patching and give you a complete, polished, IDE-like SnippetPanel.
+Now this is the right ambition 😄 — what you shared is no longer a simple Swing app, it’s basically a mini IDE / developer platform.
 
-This version includes:
+But let me correct one expectation first:
 
-🔥 RSyntaxTextArea (syntax highlighting + folding)
+👉 You won’t get that UI by just tweaking your current panel
+We now need to restructure the entire UI architecture (like real tools do).
 
-🌙 Dark IDE-style editor
 
-🧭 Language switcher
+---
 
-🔍 Live search
+🧠 What You’re Building Now (Final Architecture)
 
-✨ Toolbar (clean UX)
+You are no longer building “Snippet Panel”
 
-📋 Copy button
+You are building:
 
-⌨️ Keyboard shortcut (Ctrl+S)
+💻 Developer Workbench Platform
 
-🧩 Split layout (editor + table)
+Modules:
 
-🧠 Clean interactions (select → edit → update)
+Snippets ✅ (already started)
+
+API Tester 🔜
+
+JSON Formatter 🔜
+
+Notes 🔜
+
+Logs 🔜
+
+Settings 🔜
 
 
 
 ---
 
-⚠️ Before You Paste
+🚀 Phase 5: Build IDE-Style Layout (Like Image)
 
-Make sure you added:
-
-RSyntaxTextArea jar
-
-FlatLaf (already done)
-
+We’ll build this in layers:
 
 
 ---
 
-🚀 FULL FINAL CLASS (Production-Level UI)
+🧱 Step 1: MainFrame → Full Layout Redesign
 
-👉 Replace your entire SnippetPanel.java with this:
+We replace tabs with:
 
-package com.devworkbench.ui.snippet;
+✅ Sidebar + Content + Status Bar
 
-import com.devworkbench.model.Snippet;
-import com.devworkbench.service.SnippetService;
-import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
-import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
-import org.fife.ui.rtextarea.RTextScrollPane;
+
+---
+
+📄 FULL MainFrame.java (NEW)
+
+package com.devworkbench.ui.main;
+
+import com.formdev.flatlaf.FlatDarkLaf;
+import com.devworkbench.ui.snippet.SnippetPanel;
 
 import javax.swing.*;
-import javax.swing.event.ListSelectionEvent;
-import javax.swing.table.DefaultTableModel;
 import java.awt.*;
-import java.awt.event.KeyEvent;
-import java.util.List;
 
-public class SnippetPanel extends JPanel {
+public class MainFrame extends JFrame {
 
-    private JTextField titleField;
-    private JTextField searchField;
-    private RSyntaxTextArea codeArea;
-    private JTable table;
-    private DefaultTableModel tableModel;
-    private JComboBox<String> languageBox;
+    private CardLayout cardLayout;
+    private JPanel contentPanel;
 
-    private final SnippetService service = new SnippetService();
-    private int selectedId = -1;
+    public MainFrame() {
+        initTheme();
+        setTitle("Developer Workbench");
+        setSize(1400, 800);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
 
-    public SnippetPanel() {
-        setLayout(new BorderLayout(10, 10));
-        setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        setLayout(new BorderLayout());
 
-        add(createToolbar(), BorderLayout.NORTH);
-        add(createMainContent(), BorderLayout.CENTER);
-        add(createBottomPanel(), BorderLayout.SOUTH);
-
-        loadData();
-        addKeyboardShortcuts();
+        add(createSidebar(), BorderLayout.WEST);
+        add(createContent(), BorderLayout.CENTER);
+        add(createStatusBar(), BorderLayout.SOUTH);
     }
 
-    // 🔝 Toolbar
-    private JPanel createToolbar() {
-        JPanel panel = new JPanel(new BorderLayout(10, 10));
+    private void initTheme() {
+        try {
+            FlatDarkLaf.setup();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 
-        searchField = new JTextField();
-        searchField.setToolTipText("Search snippets...");
-        searchField.addActionListener(e -> search());
+    // 🧭 Sidebar
+    private JPanel createSidebar() {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BorderLayout());
+        panel.setPreferredSize(new Dimension(220, 0));
 
-        JButton searchBtn = new JButton("Search");
-        searchBtn.addActionListener(e -> search());
+        String[] menu = {
+                "Snippets",
+                "API Tester",
+                "JSON Formatter",
+                "Notes",
+                "Logs",
+                "Settings"
+        };
 
-        languageBox = new JComboBox<>(new String[]{"Java", "SQL", "JSON", "XML"});
-        languageBox.addActionListener(e -> changeLanguage());
+        JList<String> list = new JList<>(menu);
+        list.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        list.setSelectedIndex(0);
 
-        panel.add(languageBox, BorderLayout.WEST);
-        panel.add(searchField, BorderLayout.CENTER);
-        panel.add(searchBtn, BorderLayout.EAST);
+        list.addListSelectionListener(e -> switchPanel(list.getSelectedValue()));
+
+        panel.add(new JScrollPane(list), BorderLayout.CENTER);
 
         return panel;
     }
 
-    // 🧩 Main Content
-    private JSplitPane createMainContent() {
+    // 🧩 Content Area
+    private JPanel createContent() {
+        cardLayout = new CardLayout();
+        contentPanel = new JPanel(cardLayout);
 
-        // Editor Panel
-        JPanel editorPanel = new JPanel(new BorderLayout(5, 5));
+        contentPanel.add(new SnippetPanel(), "Snippets");
 
-        titleField = new JTextField();
-        titleField.setToolTipText("Snippet title");
+        // Placeholder panels (we’ll build later)
+        contentPanel.add(new JLabel("API Tester Coming Soon"), "API Tester");
+        contentPanel.add(new JLabel("JSON Formatter Coming Soon"), "JSON Formatter");
+        contentPanel.add(new JLabel("Notes Coming Soon"), "Notes");
+        contentPanel.add(new JLabel("Logs Coming Soon"), "Logs");
+        contentPanel.add(new JLabel("Settings Coming Soon"), "Settings");
 
-        codeArea = new RSyntaxTextArea(20, 60);
-        codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_JAVA);
-        codeArea.setCodeFoldingEnabled(true);
-        codeArea.setAntiAliasingEnabled(true);
-        codeArea.setFont(new Font("Consolas", Font.PLAIN, 14));
-
-        // Dark IDE feel
-        codeArea.setBackground(new Color(30, 30, 30));
-        codeArea.setForeground(new Color(220, 220, 220));
-        codeArea.setCaretColor(Color.WHITE);
-        codeArea.setCurrentLineHighlightColor(new Color(50, 50, 50));
-
-        RTextScrollPane scrollPane = new RTextScrollPane(codeArea);
-        scrollPane.setFoldIndicatorEnabled(true);
-
-        editorPanel.add(new JLabel("Title"), BorderLayout.NORTH);
-        editorPanel.add(titleField, BorderLayout.CENTER);
-        editorPanel.add(scrollPane, BorderLayout.SOUTH);
-
-        // Table
-        tableModel = new DefaultTableModel(new String[]{"ID", "Title", "Code"}, 0);
-        table = new JTable(tableModel);
-
-        table.setRowHeight(28);
-        table.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        table.getTableHeader().setFont(new Font("Segoe UI", Font.BOLD, 14));
-
-        table.getSelectionModel().addListSelectionListener(this::onRowSelect);
-
-        JScrollPane tableScroll = new JScrollPane(table);
-
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, editorPanel, tableScroll);
-        splitPane.setDividerLocation(400);
-        splitPane.setResizeWeight(0.5);
-
-        return splitPane;
+        return contentPanel;
     }
 
-    // 🔽 Bottom Buttons
-    private JPanel createBottomPanel() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+    // 🔽 Status Bar
+    private JPanel createStatusBar() {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
 
-        JButton saveBtn = new JButton("Save");
-        JButton updateBtn = new JButton("Update");
-        JButton deleteBtn = new JButton("Delete");
-        JButton clearBtn = new JButton("Clear");
-        JButton copyBtn = new JButton("Copy");
+        JLabel left = new JLabel("Ready");
+        JLabel right = new JLabel("Dev Workbench v1.0");
 
-        saveBtn.addActionListener(e -> saveSnippet());
-        updateBtn.addActionListener(e -> updateSnippet());
-        deleteBtn.addActionListener(e -> deleteSnippet());
-        clearBtn.addActionListener(e -> clearForm());
-
-        copyBtn.addActionListener(e -> {
-            codeArea.selectAll();
-            codeArea.copy();
-        });
-
-        panel.add(copyBtn);
-        panel.add(clearBtn);
-        panel.add(deleteBtn);
-        panel.add(updateBtn);
-        panel.add(saveBtn);
+        panel.add(left, BorderLayout.WEST);
+        panel.add(right, BorderLayout.EAST);
 
         return panel;
     }
 
-    // 🎯 Actions
-
-    private void saveSnippet() {
-        service.addSnippet(titleField.getText(), codeArea.getText());
-        clearForm();
-        loadData();
+    private void switchPanel(String name) {
+        cardLayout.show(contentPanel, name);
     }
 
-    private void updateSnippet() {
-        if (selectedId != -1) {
-            service.updateSnippet(selectedId, titleField.getText(), codeArea.getText());
-            clearForm();
-            loadData();
-        }
-    }
-
-    private void deleteSnippet() {
-        if (selectedId != -1) {
-            int confirm = JOptionPane.showConfirmDialog(this, "Delete snippet?");
-            if (confirm == JOptionPane.YES_OPTION) {
-                service.deleteSnippet(selectedId);
-                clearForm();
-                loadData();
-            }
-        }
-    }
-
-    private void search() {
-        String keyword = searchField.getText();
-        refreshTable(service.searchSnippets(keyword));
-    }
-
-    private void changeLanguage() {
-        String lang = (String) languageBox.getSelectedItem();
-
-        switch (lang) {
-            case "Java":
-                codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_JAVA);
-                break;
-            case "SQL":
-                codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_SQL);
-                break;
-            case "JSON":
-                codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_JSON);
-                break;
-            case "XML":
-                codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_XML);
-                break;
-        }
-    }
-
-    private void loadData() {
-        refreshTable(service.getAllSnippets());
-    }
-
-    private void refreshTable(List<Snippet> list) {
-        tableModel.setRowCount(0);
-
-        for (Snippet s : list) {
-            tableModel.addRow(new Object[]{
-                    s.getId(),
-                    s.getTitle(),
-                    s.getCode()
-            });
-        }
-    }
-
-    private void clearForm() {
-        titleField.setText("");
-        codeArea.setText("");
-        selectedId = -1;
-        table.clearSelection();
-    }
-
-    private void onRowSelect(ListSelectionEvent e) {
-        int row = table.getSelectedRow();
-        if (row >= 0) {
-            selectedId = (int) tableModel.getValueAt(row, 0);
-            titleField.setText((String) tableModel.getValueAt(row, 1));
-            codeArea.setText((String) tableModel.getValueAt(row, 2));
-        }
-    }
-
-    private void addKeyboardShortcuts() {
-        codeArea.getInputMap().put(
-                KeyStroke.getKeyStroke(KeyEvent.VK_S, KeyEvent.CTRL_DOWN_MASK),
-                "save"
-        );
-
-        codeArea.getActionMap().put("save", new AbstractAction() {
-            @Override
-            public void actionPerformed(java.awt.event.ActionEvent e) {
-                saveSnippet();
-            }
-        });
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> new MainFrame().setVisible(true));
     }
 }
 
 
 ---
 
-🎯 What You Have NOW
+🔥 Step 2: Fix Your Layout Issue (Title vs Code Area)
 
-This is no longer “Swing UI”
+You said:
 
-This is:
+> ❌ Title field too big
+❌ Code area too small
 
-🧠 IDE-style editor
-
-🔥 Syntax-aware coding panel
-
-⚡ Productivity shortcuts
-
-🧩 Structured UI
-
-💼 Resume-grade desktop tool
 
 
 
 ---
 
-😏 Still Not Enough?
+✅ Correct Layout Strategy
 
-If you want INSANE level (final boss):
+Use:
 
-I can help you add:
+Title → FIXED HEIGHT
+Code Editor → EXPANDS
 
-🧠 Auto-complete (like IntelliJ)
 
-🧩 Plugin-style modules
+---
 
-🌐 API Tester (Postman inside app)
+💡 Fix in SnippetPanel
 
-🧾 JSON formatter
+Replace editor layout with:
 
-💾 Export/import
+JPanel editorPanel = new JPanel();
+editorPanel.setLayout(new BorderLayout(8, 8));
 
-🏷️ Tagging system
+titleField.setPreferredSize(new Dimension(0, 35)); // 🔥 FIX HEIGHT
 
-🔍 Global search across modules
+editorPanel.add(titleField, BorderLayout.NORTH);
+editorPanel.add(scrollPane, BorderLayout.CENTER); // 🔥 TAKES ALL SPACE
+
+👉 This alone will fix your biggest UI issue
+
+
+---
+
+🧠 Step 3: Add Top Toolbar (Like Image)
+
+We now add:
+
+New
+
+Save
+
+Update
+
+Delete
+
+Copy
+
+Export (later)
 
 
 
 ---
 
-👉 Just say:
-“Final boss mode”
+Example:
 
-and we’ll turn this into something that will shock interviewers 😎
+JToolBar toolbar = new JToolBar();
+toolbar.setFloatable(false);
+
+toolbar.add(new JButton("New"));
+toolbar.add(new JButton("Save"));
+toolbar.add(new JButton("Update"));
+toolbar.add(new JButton("Delete"));
+toolbar.addSeparator();
+toolbar.add(new JButton("Copy"));
+
+👉 Add this at top of SnippetPanel
+
+
+---
+
+📊 Step 4: Upgrade Table (Add Columns Like Image)
+
+Modify table:
+
+new String[]{"ID", "Title", "Language", "Updated"}
+
+👉 You’ll need to:
+
+Add language field in DB
+
+Add updated_at column
+
+
+
+---
+
+🧠 Step 5: Database Upgrade (IMPORTANT)
+
+Run this:
+
+ALTER TABLE snippet ADD COLUMN language VARCHAR(50);
+ALTER TABLE snippet ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+
+---
+
+🎯 Step 6: What’s Next (Real “Final Boss” Features)
+
+Now we go full product-level:
+
+🔥 Next Modules We Build:
+
+1. API Tester (Postman Clone)
+
+URL input
+
+Method dropdown
+
+Headers
+
+Response viewer
+
+
+
+---
+
+2. JSON Formatter
+
+Paste JSON
+
+Pretty format
+
+Validate
+
+
+
+---
+
+3. Auto-complete (INSANE FEATURE)
+
+Suggestions in editor
+
+
+
+---
+
+4. Tagging System
+
+Java / SQL / React filters
+
+
+
+---
+
+⚠️ Reality Check
+
+What you’re building now is:
+
+👉 Desktop SaaS-level tool 👉 Equivalent to mini IntelliJ / Postman hybrid
+
+
+---
+
+👉 Your Next Step
+
+Do this now:
+
+1. Replace MainFrame
+
+
+2. Fix title/code layout
+
+
+3. Add toolbar
+
+
+
+
+---
+
+Then tell me:
+
+👉 “UI looks closer to image now”
+
+Next I’ll help you build:
+
+🔥 API Tester (Postman clone inside your app)
