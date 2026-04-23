@@ -1,238 +1,299 @@
-Good—now we’re talking 😄
-Right now your app works, but it still looks like Java Swing 2005 edition. Let’s upgrade it to something that actually feels like a modern developer tool (dark, clean, IDE-like).
-
-We’ll do this in 3 powerful upgrades:
+Perfect—that’s the right move. We’ll turn your Snippet module into something that actually feels like a developer-grade tool, not just CRUD + table.
 
 
 ---
 
-🚀 Phase 3: Make It Look Like a Modern Dev Workbench
+🚀 Phase 2 Upgrade: Snippet Module → PRO LEVEL
 
-🎯 What we’ll achieve
+🎯 What we’ll add now
 
-Dark theme (like IDEs)
+🔥 Syntax highlighting (real IDE feel)
 
-Better layout (clean spacing, typography)
+🏷️ Tag system (Java, SQL, React…)
 
-Syntax-style code editor feel
+📋 Copy-to-clipboard
 
-Professional buttons & UX
+⌨️ Keyboard shortcuts (Ctrl+S, Ctrl+F)
 
+🎯 Better UX (selection, feedback)
 
-
----
-
-🌙 Step 1: Apply Modern Dark Theme (FlatLaf)
-
-Default Swing L&F is outdated. Replace it with:
-
-👉 FlatLaf
 
 
 ---
 
-📥 Add FlatLaf (Offline Friendly)
+🧠 Step 1: Replace JTextArea → Syntax Editor
 
-Since you’re on a corporate network:
+We’ll use:
 
-Option A:
+👉 RSyntaxTextArea
 
-Download JAR from: 👉 https://repo1.maven.org/maven2/com/formdev/flatlaf/
+
+---
+
+📥 Add Library (same as FlatLaf)
+
+Download JAR: 👉 https://repo1.maven.org/maven2/com/fifesoft/rsyntaxtextarea/
 
 Get:
 
-flatlaf-3.x.jar
+rsyntaxtextarea-x.x.x.jar
 
-Put it in:
-
-C:\dev-tools\libs\
-
-Add it in IntelliJ (same way you added H2 jar)
+Add to IntelliJ (same way as H2 & FlatLaf)
 
 
 ---
 
-🧠 Apply Dark Theme
+🔧 Replace Code Area
 
-📄 Update MainFrame.java (VERY IMPORTANT)
+❌ Remove:
 
-import com.formdev.flatlaf.FlatDarkLaf;
+JTextArea codeArea;
 
-public static void main(String[] args) {
+✅ Add:
 
-    try {
-        FlatDarkLaf.setup(); // 🔥 DARK THEME
-    } catch (Exception e) {
-        e.printStackTrace();
-    }
+import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
+import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
+import org.fife.ui.rtextarea.RTextScrollPane;
 
-    SwingUtilities.invokeLater(() -> {
-        new MainFrame().setVisible(true);
-    });
-}
+private RSyntaxTextArea codeArea;
 
 
 ---
 
-👉 Run now—you’ll already see a massive difference
+✅ Initialize:
 
-
----
-
-🎨 Step 2: Improve Layout (Make it Clean)
-
-Update your SnippetPanel:
-
-🔧 Key Improvements:
-
-Padding
-
-Better spacing
-
-Scrollable code editor
-
-Proper form grouping
-
-
-
----
-
-✨ Modify constructor:
-
-setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-
-
----
-
-✨ Improve Form Panel
-
-Replace form panel with:
-
-JPanel formPanel = new JPanel();
-formPanel.setLayout(new BorderLayout(10, 10));
-
-JPanel topForm = new JPanel(new BorderLayout(5, 5));
-topForm.add(new JLabel("Title"), BorderLayout.NORTH);
-topForm.add(titleField, BorderLayout.CENTER);
-
-JPanel codePanel = new JPanel(new BorderLayout(5, 5));
-codePanel.add(new JLabel("Code"), BorderLayout.NORTH);
-codePanel.add(new JScrollPane(codeArea), BorderLayout.CENTER);
-
-formPanel.add(topForm, BorderLayout.NORTH);
-formPanel.add(codePanel, BorderLayout.CENTER);
-
-
----
-
-🧠 Step 3: Make Code Editor Look Like IDE
-
-Right now JTextArea looks basic.
-
-✨ Upgrade it visually:
-
+codeArea = new RSyntaxTextArea(20, 60);
+codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_JAVA);
+codeArea.setCodeFoldingEnabled(true);
 codeArea.setFont(new Font("Consolas", Font.PLAIN, 14));
-codeArea.setLineWrap(true);
-codeArea.setWrapStyleWord(true);
+
+RTextScrollPane scrollPane = new RTextScrollPane(codeArea);
+
+👉 Replace old JScrollPane(codeArea) with scrollPane
 
 
 ---
 
-🔥 Bonus (VERY IMPACTFUL)
+🏷️ Step 2: Add Tag System
 
-Add this:
+🎯 Why?
 
-codeArea.setBackground(new Color(30, 30, 30));
-codeArea.setForeground(new Color(220, 220, 220));
-codeArea.setCaretColor(Color.WHITE);
+Real devs categorize snippets:
 
-👉 Now it looks like VS Code / IntelliJ editor
+Java
 
+SQL
 
----
+React
 
-🎛️ Step 4: Modern Buttons
-
-Replace plain buttons with styled ones:
-
-saveBtn.setFocusPainted(false);
-updateBtn.setFocusPainted(false);
-deleteBtn.setFocusPainted(false);
-
-Optional color hint:
-
-saveBtn.setBackground(new Color(46, 125, 50));   // green
-deleteBtn.setBackground(new Color(198, 40, 40)); // red
-
-
----
-
-📊 Step 5: Improve Table Look
-
-table.setRowHeight(28);
-table.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-table.getTableHeader().setFont(new Font("Segoe UI", Font.BOLD, 14));
-
-
----
-
-🧩 Step 6: Better Split Pane UX
-
-splitPane.setResizeWeight(0.4);
-
-👉 Gives better space distribution
-
-
----
-
-✨ Step 7: Add Placeholder UX (Small but Powerful)
-
-titleField.setToolTipText("Enter snippet title...");
-searchField.setToolTipText("Search snippets...");
-
-
----
-
-🎯 Result After This
-
-Your app will now feel like:
-
-✅ Dark developer tool
-✅ Clean layout
-✅ IDE-style code editor
-✅ Professional UI (not Swing default junk)
-
-
----
-
-🚀 Next-Level (If You Want REAL “22nd Century” 😏)
-
-If you want to go next level:
-
-💎 Add:
-
-Syntax highlighting → using RSyntaxTextArea
-
-Sidebar navigation (like IntelliJ)
-
-Icons (FlatSVG)
-
-Keyboard shortcuts (Ctrl+S, Ctrl+F)
-
-Tag system (Java, SQL, React)
-
-Copy button 📋
+Spring Boot
 
 
 
 ---
 
-👉 Your Next Step
+🗄️ Update DB
 
-Run this and tell me honestly:
+Run in H2:
 
-👉 Does it now feel like a developer tool or still basic?
+ALTER TABLE snippet ADD COLUMN tag VARCHAR(100);
 
-If still basic → next I’ll give you:
 
-🔥 Syntax Highlighting + Sidebar Navigation (this will change everything)
+---
+
+📄 Update Model
+
+private String tag;
+
+public String getTag() { return tag; }
+public void setTag(String tag) { this.tag = tag; }
+
+
+---
+
+🎛️ Add UI Dropdown
+
+JComboBox<String> tagBox = new JComboBox<>(
+    new String[]{"Java", "SQL", "React", "Spring", "Other"}
+);
+
+Add it to form panel.
+
+
+---
+
+🧠 Update DAO (IMPORTANT)
+
+INSERT:
+
+INSERT INTO snippet(title, code, tag) VALUES (?, ?, ?)
+
+SET:
+
+ps.setString(3, snippet.getTag());
+
+
+---
+
+📋 Step 3: Copy-to-Clipboard Button
+
+Add button:
+
+JButton copyBtn = new JButton("Copy");
+
+
+---
+
+Action:
+
+copyBtn.addActionListener(e -> {
+    String code = codeArea.getText();
+    Toolkit.getDefaultToolkit()
+        .getSystemClipboard()
+        .setContents(new StringSelection(code), null);
+
+    JOptionPane.showMessageDialog(this, "Copied!");
+});
+
+
+---
+
+⌨️ Step 4: Keyboard Shortcuts (VERY IMPRESSIVE)
+
+Add inside constructor:
+
+InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+ActionMap am = getActionMap();
+
+
+---
+
+💾 Ctrl + S (Save)
+
+im.put(KeyStroke.getKeyStroke("control S"), "save");
+am.put("save", new AbstractAction() {
+    public void actionPerformed(ActionEvent e) {
+        saveSnippet();
+    }
+});
+
+
+---
+
+🔍 Ctrl + F (Focus Search)
+
+im.put(KeyStroke.getKeyStroke("control F"), "search");
+am.put("search", new AbstractAction() {
+    public void actionPerformed(ActionEvent e) {
+        searchField.requestFocus();
+    }
+});
+
+
+---
+
+🎨 Step 5: Smart UX Improvements
+
+Auto-set syntax based on tag
+
+tagBox.addActionListener(e -> {
+    String tag = (String) tagBox.getSelectedItem();
+
+    switch (tag) {
+        case "Java":
+            codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_JAVA);
+            break;
+        case "SQL":
+            codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_SQL);
+            break;
+        case "React":
+            codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_JAVASCRIPT);
+            break;
+        default:
+            codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_NONE);
+    }
+});
+
+
+---
+
+📊 Step 6: Update Table (Add Tag Column)
+
+new String[]{"ID", "Title", "Tag", "Code"}
+
+
+---
+
+✨ Step 7: Visual Feedback (Feels Premium)
+
+After save:
+
+JOptionPane.showMessageDialog(this, "Snippet Saved Successfully!");
+
+
+---
+
+🎯 What You Now Have
+
+After this upgrade:
+
+✅ Syntax highlighting (IDE-like)
+✅ Tag-based organization
+✅ Copy button
+✅ Keyboard shortcuts
+✅ Better UX
+✅ Professional feel
+
+
+---
+
+🔥 THIS is where your app becomes impressive
+
+Now it’s not:
+
+> “I made a Swing app”
+
+
+
+It becomes:
+
+> “I built a developer productivity desktop tool with modular architecture and rich editor support”
+
+
+
+
+---
+
+🚀 NEXT (After You Finish This)
+
+We move to:
+
+👉 API Tester Module
+
+HTTP calls
+
+JSON viewer
+
+Headers/body editor
+
+
+👉 This will take your project to next level
+
+
+---
+
+👉 Your Task
+
+Implement this and tell me:
+
+Syntax highlighting working?
+
+Tags saving properly?
+
+Copy + shortcuts working?
+
+
+
+---
+
+If yes → we build API Tester (the most powerful module) 😎
