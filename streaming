@@ -1,299 +1,236 @@
-Perfect—that’s the right move. We’ll turn your Snippet module into something that actually feels like a developer-grade tool, not just CRUD + table.
+Perfect—here’s your fully upgraded SnippetPanel class with:
+
+Dark-theme friendly UI (works beautifully with FlatLaf)
+
+Clean layout (split pane, spacing)
+
+Styled editor (IDE-like feel)
+
+Search + CRUD (already wired)
+
+Better UX (selection, tooltips, buttons)
+
+
+👉 Replace your existing SnippetPanel.java completely with this:
 
 
 ---
 
-🚀 Phase 2 Upgrade: Snippet Module → PRO LEVEL
+package com.devworkbench.ui.snippet;
+
+import com.devworkbench.model.Snippet;
+import com.devworkbench.service.SnippetService;
 
-🎯 What we’ll add now
+import javax.swing.*;
+import javax.swing.event.ListSelectionEvent;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.util.List;
+
+public class SnippetPanel extends JPanel {
 
-🔥 Syntax highlighting (real IDE feel)
+    private JTextField titleField;
+    private JTextArea codeArea;
+    private JTextField searchField;
+    private JTable table;
+    private DefaultTableModel tableModel;
 
-🏷️ Tag system (Java, SQL, React…)
+    private final SnippetService service = new SnippetService();
+    private int selectedId = -1;
 
-📋 Copy-to-clipboard
+    public SnippetPanel() {
+        setLayout(new BorderLayout(10, 10));
+        setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-⌨️ Keyboard shortcuts (Ctrl+S, Ctrl+F)
+        // 🔍 Top Search Panel
+        JPanel topPanel = new JPanel(new BorderLayout(8, 8));
+        searchField = new JTextField();
+        searchField.setToolTipText("Search snippets...");
+        JButton searchBtn = new JButton("Search");
 
-🎯 Better UX (selection, feedback)
+        topPanel.add(searchField, BorderLayout.CENTER);
+        topPanel.add(searchBtn, BorderLayout.EAST);
 
+        add(topPanel, BorderLayout.NORTH);
 
+        // 🧾 Form Panel
+        JPanel formPanel = new JPanel();
+        formPanel.setLayout(new BorderLayout(10, 10));
 
----
+        titleField = new JTextField();
+        titleField.setToolTipText("Enter snippet title...");
 
-🧠 Step 1: Replace JTextArea → Syntax Editor
+        codeArea = new JTextArea();
+        codeArea.setFont(new Font("Consolas", Font.PLAIN, 14));
+        codeArea.setLineWrap(true);
+        codeArea.setWrapStyleWord(true);
 
-We’ll use:
+        // IDE-like dark editor feel
+        codeArea.setBackground(new Color(30, 30, 30));
+        codeArea.setForeground(new Color(220, 220, 220));
+        codeArea.setCaretColor(Color.WHITE);
 
-👉 RSyntaxTextArea
+        JPanel titlePanel = new JPanel(new BorderLayout(5, 5));
+        titlePanel.add(new JLabel("Title"), BorderLayout.NORTH);
+        titlePanel.add(titleField, BorderLayout.CENTER);
 
+        JPanel codePanel = new JPanel(new BorderLayout(5, 5));
+        codePanel.add(new JLabel("Code"), BorderLayout.NORTH);
+        codePanel.add(new JScrollPane(codeArea), BorderLayout.CENTER);
 
----
+        formPanel.add(titlePanel, BorderLayout.NORTH);
+        formPanel.add(codePanel, BorderLayout.CENTER);
 
-📥 Add Library (same as FlatLaf)
+        // 📊 Table
+        tableModel = new DefaultTableModel(new String[]{"ID", "Title", "Code"}, 0);
+        table = new JTable(tableModel);
 
-Download JAR: 👉 https://repo1.maven.org/maven2/com/fifesoft/rsyntaxtextarea/
+        table.setRowHeight(28);
+        table.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        table.getTableHeader().setFont(new Font("Segoe UI", Font.BOLD, 14));
+        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
 
-Get:
+        JScrollPane tableScroll = new JScrollPane(table);
 
-rsyntaxtextarea-x.x.x.jar
+        // 🧩 Split Pane
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, formPanel, tableScroll);
+        splitPane.setDividerLocation(350);
+        splitPane.setResizeWeight(0.4);
 
-Add to IntelliJ (same way as H2 & FlatLaf)
+        add(splitPane, BorderLayout.CENTER);
 
+        // 🎛️ Buttons
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 5));
 
----
+        JButton saveBtn = new JButton("Save");
+        JButton updateBtn = new JButton("Update");
+        JButton deleteBtn = new JButton("Delete");
+        JButton clearBtn = new JButton("Clear");
 
-🔧 Replace Code Area
+        // Remove ugly focus border
+        saveBtn.setFocusPainted(false);
+        updateBtn.setFocusPainted(false);
+        deleteBtn.setFocusPainted(false);
+        clearBtn.setFocusPainted(false);
 
-❌ Remove:
+        buttonPanel.add(saveBtn);
+        buttonPanel.add(updateBtn);
+        buttonPanel.add(deleteBtn);
+        buttonPanel.add(clearBtn);
 
-JTextArea codeArea;
+        add(buttonPanel, BorderLayout.SOUTH);
 
-✅ Add:
+        // 🔗 Actions
+        saveBtn.addActionListener(e -> saveSnippet());
+        updateBtn.addActionListener(e -> updateSnippet());
+        deleteBtn.addActionListener(e -> deleteSnippet());
+        clearBtn.addActionListener(e -> clearForm());
+        searchBtn.addActionListener(e -> search());
 
-import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
-import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
-import org.fife.ui.rtextarea.RTextScrollPane;
+        table.getSelectionModel().addListSelectionListener(this::onRowSelect);
 
-private RSyntaxTextArea codeArea;
-
-
----
-
-✅ Initialize:
-
-codeArea = new RSyntaxTextArea(20, 60);
-codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_JAVA);
-codeArea.setCodeFoldingEnabled(true);
-codeArea.setFont(new Font("Consolas", Font.PLAIN, 14));
-
-RTextScrollPane scrollPane = new RTextScrollPane(codeArea);
-
-👉 Replace old JScrollPane(codeArea) with scrollPane
-
-
----
-
-🏷️ Step 2: Add Tag System
-
-🎯 Why?
-
-Real devs categorize snippets:
-
-Java
-
-SQL
-
-React
-
-Spring Boot
-
-
-
----
-
-🗄️ Update DB
-
-Run in H2:
-
-ALTER TABLE snippet ADD COLUMN tag VARCHAR(100);
-
-
----
-
-📄 Update Model
-
-private String tag;
-
-public String getTag() { return tag; }
-public void setTag(String tag) { this.tag = tag; }
-
-
----
-
-🎛️ Add UI Dropdown
-
-JComboBox<String> tagBox = new JComboBox<>(
-    new String[]{"Java", "SQL", "React", "Spring", "Other"}
-);
-
-Add it to form panel.
-
-
----
-
-🧠 Update DAO (IMPORTANT)
-
-INSERT:
-
-INSERT INTO snippet(title, code, tag) VALUES (?, ?, ?)
-
-SET:
-
-ps.setString(3, snippet.getTag());
-
-
----
-
-📋 Step 3: Copy-to-Clipboard Button
-
-Add button:
-
-JButton copyBtn = new JButton("Copy");
-
-
----
-
-Action:
-
-copyBtn.addActionListener(e -> {
-    String code = codeArea.getText();
-    Toolkit.getDefaultToolkit()
-        .getSystemClipboard()
-        .setContents(new StringSelection(code), null);
-
-    JOptionPane.showMessageDialog(this, "Copied!");
-});
-
-
----
-
-⌨️ Step 4: Keyboard Shortcuts (VERY IMPRESSIVE)
-
-Add inside constructor:
-
-InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-ActionMap am = getActionMap();
-
-
----
-
-💾 Ctrl + S (Save)
-
-im.put(KeyStroke.getKeyStroke("control S"), "save");
-am.put("save", new AbstractAction() {
-    public void actionPerformed(ActionEvent e) {
-        saveSnippet();
+        loadData();
     }
-});
 
-
----
-
-🔍 Ctrl + F (Focus Search)
-
-im.put(KeyStroke.getKeyStroke("control F"), "search");
-am.put("search", new AbstractAction() {
-    public void actionPerformed(ActionEvent e) {
-        searchField.requestFocus();
+    private void saveSnippet() {
+        service.addSnippet(titleField.getText(), codeArea.getText());
+        clearForm();
+        loadData();
     }
-});
 
-
----
-
-🎨 Step 5: Smart UX Improvements
-
-Auto-set syntax based on tag
-
-tagBox.addActionListener(e -> {
-    String tag = (String) tagBox.getSelectedItem();
-
-    switch (tag) {
-        case "Java":
-            codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_JAVA);
-            break;
-        case "SQL":
-            codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_SQL);
-            break;
-        case "React":
-            codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_JAVASCRIPT);
-            break;
-        default:
-            codeArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_NONE);
+    private void updateSnippet() {
+        if (selectedId != -1) {
+            service.updateSnippet(selectedId, titleField.getText(), codeArea.getText());
+            clearForm();
+            loadData();
+        }
     }
-});
+
+    private void deleteSnippet() {
+        if (selectedId != -1) {
+            int confirm = JOptionPane.showConfirmDialog(this,
+                    "Delete this snippet?", "Confirm",
+                    JOptionPane.YES_NO_OPTION);
+
+            if (confirm == JOptionPane.YES_OPTION) {
+                service.deleteSnippet(selectedId);
+                clearForm();
+                loadData();
+            }
+        }
+    }
+
+    private void search() {
+        String keyword = searchField.getText();
+        List<Snippet> list = service.searchSnippets(keyword);
+        refreshTable(list);
+    }
+
+    private void loadData() {
+        refreshTable(service.getAllSnippets());
+    }
+
+    private void refreshTable(List<Snippet> list) {
+        tableModel.setRowCount(0);
+
+        for (Snippet s : list) {
+            tableModel.addRow(new Object[]{
+                    s.getId(),
+                    s.getTitle(),
+                    s.getCode()
+            });
+        }
+    }
+
+    private void clearForm() {
+        titleField.setText("");
+        codeArea.setText("");
+        selectedId = -1;
+        table.clearSelection();
+    }
+
+    private void onRowSelect(ListSelectionEvent e) {
+        int row = table.getSelectedRow();
+        if (row >= 0) {
+            selectedId = (int) tableModel.getValueAt(row, 0);
+            titleField.setText((String) tableModel.getValueAt(row, 1));
+            codeArea.setText((String) tableModel.getValueAt(row, 2));
+        }
+    }
+}
 
 
 ---
 
-📊 Step 6: Update Table (Add Tag Column)
+🎯 What You’ll Notice Now
 
-new String[]{"ID", "Title", "Tag", "Code"}
+🔥 Dark editor feel (like IDE)
 
+🧩 Clean split layout
 
----
+📊 Better table readability
 
-✨ Step 7: Visual Feedback (Feels Premium)
+🎛️ Professional button layout
 
-After save:
-
-JOptionPane.showMessageDialog(this, "Snippet Saved Successfully!");
-
-
----
-
-🎯 What You Now Have
-
-After this upgrade:
-
-✅ Syntax highlighting (IDE-like)
-✅ Tag-based organization
-✅ Copy button
-✅ Keyboard shortcuts
-✅ Better UX
-✅ Professional feel
-
-
----
-
-🔥 THIS is where your app becomes impressive
-
-Now it’s not:
-
-> “I made a Swing app”
-
-
-
-It becomes:
-
-> “I built a developer productivity desktop tool with modular architecture and rich editor support”
-
-
-
-
----
-
-🚀 NEXT (After You Finish This)
-
-We move to:
-
-👉 API Tester Module
-
-HTTP calls
-
-JSON viewer
-
-Headers/body editor
-
-
-👉 This will take your project to next level
-
-
----
-
-👉 Your Task
-
-Implement this and tell me:
-
-Syntax highlighting working?
-
-Tags saving properly?
-
-Copy + shortcuts working?
+⚡ Smooth UX (select → edit → update)
 
 
 
 ---
 
-If yes → we build API Tester (the most powerful module) 😎
+🚀 Next Upgrade (THIS is where it becomes insane)
+
+If you want real “developer tool” feel, next we add:
+
+👉 Syntax highlighting using:
+
+RSyntaxTextArea
+👉 Sidebar navigation
+👉 Keyboard shortcuts
+
+
+
+---
+
+Just say: “next level UI”
+and I’ll take this from good → elite 🔥
