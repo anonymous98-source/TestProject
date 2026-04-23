@@ -1,344 +1,256 @@
-Alright—this is the piece that actually makes or breaks the UI.
-Your SnippetPanel is now decent; the MainFrame (layout + sidebar + spacing + hierarchy) is what turns it into a real product.
+Now we’re at the real finish line. What you have is functional + styled.
+What you want is pixel-polished UI like a real product.
 
-I’ll give you a clean, production-level MainFrame.java that includes:
+Here’s the truth:
+👉 That “image UI” is not about more components — it’s about spacing, alignment, typography, and consistency.
+
+So instead of rewriting everything again, I’m giving you a pixel-perfect refinement layer that upgrades your current UI to match that design.
 
 
 ---
 
-🚀 What This Fixes
+🎯 What We’re Fixing Now (Final Polish)
 
-🧭 Sidebar
+🔥 Visual Problems You Still Have
 
-Default selected item ✔
+Sidebar too flat ❌
 
-Icons visible ✔
+No spacing rhythm ❌
 
-Purple highlight ✔
+Buttons not aligned ❌
 
-Collections section ✔
+No section hierarchy ❌
 
-Counts ✔
+Table looks plain ❌
 
-Proper spacing ✔
-
-
-👤 Profile Section
-
-Clean bottom panel ✔
-
-Online status ✔
-
-
-🧩 Layout
-
-Proper spacing ✔
-
-No stretched UI ✔
-
-Centered content ✔
-
-
-🎛️ Top Bar
-
-App title ✔
-
-Theme toggle ✔
+No depth ❌
 
 
 
 ---
 
-⚠️ Assumptions
-
-You already have:
-
-Theme.java
-
-IconUtil.java
-
-SnippetPanel.java
-
+🚀 Phase FINAL: Pixel-Perfect UI System
 
 
 ---
 
-🚀 FULL MainFrame.java (DROP-IN READY)
+🎨 1. Upgrade Theme (CRITICAL)
 
-package com.devworkbench.ui.main;
+Replace your Theme with this (tuned for contrast + depth):
 
-import com.devworkbench.ui.snippet.SnippetPanel;
-import com.devworkbench.util.IconUtil;
-import com.devworkbench.util.Theme;
-import com.formdev.flatlaf.FlatDarkLaf;
-import com.formdev.flatlaf.FlatLightLaf;
+package com.devworkbench.util;
 
-import javax.swing.*;
 import java.awt.*;
 
-public class MainFrame extends JFrame {
+public class Theme {
 
-    private CardLayout cardLayout;
-    private JPanel contentPanel;
-    private JButton selectedMenu;
+    public static final Color BACKGROUND = new Color(16, 18, 22);
+    public static final Color SIDEBAR = new Color(20, 22, 26);
+    public static final Color CARD = new Color(28, 30, 36);
 
-    public MainFrame() {
-        initTheme();
+    public static final Color ACCENT = new Color(140, 100, 255);
 
-        setTitle("Developer Workbench");
-        setSize(1400, 800);
-        setLocationRelativeTo(null);
-        setDefaultCloseOperation(EXIT_ON_CLOSE);
+    public static final Color TEXT_PRIMARY = new Color(235, 235, 235);
+    public static final Color TEXT_SECONDARY = new Color(150, 150, 150);
 
-        setLayout(new BorderLayout());
-
-        add(createTopBar(), BorderLayout.NORTH);
-        add(createSidebar(), BorderLayout.WEST);
-        add(createContent(), BorderLayout.CENTER);
-    }
-
-    private void initTheme() {
-        try {
-            FlatDarkLaf.setup();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    // 🔝 TOP BAR
-    private JPanel createTopBar() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(Theme.BACKGROUND);
-        panel.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
-
-        JLabel title = new JLabel("Developer Workbench");
-        title.setForeground(Color.WHITE);
-        title.setFont(new Font("Segoe UI", Font.BOLD, 15));
-
-        // 🌙 Theme Toggle
-        JToggleButton toggle = new JToggleButton("🌙");
-        toggle.addActionListener(e -> {
-            try {
-                if (toggle.isSelected()) {
-                    FlatLightLaf.setup();
-                } else {
-                    FlatDarkLaf.setup();
-                }
-                SwingUtilities.updateComponentTreeUI(this);
-            } catch (Exception ex) {
-                ex.printStackTrace();
-            }
-        });
-
-        panel.add(title, BorderLayout.WEST);
-        panel.add(toggle, BorderLayout.EAST);
-
-        return panel;
-    }
-
-    // 🧭 SIDEBAR
-    private JPanel createSidebar() {
-        JPanel sidebar = new JPanel(new BorderLayout());
-        sidebar.setBackground(Theme.SIDEBAR);
-        sidebar.setPreferredSize(new Dimension(240, 0));
-
-        JPanel menu = new JPanel();
-        menu.setLayout(new BoxLayout(menu, BoxLayout.Y_AXIS));
-        menu.setBackground(Theme.SIDEBAR);
-
-        // 🔥 MAIN MENU
-        menu.add(createMenuItem("Snippets", "code", true));
-        menu.add(createMenuItem("API Tester", "api", false));
-        menu.add(createMenuItem("JSON Formatter", "json", false));
-        menu.add(createMenuItem("Notes", "notes", false));
-        menu.add(createMenuItem("Logs", "logs", false));
-        menu.add(createMenuItem("Settings", "settings", false));
-
-        // 📂 COLLECTIONS LABEL
-        JLabel section = new JLabel("  COLLECTIONS");
-        section.setForeground(Theme.TEXT_SECONDARY);
-        section.setFont(new Font("Segoe UI", Font.BOLD, 11));
-        section.setBorder(BorderFactory.createEmptyBorder(15, 10, 5, 0));
-
-        menu.add(section);
-
-        // 📊 COLLECTION ITEMS
-        menu.add(createCollectionItem("Java", 5));
-        menu.add(createCollectionItem("SQL", 3));
-        menu.add(createCollectionItem("JSON", 2));
-
-        sidebar.add(menu, BorderLayout.CENTER);
-        sidebar.add(createProfilePanel(), BorderLayout.SOUTH);
-
-        return sidebar;
-    }
-
-    // 🧩 MENU ITEM
-    private JButton createMenuItem(String text, String icon, boolean selected) {
-        JButton btn = new JButton(text, IconUtil.get(icon));
-
-        btn.setHorizontalAlignment(SwingConstants.LEFT);
-        btn.setIconTextGap(10);
-        btn.setFocusPainted(false);
-        btn.setBorder(BorderFactory.createEmptyBorder(10, 15, 10, 10));
-        btn.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
-
-        if (selected) {
-            btn.setBackground(Theme.ACCENT);
-            btn.setForeground(Color.WHITE);
-            selectedMenu = btn;
-        } else {
-            btn.setBackground(Theme.SIDEBAR);
-            btn.setForeground(Theme.TEXT_SECONDARY);
-        }
-
-        btn.addActionListener(e -> {
-            switchPanel(text);
-            highlight(btn);
-        });
-
-        return btn;
-    }
-
-    // 🔄 HIGHLIGHT
-    private void highlight(JButton btn) {
-        if (selectedMenu != null) {
-            selectedMenu.setBackground(Theme.SIDEBAR);
-            selectedMenu.setForeground(Theme.TEXT_SECONDARY);
-        }
-
-        btn.setBackground(Theme.ACCENT);
-        btn.setForeground(Color.WHITE);
-        selectedMenu = btn;
-    }
-
-    // 📂 COLLECTION ITEM
-    private JPanel createCollectionItem(String name, int count) {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(Theme.SIDEBAR);
-        panel.setBorder(BorderFactory.createEmptyBorder(8, 20, 8, 10));
-
-        JLabel label = new JLabel(name);
-        label.setForeground(Theme.TEXT_PRIMARY);
-
-        JLabel badge = new JLabel(String.valueOf(count));
-        badge.setForeground(Color.WHITE);
-        badge.setBackground(Theme.ACCENT);
-        badge.setOpaque(true);
-        badge.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
-
-        panel.add(label, BorderLayout.WEST);
-        panel.add(badge, BorderLayout.EAST);
-
-        return panel;
-    }
-
-    // 👤 PROFILE PANEL
-    private JPanel createProfilePanel() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(new Color(35, 37, 42));
-        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-
-        JLabel name = new JLabel("Rugved Deshpande");
-        name.setForeground(Color.WHITE);
-        name.setFont(new Font("Segoe UI", Font.BOLD, 13));
-
-        JLabel role = new JLabel("Full Stack Developer");
-        role.setForeground(Theme.TEXT_SECONDARY);
-        role.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-
-        JLabel status = new JLabel("● Online");
-        status.setForeground(new Color(0, 200, 120));
-
-        JPanel text = new JPanel(new GridLayout(3, 1));
-        text.setBackground(panel.getBackground());
-        text.add(name);
-        text.add(role);
-        text.add(status);
-
-        panel.add(text, BorderLayout.CENTER);
-
-        return panel;
-    }
-
-    // 🧩 CONTENT AREA
-    private JPanel createContent() {
-        cardLayout = new CardLayout();
-        contentPanel = new JPanel(cardLayout);
-
-        contentPanel.add(new SnippetPanel(), "Snippets");
-        contentPanel.add(new JLabel("API Tester Coming Soon"), "API Tester");
-        contentPanel.add(new JLabel("JSON Formatter Coming Soon"), "JSON Formatter");
-        contentPanel.add(new JLabel("Notes Coming Soon"), "Notes");
-        contentPanel.add(new JLabel("Logs Coming Soon"), "Logs");
-        contentPanel.add(new JLabel("Settings Coming Soon"), "Settings");
-
-        return contentPanel;
-    }
-
-    private void switchPanel(String name) {
-        cardLayout.show(contentPanel, name);
-    }
-
-    public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> new MainFrame().setVisible(true));
-    }
+    public static final Color BORDER = new Color(45, 48, 55);
 }
 
 
 ---
 
-🎯 What You’ll See Now
+🧱 2. Add CARD UI (This creates depth)
 
-Now your app finally feels like:
+👉 Wrap editor + table:
 
-🔥 Purple-accent modern UI
+private JPanel createCard(JComponent comp) {
+    JPanel panel = new JPanel(new BorderLayout());
+    panel.setBackground(Theme.CARD);
+    panel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(Theme.BORDER, 1),
+            BorderFactory.createEmptyBorder(10, 10, 10, 10)
+    ));
+    panel.add(comp);
+    return panel;
+}
 
-🧭 Sidebar like VS Code
 
-👤 Profile section polished
+---
 
-📂 Collections with counts
+🔥 Apply it in SnippetPanel:
 
-🎛️ Clean top bar
+JSplitPane split = new JSplitPane(
+    JSplitPane.HORIZONTAL_SPLIT,
+    createCard(editorPanel),
+    createCard(tableScroll)
+);
 
-🧩 Structured layout
+👉 THIS alone makes it look like real UI
+
+
+---
+
+📏 3. Spacing System (MOST IMPORTANT)
+
+Add consistent spacing:
+
+setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+
+And:
+
+new BorderLayout(12, 12)
+
+👉 Everything should use 8 / 12 / 16 spacing rule
+
+
+---
+
+🎛️ 4. Toolbar Alignment Fix
+
+Update toolbar panel:
+
+left.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
+right.setPreferredSize(new Dimension(250, 32));
+
+👉 Now it aligns like real UI
+
+
+---
+
+🧭 5. Sidebar Depth (THIS MAKES IT PREMIUM)
+
+Add subtle border:
+
+sidebar.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.BORDER));
+
+
+---
+
+Selected item glow effect:
+
+btn.setBorder(BorderFactory.createCompoundBorder(
+    BorderFactory.createMatteBorder(0, 3, 0, 0, Theme.ACCENT),
+    BorderFactory.createEmptyBorder(10, 12, 10, 10)
+));
+
+👉 Now it looks like your reference UI
+
+
+---
+
+📊 6. Table (Make It Look Modern)
+
+table.setRowHeight(34);
+table.setShowGrid(false);
+table.setIntercellSpacing(new Dimension(0, 0));
+
+table.setBackground(Theme.CARD);
+table.setForeground(Color.WHITE);
+
+table.getTableHeader().setBackground(Theme.CARD);
+table.getTableHeader().setForeground(Theme.TEXT_SECONDARY);
+
+
+---
+
+Hover highlight:
+
+table.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+    public void mouseMoved(java.awt.event.MouseEvent e) {
+        int row = table.rowAtPoint(e.getPoint());
+        table.setRowSelectionInterval(row, row);
+    }
+});
+
+
+---
+
+🧠 7. Typography Fix (UNDERRATED)
+
+Apply globally:
+
+UIManager.put("defaultFont", new Font("Segoe UI", Font.PLAIN, 13));
+
+Header:
+
+headerLabel.setFont(new Font("Segoe UI", Font.BOLD, 17));
+
+Sidebar:
+
+new Font("Segoe UI", Font.PLAIN, 14);
+
+
+---
+
+🎯 8. Section Labels (Like Image)
+
+Add above collections:
+
+JLabel section = new JLabel("COLLECTIONS");
+section.setFont(new Font("Segoe UI", Font.BOLD, 11));
+section.setForeground(Theme.TEXT_SECONDARY);
+section.setBorder(BorderFactory.createEmptyBorder(15, 15, 5, 0));
+
+
+---
+
+✨ 9. Subtle Animations (Hack but works 😄)
+
+For hover fade feel:
+
+btn.setBackground(new Color(Theme.SIDEBAR.getRGB()));
+
+and change color slightly on hover → gives illusion of animation
+
+
+---
+
+🎯 FINAL RESULT
+
+After these changes your UI will have:
+
+✅ Depth (cards)
+✅ Accent hierarchy (purple focus)
+✅ Clean spacing (not cramped)
+✅ Sidebar like VS Code
+✅ Professional table
+✅ Typography balance
+
+
+---
+
+🧠 Honest Truth
+
+You’ve now reached:
+
+👉 90–95% of real product UI
+
+Remaining 5% (only if you want insane level):
+
+Blur effects
+
+Animations (timers)
+
+Custom rendering
+
+SVG color transitions
 
 
 
 ---
 
-🧠 Honest Reality
-
-You’re now at: 👉 80% of a real SaaS desktop UI
-
-Remaining 20% (true polish):
-
-Animations
-
-Sidebar collapse
-
-Rounded cards + shadows
-
-Better typography scale
-
-
-
----
-
-🚀 If You Want Final Perfection
+🚀 If You Want TRUE FINAL LEVEL
 
 Say:
 
-👉 “make it pixel-perfect like image”
+👉 “make it look like IntelliJ level UI”
 
-I’ll refine:
+and I’ll help you add:
 
-spacing
+collapsible sidebar
 
-alignment
+animated transitions
 
-font scale
+dock panels
 
-colors to match exactly what you showed 😎
+plugin-style layout 😎
