@@ -1,98 +1,11 @@
-Based on the Jira story, Java 17, Spring Boot, JPA, and the logging pattern visible in your project, here's how I would implement it for a clean enterprise-grade solution.
-
-
----
-
-Response DTO (Java 17 Record)
-
-package com.cardinalhealth.advship.preferences.api.dto.response;
-
-import java.util.UUID;
-
-public record FedexSubscriptionResponse(
-        UUID registrationId,
-        UUID subscriptionId
-) {
-}
-
-
----
-
-Entity
-
-package com.cardinalhealth.advship.preferences.api.entity;
-
-import jakarta.persistence.*;
-import lombok.*;
-
-import java.time.LocalDateTime;
-import java.util.UUID;
-
-@Entity
-@Table(name = "fedex_subscriptions")
-@Getter
-@Setter
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class FedexSubscriptionEntity {
-
-    @Id
-    @Column(name = "id")
-    private UUID id;
-
-    @Column(name = "customer_id", nullable = false)
-    private UUID customerId;
-
-    @Column(name = "registration_id", nullable = false)
-    private UUID registrationId;
-
-    @Column(name = "subscription_id", nullable = false)
-    private UUID subscriptionId;
-
-    @Column(name = "created_by")
-    private String createdBy;
-
-    @Column(name = "modified_by")
-    private String modifiedBy;
-
-    @Column(name = "created_at")
-    private LocalDateTime createdAt;
-
-    @Column(name = "modified_at")
-    private LocalDateTime modifiedAt;
-}
-
-
----
-
-Projection (Optimized Query)
-
-Instead of loading the whole entity.
-
-package com.cardinalhealth.advship.preferences.api.repository.projection;
-
-import java.util.UUID;
-
-public interface FedexSubscriptionProjection {
-
-    UUID getRegistrationId();
-
-    UUID getSubscriptionId();
-}
-
-
----
+If this is your first card, I would actually recommend direct entity fetching. It's simpler, easier to understand during code review, and matches most enterprise codebases.
 
 Repository
 
 package com.cardinalhealth.advship.preferences.api.repository;
 
 import com.cardinalhealth.advship.preferences.api.entity.FedexSubscriptionEntity;
-import com.cardinalhealth.advship.preferences.api.repository.projection.FedexSubscriptionProjection;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -100,15 +13,7 @@ import java.util.UUID;
 public interface FedexSubscriptionRepository
         extends JpaRepository<FedexSubscriptionEntity, UUID> {
 
-    @Query("""
-            SELECT
-                f.registrationId as registrationId,
-                f.subscriptionId as subscriptionId
-            FROM FedexSubscriptionEntity f
-            WHERE f.customerId = :customerId
-            """)
-    Optional<FedexSubscriptionProjection> findSubscriptionDetails(
-            @Param("customerId") UUID customerId);
+    Optional<FedexSubscriptionEntity> findByCustomerId(UUID customerId);
 }
 
 
@@ -135,8 +40,8 @@ Service Implementation
 package com.cardinalhealth.advship.preferences.api.service.impl;
 
 import com.cardinalhealth.advship.preferences.api.dto.response.FedexSubscriptionResponse;
+import com.cardinalhealth.advship.preferences.api.entity.FedexSubscriptionEntity;
 import com.cardinalhealth.advship.preferences.api.repository.FedexSubscriptionRepository;
-import com.cardinalhealth.advship.preferences.api.repository.projection.FedexSubscriptionProjection;
 import com.cardinalhealth.advship.preferences.api.service.FedexSubscriptionService;
 import com.cardinalhealth.ofl.next.logging.library.LogBuilder;
 import lombok.RequiredArgsConstructor;
@@ -159,18 +64,16 @@ public class FedexSubscriptionServiceImpl implements FedexSubscriptionService {
 
         log.info(new LogBuilder()
                 .withMessage("Fetching FedEx subscription details")
-                .withField("customerId", customerId)
                 .toString());
 
-        FedexSubscriptionProjection projection = repository
-                .findSubscriptionDetails(customerId)
+        FedexSubscriptionEntity entity = repository
+                .findByCustomerId(customerId)
                 .orElse(null);
 
-        if (projection == null) {
+        if (entity == null) {
 
             log.info(new LogBuilder()
-                    .withMessage("FedEx subscription not found")
-                    .withField("customerId", customerId)
+                    .withMessage("No FedEx subscription found")
                     .toString());
 
             return null;
@@ -178,12 +81,11 @@ public class FedexSubscriptionServiceImpl implements FedexSubscriptionService {
 
         log.info(new LogBuilder()
                 .withMessage("FedEx subscription found")
-                .withField("customerId", customerId)
                 .toString());
 
         return new FedexSubscriptionResponse(
-                projection.getRegistrationId(),
-                projection.getSubscriptionId()
+                entity.getRegistrationId(),
+                entity.getSubscriptionId()
         );
     }
 }
@@ -192,8 +94,6 @@ public class FedexSubscriptionServiceImpl implements FedexSubscriptionService {
 ---
 
 Controller
-
-Follow the pattern shown in your screenshot.
 
 package com.cardinalhealth.advship.preferences.api.controller;
 
@@ -223,7 +123,6 @@ public class FedexSubscriptionController {
 
         log.info(new LogBuilder()
                 .withMessage("Received request to fetch FedEx subscription")
-                .withField("customerId", customerId)
                 .toString());
 
         FedexSubscriptionResponse response =
@@ -231,7 +130,6 @@ public class FedexSubscriptionController {
 
         log.info(new LogBuilder()
                 .withMessage("Returning FedEx subscription response")
-                .withField("customerId", customerId)
                 .toString());
 
         return ResponseEntity.ok(response);
@@ -241,23 +139,193 @@ public class FedexSubscriptionController {
 
 ---
 
-One thing I'd verify before coding
+Response DTO
 
-Check whether your project already uses:
+If your project is already on Java 17, use a record:
 
-record DTOs or Lombok DTOs
+package com.cardinalhealth.advship.preferences.api.dto.response;
 
-Projections or direct entity fetching
+import java.util.UUID;
 
-LogBuilder.withField() method name (some teams use withKeyValue())
+public record FedexSubscriptionResponse(
+        UUID registrationId,
+        UUID subscriptionId
+) {
+}
+
+One improvement I'd make
+
+Instead of:
+
+return null;
+
+I'd ask the lead whether they want:
+
+return ResponseEntity.noContent().build();
+
+when no record exists. That's often cleaner than returning a 200 with a null body.
+
+Before coding, check whether there is already a similar pattern in the preferences-api project (controller → service → repository). For a first Jira card, matching the existing code style is usually more important than using the most advanced pattern.
 
 
-Search for an existing GET API in the same service and mirror the exact style. Consistency with the codebase is usually valued more than introducing a new pattern.
-
-Also ask:
-
-> If no subscription exists for the customer, should I return 200 with null body, 204 No Content, or 404 Not Found?
 
 
 
-That answer affects the controller implementation.
+
+Yes. Adding a custom exception will make the API look much more production-ready.
+
+Since the requirement says:
+
+> Check if registrationId & subscriptionId exist for customer
+
+
+
+I would throw a custom exception when the customer is not found rather than returning null.
+
+
+---
+
+Custom Exception
+
+package com.cardinalhealth.advship.preferences.api.exception;
+
+public class FedexSubscriptionNotFoundException extends RuntimeException {
+
+    public FedexSubscriptionNotFoundException(String message) {
+        super(message);
+    }
+}
+
+
+---
+
+Service Implementation
+
+@Override
+public FedexSubscriptionResponse getFedexSubscription(UUID customerId) {
+
+    log.info(new LogBuilder()
+            .withMessage("Fetching FedEx subscription details")
+            .toString());
+
+    FedexSubscriptionEntity entity = repository
+            .findByCustomerId(customerId)
+            .orElseThrow(() -> {
+
+                log.warn(new LogBuilder()
+                        .withMessage("FedEx subscription not found")
+                        .toString());
+
+                return new FedexSubscriptionNotFoundException(
+                        "No FedEx subscription found for customerId: " + customerId);
+            });
+
+    log.info(new LogBuilder()
+            .withMessage("FedEx subscription found")
+            .toString());
+
+    return new FedexSubscriptionResponse(
+            entity.getRegistrationId(),
+            entity.getSubscriptionId()
+    );
+}
+
+
+---
+
+Error Response DTO
+
+package com.cardinalhealth.advship.preferences.api.dto.response;
+
+import lombok.Builder;
+
+import java.time.LocalDateTime;
+
+@Builder
+public record ErrorResponse(
+        String message,
+        String errorCode,
+        LocalDateTime timestamp
+) {
+}
+
+
+---
+
+Global Exception Handler
+
+If your project already has one, add a handler there.
+
+Otherwise:
+
+package com.cardinalhealth.advship.preferences.api.exception;
+
+import com.cardinalhealth.advship.preferences.api.dto.response.ErrorResponse;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import java.time.LocalDateTime;
+
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(FedexSubscriptionNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleSubscriptionNotFound(
+            FedexSubscriptionNotFoundException ex) {
+
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ErrorResponse.builder()
+                        .message(ex.getMessage())
+                        .errorCode("FEDEX_SUBSCRIPTION_NOT_FOUND")
+                        .timestamp(LocalDateTime.now())
+                        .build());
+    }
+}
+
+
+---
+
+API Response
+
+Success
+
+{
+  "registrationId": "a1b2c3d4",
+  "subscriptionId": "x1y2z3"
+}
+
+Customer Not Found
+
+404
+
+{
+  "message": "No FedEx subscription found for customerId: 12345",
+  "errorCode": "FEDEX_SUBSCRIPTION_NOT_FOUND",
+  "timestamp": "2026-06-22T18:20:30"
+}
+
+
+---
+
+Before implementing
+
+Search your project for:
+
+@RestControllerAdvice
+
+and
+
+extends RuntimeException
+
+Most likely your team already has:
+
+ResourceNotFoundException
+
+BusinessException
+
+ApiException
+
+
+If they already exist, reuse them instead of creating a new one. That will make your PR look much more aligned with the existing codebase.
