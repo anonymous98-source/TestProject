@@ -380,3 +380,162 @@ public class FedexSubscriptionServiceImpl implements FedexSubscriptionService {
         );
     }
 }
+
+
+
+Yes, looking at your screenshot, your project follows the standard pattern:
+
+src/test/java
+ ├── controller
+ ├── service
+ ├── validator
+ ├── util
+ └── ...
+
+For your API, you'll typically need:
+
+1. Service Test (Most Important)
+
+Create:
+
+src/test/java/.../service/FedexSubscriptionServiceImplTest.java
+
+Example:
+
+@ExtendWith(MockitoExtension.class)
+class FedexSubscriptionServiceImplTest {
+
+    @Mock
+    private FedexSubscriptionRepository repository;
+
+    @InjectMocks
+    private FedexSubscriptionServiceImpl service;
+
+    @Test
+    void shouldReturnSubscriptionDetails() {
+
+        UUID customerId = UUID.randomUUID();
+
+        FedexSubscriptionEntity entity = FedexSubscriptionEntity.builder()
+                .registrationId(UUID.randomUUID())
+                .subscriptionId(UUID.randomUUID())
+                .customerId(customerId)
+                .build();
+
+        when(repository.findByCustomerId(customerId))
+                .thenReturn(Optional.of(entity));
+
+        FedexSubscriptionResponse response =
+                service.getFedexSubscription(customerId);
+
+        assertNotNull(response);
+        assertEquals(entity.getRegistrationId(),
+                response.registrationId());
+        assertEquals(entity.getSubscriptionId(),
+                response.subscriptionId());
+    }
+
+    @Test
+    void shouldReturnNullWhenSubscriptionNotFound() {
+
+        UUID customerId = UUID.randomUUID();
+
+        when(repository.findByCustomerId(customerId))
+                .thenReturn(Optional.empty());
+
+        FedexSubscriptionResponse response =
+                service.getFedexSubscription(customerId);
+
+        assertNull(response);
+    }
+}
+
+
+---
+
+2. Controller Test
+
+Create:
+
+src/test/java/.../controller/FedexSubscriptionControllerTest.java
+
+Example:
+
+@WebMvcTest(FedexSubscriptionController.class)
+class FedexSubscriptionControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private FedexSubscriptionService service;
+
+    @Test
+    void shouldReturnSubscriptionDetails() throws Exception {
+
+        UUID customerId = UUID.randomUUID();
+        UUID registrationId = UUID.randomUUID();
+        UUID subscriptionId = UUID.randomUUID();
+
+        when(service.getFedexSubscription(customerId))
+                .thenReturn(new FedexSubscriptionResponse(
+                        registrationId,
+                        subscriptionId));
+
+        mockMvc.perform(
+                        get("/v1/api/fedex/subscription")
+                                .param("customerId",
+                                        customerId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.registrationId")
+                        .value(registrationId.toString()))
+                .andExpect(jsonPath("$.subscriptionId")
+                        .value(subscriptionId.toString()));
+    }
+}
+
+
+---
+
+3. Optional Repository Test
+
+Most teams don't write repository tests for simple derived methods like:
+
+findByCustomerId()
+
+because Spring Data already tests that.
+
+Only create repository tests if your team has a convention for @DataJpaTest.
+
+
+---
+
+Coverage Expected for Your Card
+
+For this Jira, I'd submit:
+
+✅ Controller Test
+✅ Service Test (success case)
+✅ Service Test (record not found)
+
+That's usually enough to get 80–90% coverage for this feature.
+
+
+---
+
+Before writing the tests, look inside:
+
+src/test/java/.../service
+
+and open an existing *ServiceTest.java.
+
+Follow:
+
+same annotations (@ExtendWith, @SpringBootTest, etc.)
+
+same assertion style (AssertJ vs JUnit)
+
+same naming convention
+
+
+Your reviewers will care more about consistency with existing tests than about using a different testing style. If you share one existing service test from the project, I can generate tests that exactly match your team's pattern.
