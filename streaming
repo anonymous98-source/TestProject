@@ -329,3 +329,54 @@ ApiException
 
 
 If they already exist, reuse them instead of creating a new one. That will make your PR look much more aligned with the existing codebase.
+
+
+
+
+package com.cardinalhealth.advship.preferences.api.service.impl;
+
+import com.cardinalhealth.advship.preferences.api.dto.response.FedexSubscriptionResponse;
+import com.cardinalhealth.advship.preferences.api.exception.ResourceNotFoundException;
+import com.cardinalhealth.advship.preferences.api.repository.FedexSubscriptionRepository;
+import com.cardinalhealth.advship.preferences.api.repository.projection.FedexSubscriptionProjection;
+import com.cardinalhealth.advship.preferences.api.service.FedexSubscriptionService;
+import com.cardinalhealth.ofl.next.logging.library.LogBuilder;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.UUID;
+
+@Service
+@Slf4j
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+public class FedexSubscriptionServiceImpl implements FedexSubscriptionService {
+
+    private final FedexSubscriptionRepository repository;
+
+    @Override
+    public FedexSubscriptionResponse getFedexSubscription(UUID customerId) {
+
+        log.info(new LogBuilder()
+                .withMessage("Fetching FedEx subscription details")
+                .withField("customerId", customerId)
+                .toString());
+
+        FedexSubscriptionProjection subscription = repository
+                .findProjectedByCustomerId(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "FedEx subscription not found for customerId: " + customerId));
+
+        log.info(new LogBuilder()
+                .withMessage("FedEx subscription found")
+                .withField("customerId", customerId)
+                .toString());
+
+        return new FedexSubscriptionResponse(
+                subscription.getRegistrationId(),
+                subscription.getSubscriptionId()
+        );
+    }
+}
