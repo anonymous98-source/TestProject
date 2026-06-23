@@ -152,3 +152,259 @@ For code coverage and review, these 3 scenarios are exactly what I'd expect:
 ✅ Customer exists + account does not exist
 
 That fully covers the new business logic.
+
+
+
+
+Assuming your implementation is:
+
+boolean existsByCustomerId(UUID customerId);
+
+Optional<FedexSubscriptionProjection> findSubscriptionDetails(
+        UUID customerId,
+        String accountNumber);
+
+and service method:
+
+FedexSubscriptionResponse getFedexSubscription(
+        UUID customerId,
+        String accountNumber);
+
+Here are production-ready test classes.
+
+
+---
+
+Service Test
+
+package com.cardinalhealth.advship.preferences.api.service.impl;
+
+import com.cardinalhealth.advship.preferences.api.dto.response.FedexSubscriptionResponse;
+import com.cardinalhealth.advship.preferences.api.repository.FedexSubscriptionRepository;
+import com.cardinalhealth.advship.preferences.api.repository.projection.FedexSubscriptionProjection;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+class FedexSubscriptionServiceImplTest {
+
+    @Mock
+    private FedexSubscriptionRepository repository;
+
+    @InjectMocks
+    private FedexSubscriptionServiceImpl service;
+
+    @Test
+    void shouldReturnSubscriptionDetails() {
+
+        UUID customerId = UUID.randomUUID();
+        UUID registrationId = UUID.randomUUID();
+        UUID subscriptionId = UUID.randomUUID();
+
+        String accountNumber = "123456";
+
+        FedexSubscriptionProjection projection =
+                mock(FedexSubscriptionProjection.class);
+
+        when(repository.existsByCustomerId(customerId))
+                .thenReturn(true);
+
+        when(repository.findSubscriptionDetails(
+                customerId,
+                accountNumber))
+                .thenReturn(Optional.of(projection));
+
+        when(projection.getRegistrationId())
+                .thenReturn(registrationId);
+
+        when(projection.getSubscriptionId())
+                .thenReturn(subscriptionId);
+
+        when(projection.getAccountNumber())
+                .thenReturn(accountNumber);
+
+        FedexSubscriptionResponse response =
+                service.getFedexSubscription(
+                        customerId,
+                        accountNumber);
+
+        assertNotNull(response);
+        assertEquals(registrationId, response.registrationId());
+        assertEquals(subscriptionId, response.subscriptionId());
+        assertEquals(accountNumber, response.accountNumber());
+
+        verify(repository).existsByCustomerId(customerId);
+        verify(repository).findSubscriptionDetails(
+                customerId,
+                accountNumber);
+    }
+
+    @Test
+    void shouldReturnNullWhenCustomerDoesNotExist() {
+
+        UUID customerId = UUID.randomUUID();
+
+        when(repository.existsByCustomerId(customerId))
+                .thenReturn(false);
+
+        FedexSubscriptionResponse response =
+                service.getFedexSubscription(
+                        customerId,
+                        "123456");
+
+        assertNull(response);
+
+        verify(repository).existsByCustomerId(customerId);
+
+        verify(repository, never())
+                .findSubscriptionDetails(any(), any());
+    }
+
+    @Test
+    void shouldReturnNullWhenSubscriptionNotFound() {
+
+        UUID customerId = UUID.randomUUID();
+
+        String accountNumber = "123456";
+
+        when(repository.existsByCustomerId(customerId))
+                .thenReturn(true);
+
+        when(repository.findSubscriptionDetails(
+                customerId,
+                accountNumber))
+                .thenReturn(Optional.empty());
+
+        FedexSubscriptionResponse response =
+                service.getFedexSubscription(
+                        customerId,
+                        accountNumber);
+
+        assertNull(response);
+
+        verify(repository).existsByCustomerId(customerId);
+
+        verify(repository).findSubscriptionDetails(
+                customerId,
+                accountNumber);
+    }
+}
+
+
+---
+
+Controller Test
+
+package com.cardinalhealth.advship.preferences.api.controller;
+
+import com.cardinalhealth.advship.preferences.api.dto.response.FedexSubscriptionResponse;
+import com.cardinalhealth.advship.preferences.api.service.FedexSubscriptionService;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.UUID;
+
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+@WebMvcTest(FedexSubscriptionController.class)
+class FedexSubscriptionControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private FedexSubscriptionService service;
+
+    @Test
+    void shouldReturnSubscriptionDetails() throws Exception {
+
+        UUID customerId = UUID.randomUUID();
+
+        UUID registrationId = UUID.randomUUID();
+        UUID subscriptionId = UUID.randomUUID();
+
+        String accountNumber = "123456";
+
+        when(service.getFedexSubscription(
+                customerId,
+                accountNumber))
+                .thenReturn(
+                        new FedexSubscriptionResponse(
+                                registrationId,
+                                subscriptionId,
+                                accountNumber));
+
+        mockMvc.perform(
+                        get("/v1/api/fedex/subscription")
+                                .param(
+                                        "customerId",
+                                        customerId.toString())
+                                .param(
+                                        "accountNumber",
+                                        accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(
+                        jsonPath("$.registrationId")
+                                .value(
+                                        registrationId.toString()))
+                .andExpect(
+                        jsonPath("$.subscriptionId")
+                                .value(
+                                        subscriptionId.toString()))
+                .andExpect(
+                        jsonPath("$.accountNumber")
+                                .value(accountNumber));
+    }
+
+    @Test
+    void shouldReturnEmptyResponseWhenSubscriptionNotFound()
+            throws Exception {
+
+        UUID customerId = UUID.randomUUID();
+
+        when(service.getFedexSubscription(
+                customerId,
+                "123456"))
+                .thenReturn(null);
+
+        mockMvc.perform(
+                        get("/v1/api/fedex/subscription")
+                                .param(
+                                        "customerId",
+                                        customerId.toString())
+                                .param(
+                                        "accountNumber",
+                                        "123456"))
+                .andExpect(status().isOk());
+    }
+}
+
+One thing before copying
+
+Open any existing *ControllerTest and *ServiceTest in your project and compare:
+
+@MockBean vs @MockitoBean
+
+JUnit assertions vs AssertJ (assertThat)
+
+@ExtendWith(MockitoExtension.class) vs Spring test runner
+
+Naming convention (givenWhenThen style)
+
+
+Your team may have a specific pattern. If you share one existing service test file, I can rewrite these tests to match your codebase exactly.
