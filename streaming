@@ -94,3 +94,81 @@ For a first Jira card, if you're unsure, send a quick Teams message:
 
 
 That avoids surprises.
+
+The error tells you exactly what's wrong:
+
+fedex_subscribed_accounts does not exist, skipping
+
+But the constraint still exists in:
+
+advship_preferences_api.fedex_subscribed_accounts
+
+Looking at your screenshot, you're connected to:
+
+db_local.public
+
+while the actual tables are in:
+
+advship_preferences_api
+
+schema.
+
+First verify
+
+Run:
+
+SELECT schemaname, tablename
+FROM pg_tables
+WHERE tablename IN (
+    'fedex_subscriptions',
+    'fedex_subscribed_accounts'
+);
+
+You'll likely see:
+
+advship_preferences_api | fedex_subscriptions
+advship_preferences_api | fedex_subscribed_accounts
+
+Then drop properly
+
+DROP TABLE IF EXISTS advship_preferences_api.fedex_subscribed_accounts;
+
+DROP TABLE IF EXISTS advship_preferences_api.fedex_subscriptions;
+
+Quickest option
+
+DROP TABLE IF EXISTS advship_preferences_api.fedex_subscriptions CASCADE;
+
+CASCADE will automatically remove:
+
+fk_fedex_subscribed_accounts_subscription
+
+and any dependent objects.
+
+After dropping
+
+Check:
+
+SELECT *
+FROM flyway_schema_history
+WHERE script LIKE '%fedex%';
+
+If your migration is already marked as executed, delete that entry (only in local):
+
+DELETE
+FROM flyway_schema_history
+WHERE version = '20';
+
+(or whatever version created these tables).
+
+Then restart:
+
+./gradlew bootRun
+
+or
+
+./gradlew flywayMigrate
+
+and Flyway will recreate the tables using your updated TEXT column definitions.
+
+From the screenshot, the main issue is that you're dropping tables from the wrong schema (public), while the tables live in advship_preferences_api.
