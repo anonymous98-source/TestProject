@@ -1,117 +1,259 @@
-Since your columns are now TEXT, I'll use meaningful string values instead of UUIDs.
+Since you've changed:
 
-Relationship Structure
+UUID customerId
+UUID registrationId
+UUID subscriptionId
 
-CUST001
- ├── REG001
- │     ├── SUB001
- │     │      ├── ACC1001
- │     │      └── ACC1002
- │     └── SUB002
- │            └── ACC1003
- │
- └── REG002
-       ├── SUB003
-       │      ├── ACC1004
-       │      └── ACC1005
-       └── SUB004
-              └── ACC1006
+to:
 
-CUST002
- ├── REG003
- │     ├── SUB005
- │     │      └── ACC2001
- │     └── SUB006
- │            └── ACC2002
- └── REG004
-       └── SUB007
-              └── ACC2003
+String customerId
+String registrationId
+String subscriptionId
 
-FEDEX_SUBSCRIPTIONS (10 Rows)
-
-INSERT INTO fedex_subscriptions
-(id, customer_id, registration_id, subscription_id,
- created_by, modified_by, created_at, modified_at)
-VALUES
-(uuid_generate_v4(),'CUST001','REG001','SUB001','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
-
-(uuid_generate_v4(),'CUST001','REG001','SUB002','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
-
-(uuid_generate_v4(),'CUST001','REG002','SUB003','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
-
-(uuid_generate_v4(),'CUST001','REG002','SUB004','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
-
-(uuid_generate_v4(),'CUST002','REG003','SUB005','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
-
-(uuid_generate_v4(),'CUST002','REG003','SUB006','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
-
-(uuid_generate_v4(),'CUST002','REG004','SUB007','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
-
-(uuid_generate_v4(),'CUST003','REG005','SUB008','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
-
-(uuid_generate_v4(),'CUST003','REG005','SUB009','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
-
-(uuid_generate_v4(),'CUST004','REG006','SUB010','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+you need to update both Service Test and Controller Test.
 
 
 ---
 
-FEDEX_SUBSCRIBED_ACCOUNTS (10 Rows)
+Service Test Changes
 
-INSERT INTO fedex_subscribed_accounts
-(id, subscription_id, account_number,
- created_by, modified_by, created_at, modified_at)
-VALUES
-(uuid_generate_v4(),'SUB001','ACC1001','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
+Before
 
-(uuid_generate_v4(),'SUB001','ACC1002','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
+UUID customerId = UUID.randomUUID();
+UUID registrationId = UUID.randomUUID();
+UUID subscriptionId = UUID.randomUUID();
 
-(uuid_generate_v4(),'SUB002','ACC1003','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
+After
 
-(uuid_generate_v4(),'SUB003','ACC1004','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
+String customerId = "CUST001";
+String registrationId = "REG001";
+String subscriptionId = "SUB001";
+String accountNumber = "ACC1001";
 
-(uuid_generate_v4(),'SUB003','ACC1005','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-(uuid_generate_v4(),'SUB004','ACC1006','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
+---
 
-(uuid_generate_v4(),'SUB005','ACC2001','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
+Success Test
 
-(uuid_generate_v4(),'SUB006','ACC2002','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
+@Test
+@DisplayName("Fetch FedEx Subscription Details - Success")
+void testGetFedexSubscription_SuccessScenario() {
 
-(uuid_generate_v4(),'SUB007','ACC2003','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
+    String customerId = "CUST001";
+    String registrationId = "REG001";
+    String subscriptionId = "SUB001";
+    String accountNumber = "ACC1001";
 
-(uuid_generate_v4(),'SUB008','ACC3001','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+    FedexSubscriptionProjection projection =
+            mock(FedexSubscriptionProjection.class);
 
-Example API Test Data
+    when(fedexSubscriptionRepository.existsByCustomerId(customerId))
+            .thenReturn(true);
 
-These will return data:
+    when(fedexSubscriptionRepository.findSubscriptionDetails(
+            customerId,
+            accountNumber))
+            .thenReturn(Optional.of(projection));
 
-GET /v1/api/fedex/subscription?customerId=CUST001&accountNumber=ACC1001
+    when(projection.getRegistrationId())
+            .thenReturn(registrationId);
 
-Response:
+    when(projection.getSubscriptionId())
+            .thenReturn(subscriptionId);
 
-{
-  "registrationId": "REG001",
-  "subscriptionId": "SUB001",
-  "accountNumber": "ACC1001"
+    when(projection.getAccountNumber())
+            .thenReturn(accountNumber);
+
+    FedexSubscriptionResponse response =
+            fedexSubscriptionService.getFedexSubscription(
+                    customerId,
+                    accountNumber);
+
+    assertNotNull(response);
+    assertEquals(registrationId,
+            response.getRegistrationId());
+
+    assertEquals(subscriptionId,
+            response.getSubscriptionId());
+
+    assertEquals(accountNumber,
+            response.getAccountNumber());
 }
 
-GET /v1/api/fedex/subscription?customerId=CUST001&accountNumber=ACC1005
 
-Response:
+---
 
-{
-  "registrationId": "REG002",
-  "subscriptionId": "SUB003",
-  "accountNumber": "ACC1005"
+Customer Not Found Test
+
+@Test
+@DisplayName("Customer Not Found")
+void testGetFedexSubscription_CustomerNotFoundScenario() {
+
+    String customerId = "INVALID_CUSTOMER";
+
+    when(fedexSubscriptionRepository.existsByCustomerId(customerId))
+            .thenReturn(false);
+
+    FedexSubscriptionResponse response =
+            fedexSubscriptionService.getFedexSubscription(
+                    customerId,
+                    "ACC1001");
+
+    assertNull(response);
+
+    verify(fedexSubscriptionRepository)
+            .existsByCustomerId(customerId);
+
+    verifyNoMoreInteractions(
+            fedexSubscriptionRepository);
 }
 
-This data set nicely demonstrates:
 
-Multiple registrations under a customer
+---
 
-Multiple subscriptions under a registration
+Subscription Not Found Test
 
-Multiple accounts under a subscription
+@Test
+@DisplayName("Subscription Not Found")
+void testGetFedexSubscription_SubscriptionNotFoundScenario() {
 
-No duplicate account numbers across subscriptions (matching your business rule)
+    String customerId = "CUST001";
+    String accountNumber = "INVALID_ACC";
+
+    when(fedexSubscriptionRepository.existsByCustomerId(customerId))
+            .thenReturn(true);
+
+    when(fedexSubscriptionRepository.findSubscriptionDetails(
+            customerId,
+            accountNumber))
+            .thenReturn(Optional.empty());
+
+    FedexSubscriptionResponse response =
+            fedexSubscriptionService.getFedexSubscription(
+                    customerId,
+                    accountNumber);
+
+    assertNull(response);
+}
+
+
+---
+
+Controller Test Changes
+
+Valid Request
+
+@Test
+@WithMockOflUser(role = "ADVSHIP_ADMIN")
+void testGetFedexSubscription_ValidRequest() throws Exception {
+
+    String customerId = "CUST001";
+    String registrationId = "REG001";
+    String subscriptionId = "SUB001";
+    String accountNumber = "ACC1001";
+
+    FedexSubscriptionResponse response =
+            FedexSubscriptionResponse.builder()
+                    .registrationId(registrationId)
+                    .subscriptionId(subscriptionId)
+                    .accountNumber(accountNumber)
+                    .build();
+
+    Mockito.when(
+            fedexSubscriptionService.getFedexSubscription(
+                    customerId,
+                    accountNumber))
+            .thenReturn(response);
+
+    mockMvc.perform(
+                    get("/v1/api/fedex/subscription")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .with(csrf())
+                            .header("Authorization", "dummy-token")
+                            .param("customerId", customerId)
+                            .param("accountNumber", accountNumber))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.registrationId")
+                    .value(registrationId))
+            .andExpect(jsonPath("$.subscriptionId")
+                    .value(subscriptionId))
+            .andExpect(jsonPath("$.accountNumber")
+                    .value(accountNumber));
+}
+
+
+---
+
+No Data Found
+
+@Test
+@WithMockOflUser(role = "ADVSHIP_ADMIN")
+void testGetFedexSubscription_NoDataFound() throws Exception {
+
+    Mockito.when(
+            fedexSubscriptionService.getFedexSubscription(
+                    "CUST001",
+                    "INVALID_ACC"))
+            .thenReturn(null);
+
+    mockMvc.perform(
+                    get("/v1/api/fedex/subscription")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .with(csrf())
+                            .header("Authorization", "dummy-token")
+                            .param("customerId", "CUST001")
+                            .param("accountNumber", "INVALID_ACC"))
+            .andExpect(status().isOk());
+}
+
+
+---
+
+Invalid Customer Test
+
+Since customerId is now a String, there is no UUID conversion anymore.
+
+So this test:
+
+customerId = "invalid-uuid"
+
+is no longer meaningful and should be removed.
+
+Instead create:
+
+@Test
+@WithMockOflUser(role = "ADVSHIP_ADMIN")
+void testGetFedexSubscription_EmptyCustomerId() throws Exception {
+
+    mockMvc.perform(
+                    get("/v1/api/fedex/subscription")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .with(csrf())
+                            .header("Authorization", "dummy-token")
+                            .param("customerId", "")
+                            .param("accountNumber", "ACC1001"))
+            .andExpect(status().isBadRequest());
+}
+
+Only keep this test if your controller has validation like:
+
+@RequestParam
+@NotBlank
+String customerId
+
+Otherwise remove the third controller test entirely.
+
+Important
+
+Now that IDs are Strings, update:
+
+FedexSubscriptionProjection
+FedexSubscriptionResponse
+Entity
+Repository
+Service Interface
+Service Impl
+Controller
+Tests
+
+to use String consistently. Any remaining UUID in the chain will likely cause compilation failures.
