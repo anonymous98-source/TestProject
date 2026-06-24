@@ -1,181 +1,145 @@
-Good catch. From your screenshot I can see the project test pattern is:
+Based on your project's controller test pattern (@WebMvcTest, @MockitoBean, @WithMockOflUser, MockMvc), here's a complete class with the 3 scenarios:
 
-@ExtendWith(MockitoExtension.class)
+package com.cardinalhealth.advship.preferences.api.controller;
 
-@Mock
-private SomeRepository repository;
+import com.cardinalhealth.advship.preferences.api.dto.response.FedexSubscriptionResponse;
+import com.cardinalhealth.advship.preferences.api.service.FedexSubscriptionService;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.http.MediaType;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
 
-@InjectMocks
-private SomeServiceImpl service;
+import java.util.UUID;
 
-@Test
-@DisplayName("...")
-void testSomething_SuccessScenario() {
-}
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-And since you've changed from Record DTO to a normal DTO with getters/setters, assertions need to change from:
+@WebMvcTest(FedexSubscriptionController.class)
+class FedexSubscriptionControllerTest {
 
-response.registrationId()
+    @Autowired
+    private MockMvc mockMvc;
 
-to:
-
-response.getRegistrationId()
-
-
----
-
-Service Test (Matching Your Project Style)
-
-@ExtendWith(MockitoExtension.class)
-class FedexSubscriptionServiceImplTest {
-
-    @Mock
-    private FedexSubscriptionRepository fedexSubscriptionRepository;
-
-    @InjectMocks
-    private FedexSubscriptionServiceImpl fedexSubscriptionService;
+    @MockitoBean
+    private FedexSubscriptionService fedexSubscriptionService;
 
     @Test
-    @DisplayName("Fetch FedEx subscription details - Success")
-    void testGetFedexSubscription_SuccessScenario() {
+    @WithMockOflUser(role = "ADVSHIP_ADMIN")
+    void testGetFedexSubscription_ValidRequest() throws Exception {
 
         UUID customerId = UUID.randomUUID();
         UUID registrationId = UUID.randomUUID();
         UUID subscriptionId = UUID.randomUUID();
-
         String accountNumber = "123456";
 
-        FedexSubscriptionProjection projection =
-                mock(FedexSubscriptionProjection.class);
-
-        when(fedexSubscriptionRepository.existsByCustomerId(customerId))
-                .thenReturn(true);
-
-        when(fedexSubscriptionRepository.findSubscriptionDetails(
-                customerId,
-                accountNumber))
-                .thenReturn(Optional.of(projection));
-
-        when(projection.getRegistrationId())
-                .thenReturn(registrationId);
-
-        when(projection.getSubscriptionId())
-                .thenReturn(subscriptionId);
-
-        when(projection.getAccountNumber())
-                .thenReturn(accountNumber);
-
         FedexSubscriptionResponse response =
+                FedexSubscriptionResponse.builder()
+                        .registrationId(registrationId)
+                        .subscriptionId(subscriptionId)
+                        .accountNumber(accountNumber)
+                        .build();
+
+        Mockito.when(
                 fedexSubscriptionService.getFedexSubscription(
                         customerId,
-                        accountNumber);
+                        accountNumber))
+                .thenReturn(response);
 
-        assertNotNull(response);
-        assertEquals(registrationId,
-                response.getRegistrationId());
-
-        assertEquals(subscriptionId,
-                response.getSubscriptionId());
-
-        assertEquals(accountNumber,
-                response.getAccountNumber());
+        mockMvc.perform(
+                        get("/v1/api/fedex/subscription")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .with(csrf())
+                                .header("Authorization", "dummy-token")
+                                .param("customerId", customerId.toString())
+                                .param("accountNumber", accountNumber))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.registrationId")
+                        .value(registrationId.toString()))
+                .andExpect(jsonPath("$.subscriptionId")
+                        .value(subscriptionId.toString()))
+                .andExpect(jsonPath("$.accountNumber")
+                        .value(accountNumber));
     }
 
     @Test
-    @DisplayName("Fetch FedEx subscription details - Customer Not Found")
-    void testGetFedexSubscription_CustomerNotFoundScenario() {
+    @WithMockOflUser(role = "ADVSHIP_ADMIN")
+    void testGetFedexSubscription_NoDataFound() throws Exception {
 
         UUID customerId = UUID.randomUUID();
+        String accountNumber = "123456";
 
-        when(fedexSubscriptionRepository.existsByCustomerId(customerId))
-                .thenReturn(false);
-
-        FedexSubscriptionResponse response =
+        Mockito.when(
                 fedexSubscriptionService.getFedexSubscription(
                         customerId,
-                        "123456");
+                        accountNumber))
+                .thenReturn(null);
 
-        assertNull(response);
-
-        verify(fedexSubscriptionRepository)
-                .existsByCustomerId(customerId);
-
-        verifyNoMoreInteractions(
-                fedexSubscriptionRepository);
+        mockMvc.perform(
+                        get("/v1/api/fedex/subscription")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .with(csrf())
+                                .header("Authorization", "dummy-token")
+                                .param("customerId", customerId.toString())
+                                .param("accountNumber", accountNumber))
+                .andExpect(status().isOk());
     }
 
     @Test
-    @DisplayName("Fetch FedEx subscription details - Subscription Not Found")
-    void testGetFedexSubscription_SubscriptionNotFoundScenario() {
-
-        UUID customerId = UUID.randomUUID();
+    @WithMockOflUser(role = "ADVSHIP_ADMIN")
+    void testGetFedexSubscription_InvalidCustomerId() throws Exception {
 
         String accountNumber = "123456";
 
-        when(fedexSubscriptionRepository.existsByCustomerId(customerId))
-                .thenReturn(true);
-
-        when(fedexSubscriptionRepository.findSubscriptionDetails(
-                customerId,
-                accountNumber))
-                .thenReturn(Optional.empty());
-
-        FedexSubscriptionResponse response =
-                fedexSubscriptionService.getFedexSubscription(
-                        customerId,
-                        accountNumber);
-
-        assertNull(response);
+        mockMvc.perform(
+                        get("/v1/api/fedex/subscription")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .with(csrf())
+                                .header("Authorization", "dummy-token")
+                                .param("customerId", "invalid-uuid")
+                                .param("accountNumber", accountNumber))
+                .andExpect(status().isBadRequest());
     }
 }
 
+A couple of things to verify before committing
 
----
+1. Import for @WithMockOflUser
 
-DTO (Normal DTO)
-
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
-public class FedexSubscriptionResponse {
-
-    private UUID registrationId;
-
-    private UUID subscriptionId;
-
-    private String accountNumber;
-}
+Copy the same import from FedexConfigurationControllerTest.
 
 
----
 
-One improvement for your service
+2. Some projects use:
 
-Instead of:
+@MockitoBean
 
-FedexSubscriptionProjection projection =
-        repository.findSubscriptionDetails(...)
-        .orElse(null);
+and some use:
 
-if (projection == null) {
-   return null;
-}
+@MockBean
 
-Use:
-
-return repository.findSubscriptionDetails(
-                customerId,
-                accountNumber)
-        .map(this::mapToResponse)
-        .orElse(null);
-
-Cleaner and easier to test.
+Keep it exactly as used in the existing controller tests.
 
 
----
+3. If your controller returns:
 
-For your PR review, if your lead asks "Why did you add existsByCustomerId?", answer:
+ResponseEntity.noContent().build();
 
-> "Because customerId validation is now an explicit business requirement. It allows us to differentiate between an invalid customer and a valid customer that simply doesn't have a matching account subscription."
+when no data is found, then change:
+
+.andExpect(status().isOk());
+
+to:
+
+.andExpect(status().isNoContent());
+
+
+4. If the project has a base path/version prefix configured globally, verify the URL matches the actual mapping.
+
+
+
+This should give you good controller coverage for the new API.
