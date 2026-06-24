@@ -1,145 +1,96 @@
-Based on your project's controller test pattern (@WebMvcTest, @MockitoBean, @WithMockOflUser, MockMvc), here's a complete class with the 3 scenarios:
+Yes, if this is just your local/dev database and those 10 rows are test data, the simplest approach is:
 
-package com.cardinalhealth.advship.preferences.api.controller;
+Drop child table first
 
-import com.cardinalhealth.advship.preferences.api.dto.response.FedexSubscriptionResponse;
-import com.cardinalhealth.advship.preferences.api.service.FedexSubscriptionService;
-import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.http.MediaType;
-import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.servlet.MockMvc;
+Because of the foreign key:
 
-import java.util.UUID;
+DROP TABLE IF EXISTS fedex_subscribed_accounts;
 
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+Then drop parent table
 
-@WebMvcTest(FedexSubscriptionController.class)
-class FedexSubscriptionControllerTest {
+DROP TABLE IF EXISTS fedex_subscriptions;
 
-    @Autowired
-    private MockMvc mockMvc;
+Or in one go:
 
-    @MockitoBean
-    private FedexSubscriptionService fedexSubscriptionService;
+DROP TABLE IF EXISTS fedex_subscribed_accounts;
+DROP TABLE IF EXISTS fedex_subscriptions;
 
-    @Test
-    @WithMockOflUser(role = "ADVSHIP_ADMIN")
-    void testGetFedexSubscription_ValidRequest() throws Exception {
 
-        UUID customerId = UUID.randomUUID();
-        UUID registrationId = UUID.randomUUID();
-        UUID subscriptionId = UUID.randomUUID();
-        String accountNumber = "123456";
+---
 
-        FedexSubscriptionResponse response =
-                FedexSubscriptionResponse.builder()
-                        .registrationId(registrationId)
-                        .subscriptionId(subscriptionId)
-                        .accountNumber(accountNumber)
-                        .build();
+Then clean Flyway history
 
-        Mockito.when(
-                fedexSubscriptionService.getFedexSubscription(
-                        customerId,
-                        accountNumber))
-                .thenReturn(response);
+Check if Flyway has already executed your migration:
 
-        mockMvc.perform(
-                        get("/v1/api/fedex/subscription")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .with(csrf())
-                                .header("Authorization", "dummy-token")
-                                .param("customerId", customerId.toString())
-                                .param("accountNumber", accountNumber))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.registrationId")
-                        .value(registrationId.toString()))
-                .andExpect(jsonPath("$.subscriptionId")
-                        .value(subscriptionId.toString()))
-                .andExpect(jsonPath("$.accountNumber")
-                        .value(accountNumber));
-    }
+SELECT *
+FROM flyway_schema_history
+ORDER BY installed_rank DESC;
 
-    @Test
-    @WithMockOflUser(role = "ADVSHIP_ADMIN")
-    void testGetFedexSubscription_NoDataFound() throws Exception {
+If your migration is something like:
 
-        UUID customerId = UUID.randomUUID();
-        String accountNumber = "123456";
+V20_create_tables_fedex_subscription.sql
 
-        Mockito.when(
-                fedexSubscriptionService.getFedexSubscription(
-                        customerId,
-                        accountNumber))
-                .thenReturn(null);
+then either:
 
-        mockMvc.perform(
-                        get("/v1/api/fedex/subscription")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .with(csrf())
-                                .header("Authorization", "dummy-token")
-                                .param("customerId", customerId.toString())
-                                .param("accountNumber", accountNumber))
-                .andExpect(status().isOk());
-    }
+Option 1 (Recommended for local)
 
-    @Test
-    @WithMockOflUser(role = "ADVSHIP_ADMIN")
-    void testGetFedexSubscription_InvalidCustomerId() throws Exception {
+Delete the entry:
 
-        String accountNumber = "123456";
+DELETE FROM flyway_schema_history
+WHERE version = '20';
 
-        mockMvc.perform(
-                        get("/v1/api/fedex/subscription")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .with(csrf())
-                                .header("Authorization", "dummy-token")
-                                .param("customerId", "invalid-uuid")
-                                .param("accountNumber", accountNumber))
-                .andExpect(status().isBadRequest());
-    }
-}
+Option 2
 
-A couple of things to verify before committing
+Run:
 
-1. Import for @WithMockOflUser
+./gradlew flywayClean
 
-Copy the same import from FedexConfigurationControllerTest.
+(if your project allows clean)
+
+
+---
+
+Then update your DDL
+
+Change the columns to:
+
+customer_id TEXT
+registration_id TEXT
+subscription_id TEXT
+account_number TEXT
+
+Keep:
+
+id UUID
+created_at TIMESTAMP
+modified_at TIMESTAMP
+
+
+---
+
+Finally restart application
+
+./gradlew bootRun
+
+or
+
+./gradlew flywayMigrate
+
+Flyway will recreate the tables from scratch using the updated DDL.
+
+Before doing this
+
+Ask yourself:
+
+Is this your local schema only? → Safe to drop.
+
+Is this a shared DEV environment used by the team? → Don't drop; create a new migration instead.
+
+
+For a first Jira card, if you're unsure, send a quick Teams message:
+
+> "The tables are already created in the dev schema. Since the data is only test data, is it okay if I drop and recreate them with the updated column types, or would you prefer a Flyway alter migration?"
 
 
 
-2. Some projects use:
-
-@MockitoBean
-
-and some use:
-
-@MockBean
-
-Keep it exactly as used in the existing controller tests.
-
-
-3. If your controller returns:
-
-ResponseEntity.noContent().build();
-
-when no data is found, then change:
-
-.andExpect(status().isOk());
-
-to:
-
-.andExpect(status().isNoContent());
-
-
-4. If the project has a base path/version prefix configured globally, verify the URL matches the actual mapping.
-
-
-
-This should give you good controller coverage for the new API.
+That avoids surprises.
