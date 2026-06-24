@@ -1,174 +1,117 @@
-Yes, if this is just your local/dev database and those 10 rows are test data, the simplest approach is:
+Since your columns are now TEXT, I'll use meaningful string values instead of UUIDs.
 
-Drop child table first
+Relationship Structure
 
-Because of the foreign key:
+CUST001
+ ├── REG001
+ │     ├── SUB001
+ │     │      ├── ACC1001
+ │     │      └── ACC1002
+ │     └── SUB002
+ │            └── ACC1003
+ │
+ └── REG002
+       ├── SUB003
+       │      ├── ACC1004
+       │      └── ACC1005
+       └── SUB004
+              └── ACC1006
 
-DROP TABLE IF EXISTS fedex_subscribed_accounts;
+CUST002
+ ├── REG003
+ │     ├── SUB005
+ │     │      └── ACC2001
+ │     └── SUB006
+ │            └── ACC2002
+ └── REG004
+       └── SUB007
+              └── ACC2003
 
-Then drop parent table
+FEDEX_SUBSCRIPTIONS (10 Rows)
 
-DROP TABLE IF EXISTS fedex_subscriptions;
+INSERT INTO fedex_subscriptions
+(id, customer_id, registration_id, subscription_id,
+ created_by, modified_by, created_at, modified_at)
+VALUES
+(uuid_generate_v4(),'CUST001','REG001','SUB001','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-Or in one go:
+(uuid_generate_v4(),'CUST001','REG001','SUB002','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-DROP TABLE IF EXISTS fedex_subscribed_accounts;
-DROP TABLE IF EXISTS fedex_subscriptions;
+(uuid_generate_v4(),'CUST001','REG002','SUB003','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
+(uuid_generate_v4(),'CUST001','REG002','SUB004','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
----
+(uuid_generate_v4(),'CUST002','REG003','SUB005','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-Then clean Flyway history
+(uuid_generate_v4(),'CUST002','REG003','SUB006','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-Check if Flyway has already executed your migration:
+(uuid_generate_v4(),'CUST002','REG004','SUB007','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-SELECT *
-FROM flyway_schema_history
-ORDER BY installed_rank DESC;
+(uuid_generate_v4(),'CUST003','REG005','SUB008','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-If your migration is something like:
+(uuid_generate_v4(),'CUST003','REG005','SUB009','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-V20_create_tables_fedex_subscription.sql
-
-then either:
-
-Option 1 (Recommended for local)
-
-Delete the entry:
-
-DELETE FROM flyway_schema_history
-WHERE version = '20';
-
-Option 2
-
-Run:
-
-./gradlew flywayClean
-
-(if your project allows clean)
-
-
----
-
-Then update your DDL
-
-Change the columns to:
-
-customer_id TEXT
-registration_id TEXT
-subscription_id TEXT
-account_number TEXT
-
-Keep:
-
-id UUID
-created_at TIMESTAMP
-modified_at TIMESTAMP
+(uuid_generate_v4(),'CUST004','REG006','SUB010','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
 
 
 ---
 
-Finally restart application
+FEDEX_SUBSCRIBED_ACCOUNTS (10 Rows)
 
-./gradlew bootRun
+INSERT INTO fedex_subscribed_accounts
+(id, subscription_id, account_number,
+ created_by, modified_by, created_at, modified_at)
+VALUES
+(uuid_generate_v4(),'SUB001','ACC1001','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-or
+(uuid_generate_v4(),'SUB001','ACC1002','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-./gradlew flywayMigrate
+(uuid_generate_v4(),'SUB002','ACC1003','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-Flyway will recreate the tables from scratch using the updated DDL.
+(uuid_generate_v4(),'SUB003','ACC1004','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-Before doing this
+(uuid_generate_v4(),'SUB003','ACC1005','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-Ask yourself:
+(uuid_generate_v4(),'SUB004','ACC1006','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-Is this your local schema only? → Safe to drop.
+(uuid_generate_v4(),'SUB005','ACC2001','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-Is this a shared DEV environment used by the team? → Don't drop; create a new migration instead.
+(uuid_generate_v4(),'SUB006','ACC2002','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
+(uuid_generate_v4(),'SUB007','ACC2003','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 
-For a first Jira card, if you're unsure, send a quick Teams message:
+(uuid_generate_v4(),'SUB008','ACC3001','SYSTEM','SYSTEM',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
 
-> "The tables are already created in the dev schema. Since the data is only test data, is it okay if I drop and recreate them with the updated column types, or would you prefer a Flyway alter migration?"
+Example API Test Data
 
+These will return data:
 
+GET /v1/api/fedex/subscription?customerId=CUST001&accountNumber=ACC1001
 
-That avoids surprises.
+Response:
 
-The error tells you exactly what's wrong:
+{
+  "registrationId": "REG001",
+  "subscriptionId": "SUB001",
+  "accountNumber": "ACC1001"
+}
 
-fedex_subscribed_accounts does not exist, skipping
+GET /v1/api/fedex/subscription?customerId=CUST001&accountNumber=ACC1005
 
-But the constraint still exists in:
+Response:
 
-advship_preferences_api.fedex_subscribed_accounts
+{
+  "registrationId": "REG002",
+  "subscriptionId": "SUB003",
+  "accountNumber": "ACC1005"
+}
 
-Looking at your screenshot, you're connected to:
+This data set nicely demonstrates:
 
-db_local.public
+Multiple registrations under a customer
 
-while the actual tables are in:
+Multiple subscriptions under a registration
 
-advship_preferences_api
+Multiple accounts under a subscription
 
-schema.
-
-First verify
-
-Run:
-
-SELECT schemaname, tablename
-FROM pg_tables
-WHERE tablename IN (
-    'fedex_subscriptions',
-    'fedex_subscribed_accounts'
-);
-
-You'll likely see:
-
-advship_preferences_api | fedex_subscriptions
-advship_preferences_api | fedex_subscribed_accounts
-
-Then drop properly
-
-DROP TABLE IF EXISTS advship_preferences_api.fedex_subscribed_accounts;
-
-DROP TABLE IF EXISTS advship_preferences_api.fedex_subscriptions;
-
-Quickest option
-
-DROP TABLE IF EXISTS advship_preferences_api.fedex_subscriptions CASCADE;
-
-CASCADE will automatically remove:
-
-fk_fedex_subscribed_accounts_subscription
-
-and any dependent objects.
-
-After dropping
-
-Check:
-
-SELECT *
-FROM flyway_schema_history
-WHERE script LIKE '%fedex%';
-
-If your migration is already marked as executed, delete that entry (only in local):
-
-DELETE
-FROM flyway_schema_history
-WHERE version = '20';
-
-(or whatever version created these tables).
-
-Then restart:
-
-./gradlew bootRun
-
-or
-
-./gradlew flywayMigrate
-
-and Flyway will recreate the tables using your updated TEXT column definitions.
-
-From the screenshot, the main issue is that you're dropping tables from the wrong schema (public), while the tables live in advship_preferences_api.
+No duplicate account numbers across subscriptions (matching your business rule)
