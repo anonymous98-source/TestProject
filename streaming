@@ -1,259 +1,139 @@
-Since you've changed:
-
-UUID customerId
-UUID registrationId
-UUID subscriptionId
-
-to:
-
-String customerId
-String registrationId
-String subscriptionId
-
-you need to update both Service Test and Controller Test.
+Since you're working on a production codebase and want to impress your lead, I'd recommend avoiding the N+1 query approach. Instead, use one query to find the orphan subscription and one query to delete it. It's cleaner, more scalable, and demonstrates good database optimization.
 
 
 ---
 
-Service Test Changes
-
-Before
-
-UUID customerId = UUID.randomUUID();
-UUID registrationId = UUID.randomUUID();
-UUID subscriptionId = UUID.randomUUID();
-
-After
-
-String customerId = "CUST001";
-String registrationId = "REG001";
-String subscriptionId = "SUB001";
-String accountNumber = "ACC1001";
-
-
----
-
-Success Test
-
-@Test
-@DisplayName("Fetch FedEx Subscription Details - Success")
-void testGetFedexSubscription_SuccessScenario() {
-
-    String customerId = "CUST001";
-    String registrationId = "REG001";
-    String subscriptionId = "SUB001";
-    String accountNumber = "ACC1001";
-
-    FedexSubscriptionProjection projection =
-            mock(FedexSubscriptionProjection.class);
-
-    when(fedexSubscriptionRepository.existsByCustomerId(customerId))
-            .thenReturn(true);
-
-    when(fedexSubscriptionRepository.findSubscriptionDetails(
-            customerId,
-            accountNumber))
-            .thenReturn(Optional.of(projection));
-
-    when(projection.getRegistrationId())
-            .thenReturn(registrationId);
-
-    when(projection.getSubscriptionId())
-            .thenReturn(subscriptionId);
-
-    when(projection.getAccountNumber())
-            .thenReturn(accountNumber);
-
-    FedexSubscriptionResponse response =
-            fedexSubscriptionService.getFedexSubscription(
-                    customerId,
-                    accountNumber);
-
-    assertNotNull(response);
-    assertEquals(registrationId,
-            response.getRegistrationId());
-
-    assertEquals(subscriptionId,
-            response.getSubscriptionId());
-
-    assertEquals(accountNumber,
-            response.getAccountNumber());
-}
-
-
----
-
-Customer Not Found Test
-
-@Test
-@DisplayName("Customer Not Found")
-void testGetFedexSubscription_CustomerNotFoundScenario() {
-
-    String customerId = "INVALID_CUSTOMER";
-
-    when(fedexSubscriptionRepository.existsByCustomerId(customerId))
-            .thenReturn(false);
-
-    FedexSubscriptionResponse response =
-            fedexSubscriptionService.getFedexSubscription(
-                    customerId,
-                    "ACC1001");
-
-    assertNull(response);
-
-    verify(fedexSubscriptionRepository)
-            .existsByCustomerId(customerId);
-
-    verifyNoMoreInteractions(
-            fedexSubscriptionRepository);
-}
-
-
----
-
-Subscription Not Found Test
-
-@Test
-@DisplayName("Subscription Not Found")
-void testGetFedexSubscription_SubscriptionNotFoundScenario() {
-
-    String customerId = "CUST001";
-    String accountNumber = "INVALID_ACC";
-
-    when(fedexSubscriptionRepository.existsByCustomerId(customerId))
-            .thenReturn(true);
-
-    when(fedexSubscriptionRepository.findSubscriptionDetails(
-            customerId,
-            accountNumber))
-            .thenReturn(Optional.empty());
-
-    FedexSubscriptionResponse response =
-            fedexSubscriptionService.getFedexSubscription(
-                    customerId,
-                    accountNumber);
-
-    assertNull(response);
-}
-
-
----
-
-Controller Test Changes
-
-Valid Request
-
-@Test
-@WithMockOflUser(role = "ADVSHIP_ADMIN")
-void testGetFedexSubscription_ValidRequest() throws Exception {
-
-    String customerId = "CUST001";
-    String registrationId = "REG001";
-    String subscriptionId = "SUB001";
-    String accountNumber = "ACC1001";
-
-    FedexSubscriptionResponse response =
-            FedexSubscriptionResponse.builder()
-                    .registrationId(registrationId)
-                    .subscriptionId(subscriptionId)
-                    .accountNumber(accountNumber)
-                    .build();
-
-    Mockito.when(
-            fedexSubscriptionService.getFedexSubscription(
-                    customerId,
-                    accountNumber))
-            .thenReturn(response);
-
-    mockMvc.perform(
-                    get("/v1/api/fedex/subscription")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .with(csrf())
-                            .header("Authorization", "dummy-token")
-                            .param("customerId", customerId)
-                            .param("accountNumber", accountNumber))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.registrationId")
-                    .value(registrationId))
-            .andExpect(jsonPath("$.subscriptionId")
-                    .value(subscriptionId))
-            .andExpect(jsonPath("$.accountNumber")
-                    .value(accountNumber));
-}
-
-
----
-
-No Data Found
-
-@Test
-@WithMockOflUser(role = "ADVSHIP_ADMIN")
-void testGetFedexSubscription_NoDataFound() throws Exception {
-
-    Mockito.when(
-            fedexSubscriptionService.getFedexSubscription(
-                    "CUST001",
-                    "INVALID_ACC"))
-            .thenReturn(null);
-
-    mockMvc.perform(
-                    get("/v1/api/fedex/subscription")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .with(csrf())
-                            .header("Authorization", "dummy-token")
-                            .param("customerId", "CUST001")
-                            .param("accountNumber", "INVALID_ACC"))
-            .andExpect(status().isOk());
-}
-
-
----
-
-Invalid Customer Test
-
-Since customerId is now a String, there is no UUID conversion anymore.
-
-So this test:
-
-customerId = "invalid-uuid"
-
-is no longer meaningful and should be removed.
-
-Instead create:
-
-@Test
-@WithMockOflUser(role = "ADVSHIP_ADMIN")
-void testGetFedexSubscription_EmptyCustomerId() throws Exception {
-
-    mockMvc.perform(
-                    get("/v1/api/fedex/subscription")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .with(csrf())
-                            .header("Authorization", "dummy-token")
-                            .param("customerId", "")
-                            .param("accountNumber", "ACC1001"))
-            .andExpect(status().isBadRequest());
-}
-
-Only keep this test if your controller has validation like:
-
-@RequestParam
-@NotBlank
-String customerId
-
-Otherwise remove the third controller test entirely.
-
-Important
-
-Now that IDs are Strings, update:
-
-FedexSubscriptionProjection
-FedexSubscriptionResponse
-Entity
 Repository
-Service Interface
-Service Impl
-Controller
-Tests
 
-to use String consistently. Any remaining UUID in the chain will likely cause compilation failures.
+FedexSubscriptionRepository
+
+@Repository
+public interface FedexSubscriptionRepository extends JpaRepository<FedexSubscriptionEntity, UUID> {
+
+    @Query("""
+            SELECT fs.subscriptionId
+            FROM FedexSubscriptionEntity fs
+            WHERE fs.customerId = :customerId
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM FedexSubscribedAccountEntity fsa
+                    WHERE fsa.subscriptionId = fs.subscriptionId
+              )
+            """)
+    Optional<String> findSubscriptionIdWithoutAccounts(@Param("customerId") String customerId);
+
+    @Modifying
+    @Transactional
+    void deleteBySubscriptionId(String subscriptionId);
+}
+
+
+---
+
+Service Interface
+
+public interface FedexUnsubscriptionService {
+
+    void processFedexUnsubscription(String customerId, String accountNumber);
+
+}
+
+> Although accountNumber is not used in the DB query, keep it in the method signature because it is part of the API request and is useful for logging/auditing.
+
+
+
+
+---
+
+Service Implementation
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+@Transactional
+public class FedexUnsubscriptionServiceImpl implements FedexUnsubscriptionService {
+
+    private final FedexSubscriptionRepository fedexSubscriptionRepository;
+
+    @Override
+    public void processFedexUnsubscription(String customerId,
+                                           String accountNumber) {
+
+        log.info(new LogBuilder()
+                .withMessage("Processing FedEx unsubscription request")
+                .withField("customerId", customerId)
+                .withField("accountNumber", accountNumber)
+                .toString());
+
+        Optional<String> subscriptionId =
+                fedexSubscriptionRepository.findSubscriptionIdWithoutAccounts(customerId);
+
+        if (subscriptionId.isEmpty()) {
+
+            log.info(new LogBuilder()
+                    .withMessage("No orphan subscription found for customer")
+                    .withField("customerId", customerId)
+                    .toString());
+
+            return;
+        }
+
+        fedexSubscriptionRepository.deleteBySubscriptionId(subscriptionId.get());
+
+        log.info(new LogBuilder()
+                .withMessage("Successfully deleted orphan subscription")
+                .withField("customerId", customerId)
+                .withField("subscriptionId", subscriptionId.get())
+                .toString());
+    }
+}
+
+
+---
+
+Why this is optimal
+
+Instead of:
+
+Customer
+    ↓
+Fetch 20 subscriptions
+    ↓
+Loop 20 times
+    ↓
+20 count queries
+    ↓
+Delete
+
+you're doing:
+
+Customer
+    ↓
+1 query (find orphan subscription)
+    ↓
+1 delete query
+
+Only 2 database calls, regardless of whether the customer has 2 subscriptions or 200.
+
+
+---
+
+Unit Tests
+
+You should have these scenarios:
+
+✅ Orphan subscription found → deleteBySubscriptionId() is invoked.
+
+✅ No orphan subscription found → delete is never invoked.
+
+✅ Verify repository methods are called exactly once.
+
+
+
+---
+
+One thing to confirm
+
+This implementation assumes there can be at most one subscription without accounts for a customer after an unsubscription event.
+
+If that's a guaranteed business rule, this is the implementation I'd submit. If multiple orphan subscriptions can exist, the repository should return a List<String> instead of an Optional<String>, and the service logic would need to decide which one to delete.
