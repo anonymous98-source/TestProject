@@ -1,46 +1,15 @@
-Since you're working on a production codebase and want to impress your lead, I'd recommend avoiding the N+1 query approach. Instead, use one query to find the orphan subscription and one query to delete it. It's cleaner, more scalable, and demonstrates good database optimization.
+Returning a boolean is actually better here because the caller can know whether a subscription was deleted.
 
-
----
-
-Repository
-
-FedexSubscriptionRepository
-
-@Repository
-public interface FedexSubscriptionRepository extends JpaRepository<FedexSubscriptionEntity, UUID> {
-
-    @Query("""
-            SELECT fs.subscriptionId
-            FROM FedexSubscriptionEntity fs
-            WHERE fs.customerId = :customerId
-              AND NOT EXISTS (
-                    SELECT 1
-                    FROM FedexSubscribedAccountEntity fsa
-                    WHERE fsa.subscriptionId = fs.subscriptionId
-              )
-            """)
-    Optional<String> findSubscriptionIdWithoutAccounts(@Param("customerId") String customerId);
-
-    @Modifying
-    @Transactional
-    void deleteBySubscriptionId(String subscriptionId);
-}
-
-
----
+I would define the service like this:
 
 Service Interface
 
 public interface FedexUnsubscriptionService {
 
-    void processFedexUnsubscription(String customerId, String accountNumber);
+    boolean processFedexUnsubscription(String customerId,
+                                       String accountNumber);
 
 }
-
-> Although accountNumber is not used in the DB query, keep it in the method signature because it is part of the API request and is useful for logging/auditing.
-
-
 
 
 ---
@@ -51,13 +20,14 @@ Service Implementation
 @Service
 @RequiredArgsConstructor
 @Transactional
-public class FedexUnsubscriptionServiceImpl implements FedexUnsubscriptionService {
+public class FedexUnsubscriptionServiceImpl
+        implements FedexUnsubscriptionService {
 
     private final FedexSubscriptionRepository fedexSubscriptionRepository;
 
     @Override
-    public void processFedexUnsubscription(String customerId,
-                                           String accountNumber) {
+    public boolean processFedexUnsubscription(String customerId,
+                                              String accountNumber) {
 
         log.info(new LogBuilder()
                 .withMessage("Processing FedEx unsubscription request")
@@ -65,75 +35,63 @@ public class FedexUnsubscriptionServiceImpl implements FedexUnsubscriptionServic
                 .withField("accountNumber", accountNumber)
                 .toString());
 
-        Optional<String> subscriptionId =
-                fedexSubscriptionRepository.findSubscriptionIdWithoutAccounts(customerId);
+        Optional<String> orphanSubscription =
+                fedexSubscriptionRepository
+                        .findSubscriptionIdWithoutAccounts(customerId);
 
-        if (subscriptionId.isEmpty()) {
+        if (orphanSubscription.isEmpty()) {
 
             log.info(new LogBuilder()
-                    .withMessage("No orphan subscription found for customer")
+                    .withMessage("No orphan subscription found")
                     .withField("customerId", customerId)
                     .toString());
 
-            return;
+            return false;
         }
 
-        fedexSubscriptionRepository.deleteBySubscriptionId(subscriptionId.get());
+        fedexSubscriptionRepository.deleteBySubscriptionId(
+                orphanSubscription.get());
 
         log.info(new LogBuilder()
                 .withMessage("Successfully deleted orphan subscription")
                 .withField("customerId", customerId)
-                .withField("subscriptionId", subscriptionId.get())
+                .withField("subscriptionId", orphanSubscription.get())
                 .toString());
+
+        return true;
     }
 }
 
+Meaning of the return value
 
----
+true → A subscription was found with no accounts and was deleted.
 
-Why this is optimal
+false → Nothing was deleted (either no orphan subscription existed or no matching customer data).
+
+
+One improvement I'd make
 
 Instead of:
 
-Customer
-    ↓
-Fetch 20 subscriptions
-    ↓
-Loop 20 times
-    ↓
-20 count queries
-    ↓
-Delete
+deleteBySubscriptionId(subscriptionId);
+return true;
 
-you're doing:
+change your repository to:
 
-Customer
-    ↓
-1 query (find orphan subscription)
-    ↓
-1 delete query
+@Modifying
+@Transactional
+@Query("""
+    DELETE FROM FedexSubscriptionEntity fs
+    WHERE fs.subscriptionId = :subscriptionId
+    """)
+int deleteBySubscriptionId(@Param("subscriptionId") String subscriptionId);
 
-Only 2 database calls, regardless of whether the customer has 2 subscriptions or 200.
+Then in the service:
 
+int deletedRows =
+        fedexSubscriptionRepository.deleteBySubscriptionId(
+                orphanSubscription.get());
 
----
+return deletedRows > 0;
 
-Unit Tests
-
-You should have these scenarios:
-
-✅ Orphan subscription found → deleteBySubscriptionId() is invoked.
-
-✅ No orphan subscription found → delete is never invoked.
-
-✅ Verify repository methods are called exactly once.
-
-
-
----
-
-One thing to confirm
-
-This implementation assumes there can be at most one subscription without accounts for a customer after an unsubscription event.
-
-If that's a guaranteed business rule, this is the implementation I'd submit. If multiple orphan subscriptions can exist, the repository should return a List<String> instead of an Optional<String>, and the service logic would need to decide which one to delete.
+This way you're returning the actual result of the delete operation rather than assuming it succeeded. It's a bit more robust and is a pattern often used in enterprise applications.
