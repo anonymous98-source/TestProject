@@ -1,97 +1,163 @@
-Returning a boolean is actually better here because the caller can know whether a subscription was deleted.
+Ah! Now I understand the requirement correctly. Thanks for clarifying.
 
-I would define the service like this:
+Your response matrix is actually:
 
-Service Interface
+Scenario	CustomerId	RegistrationId	SubscriptionId	AccountNumber
 
-public interface FedexUnsubscriptionService {
+Customer exists, account not found	✅	✅	✅	null
+Customer exists, account found	✅	✅	✅	✅
+Subscription has >500 accounts	✅	✅	null	✅
+Customer not found	Exception / 404			
 
-    boolean processFedexUnsubscription(String customerId,
-                                       String accountNumber);
 
+Notice that registrationId is always returned once the customer exists.
+
+
+---
+
+I would not use multiple repository calls.
+
+Instead, use 2 repository methods.
+
+Repository
+
+Step 1 - Fetch customer details
+
+@Query("""
+    SELECT
+        fs.customerId AS customerId,
+        fs.registrationId AS registrationId,
+        fs.subscriptionId AS subscriptionId
+    FROM FedexSubscriptionEntity fs
+    WHERE fs.customerId = :customerId
+    """)
+Optional<FedexSubscriptionProjection> findFedexSubscription(
+        String customerId);
+
+
+---
+
+Step 2
+
+long countBySubscriptionId(String subscriptionId);
+
+
+---
+
+Step 3
+
+boolean existsBySubscriptionIdAndAccountNumber(
+        String subscriptionId,
+        String accountNumber);
+
+
+---
+
+Service
+
+@Override
+public FedexSubscriptionResponse getFedexSubscription(
+        String customerId,
+        String accountNumber) {
+
+    FedexSubscriptionProjection projection =
+            repository.findFedexSubscription(customerId)
+                    .orElseThrow(() ->
+                            new ResourceNotFoundException("Customer not found"));
+
+    FedexSubscriptionResponse response =
+            new FedexSubscriptionResponse();
+
+    response.setCustomerId(projection.getCustomerId());
+    response.setRegistrationId(projection.getRegistrationId());
+
+    long accountCount =
+            accountRepository.countBySubscriptionId(
+                    projection.getSubscriptionId());
+
+    // Business Rule 1
+    if (accountCount > 500) {
+
+        response.setSubscriptionId(null);
+
+        response.setAccountNumber(accountNumber);
+
+        return response;
+    }
+
+    response.setSubscriptionId(
+            projection.getSubscriptionId());
+
+    boolean accountExists =
+            accountRepository.existsBySubscriptionIdAndAccountNumber(
+                    projection.getSubscriptionId(),
+                    accountNumber);
+
+    // Business Rule 2
+    if (!accountExists) {
+
+        response.setAccountNumber(null);
+
+        return response;
+    }
+
+    // Business Rule 3
+    response.setAccountNumber(accountNumber);
+
+    return response;
 }
 
 
 ---
 
-Service Implementation
+Why I like this
 
-@Slf4j
-@Service
-@RequiredArgsConstructor
-@Transactional
-public class FedexUnsubscriptionServiceImpl
-        implements FedexUnsubscriptionService {
+Database Calls:
 
-    private final FedexSubscriptionRepository fedexSubscriptionRepository;
+1 Query -> Customer + Registration + Subscription
 
-    @Override
-    public boolean processFedexUnsubscription(String customerId,
-                                              String accountNumber) {
+1 Query -> Count Accounts
 
-        log.info(new LogBuilder()
-                .withMessage("Processing FedEx unsubscription request")
-                .withField("customerId", customerId)
-                .withField("accountNumber", accountNumber)
-                .toString());
+1 Query -> Exists Account
 
-        Optional<String> orphanSubscription =
-                fedexSubscriptionRepository
-                        .findSubscriptionIdWithoutAccounts(customerId);
+Only 3 very cheap queries.
 
-        if (orphanSubscription.isEmpty()) {
+No joins.
 
-            log.info(new LogBuilder()
-                    .withMessage("No orphan subscription found")
-                    .withField("customerId", customerId)
-                    .toString());
+No native SQL.
 
-            return false;
-        }
+No entity loading.
 
-        fedexSubscriptionRepository.deleteBySubscriptionId(
-                orphanSubscription.get());
-
-        log.info(new LogBuilder()
-                .withMessage("Successfully deleted orphan subscription")
-                .withField("customerId", customerId)
-                .withField("subscriptionId", orphanSubscription.get())
-                .toString());
-
-        return true;
-    }
-}
-
-Meaning of the return value
-
-true → A subscription was found with no accounts and was deleted.
-
-false → Nothing was deleted (either no orphan subscription existed or no matching customer data).
+No unnecessary projections.
 
 
-One improvement I'd make
+---
 
-Instead of:
+Even Better (What I'd actually submit)
 
-deleteBySubscriptionId(subscriptionId);
-return true;
+Since this is a read API, I would make one projection query that returns:
 
-change your repository to:
+customerId
+registrationId
+subscriptionId
+accountCount
+accountExists
 
-@Modifying
-@Transactional
-@Query("""
-    DELETE FROM FedexSubscriptionEntity fs
-    WHERE fs.subscriptionId = :subscriptionId
-    """)
-int deleteBySubscriptionId(@Param("subscriptionId") String subscriptionId);
+in a single DB call.
 
-Then in the service:
+Then the service becomes only 15–20 lines.
 
-int deletedRows =
-        fedexSubscriptionRepository.deleteBySubscriptionId(
-                orphanSubscription.get());
+That is the solution I'd submit in an enterprise project because:
 
-return deletedRows > 0;
+only one database hit
 
-This way you're returning the actual result of the delete operation rather than assuming it succeeded. It's a bit more robust and is a pattern often used in enterprise applications.
+no extra repository calls
+
+much faster
+
+cleaner service
+
+easier unit testing
+
+
+I can write that version as well. It's the one I'd expect from a senior Java developer and is probably the most optimized implementation for your use case.
