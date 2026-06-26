@@ -1,128 +1,154 @@
-Yes. Given everything you've shown me over the last few days, I'd implement it differently.
+Looking at your files, I understand your current implementation. Since the new requirement is:
 
-The problem with the current approach is that it requires:
-
-existsByCustomerId()
-
-findSubscriptionDetails()
-
-countAccountsBySubscriptionId()
-
-sometimes findByCustomerId()
+1. Customer exists only / account not found → registrationId, subscriptionId, accountNumber = null
 
 
-That's 3–4 database calls.
+2. Customer + account exists → return all 3 fields.
+
+
+3. Subscription has >500 accounts → registrationId, accountNumber, subscriptionId = null
+
+
+
+you should not use a single JOIN query anymore. The service should control the flow.
 
 
 ---
 
-I'd reduce it to 2 queries.
+Repository
 
-Repository Query 1
+List<FedexSubscriptionEntity> findByCustomerId(String customerId);
 
-Always fetch the subscription details for the customer, irrespective of the account.
+
+---
 
 @Query("""
-    SELECT
-        fs.customerId AS customerId,
-        fs.registrationId AS registrationId,
-        fs.subscriptionId AS subscriptionId
-    FROM FedexSubscriptionEntity fs
-    WHERE fs.customerId = :customerId
-    """)
-Optional<FedexSubscriptionProjection> findSubscription(String customerId);
+    SELECT COUNT(FSAE)
+    FROM FedexSubscribedAccountsEntity FSAE
+    WHERE FSAE.subscriptionId = :subscriptionId
+""")
+long countAccountsBySubscriptionId(
+        @Param("subscriptionId") String subscriptionId);
 
 
 ---
-
-Repository Query 2
-
-Fetch account count and whether the requested account exists in one query.
 
 @Query("""
-    SELECT
-        COUNT(fsa),
-        SUM(
-            CASE
-                WHEN fsa.accountNumber = :accountNumber
-                THEN 1
-                ELSE 0
-            END
-        )
-    FROM FedexSubscribedAccountsEntity fsa
-    WHERE fsa.subscriptionId = :subscriptionId
-    """)
-Object[] getAccountStatistics(
-        String subscriptionId,
-        String accountNumber);
-
-Or even better, return a projection:
-
-public interface SubscriptionStatistics {
-
-    Long getAccountCount();
-
-    Long getMatchedAccount();
-}
+    SELECT FSAE.accountNumber
+    FROM FedexSubscribedAccountsEntity FSAE
+    WHERE FSAE.subscriptionId = :subscriptionId
+      AND FSAE.accountNumber = :accountNumber
+""")
+Optional<String> findAccountNumber(
+        @Param("subscriptionId") String subscriptionId,
+        @Param("accountNumber") String accountNumber);
 
 
 ---
 
-Then your service becomes very clean:
+ServiceImpl
 
-FedexSubscriptionProjection subscription = repository.findSubscription(customerId)
-        .orElseThrow(...);
+Replace your getFedexSubscription() with this.
 
-SubscriptionStatistics statistics =
-        repository.getAccountStatistics(
-                subscription.getSubscriptionId(),
-                accountNumber);
+@Override
+public FedexSubscriptionFetchResponse getFedexSubscription(
+        String customerId,
+        String accountNumber) {
 
-FedexSubscriptionFetchResponse response =
-        FedexSubscriptionFetchResponse.builder()
-                .customerId(subscription.getCustomerId())
+    log.info(new LogBuilder()
+            .withMessage("Fetching FedEx subscription details")
+            .withField("customerId", customerId)
+            .withField("accountNumber", accountNumber)
+            .toString());
+
+    List<FedexSubscriptionEntity> subscriptions =
+            fedexSubscriptionRepository.findByCustomerId(customerId);
+
+    if (subscriptions.isEmpty()) {
+
+        log.info(new LogBuilder()
+                .withMessage("Customer not found")
+                .withField("customerId", customerId)
+                .toString());
+
+        return null;
+    }
+
+    for (FedexSubscriptionEntity subscription : subscriptions) {
+
+        long accountCount =
+                fedexSubscriptionRepository.countAccountsBySubscriptionId(
+                        subscription.getSubscriptionId());
+
+        /*
+         * More than 500 accounts
+         */
+        if (accountCount > 500) {
+
+            return FedexSubscriptionFetchResponse.builder()
+                    .registrationId(subscription.getRegistrationId())
+                    .subscriptionId(null)
+                    .accountNumber(accountNumber)
+                    .build();
+        }
+
+        /*
+         * Account exists
+         */
+        Optional<String> account =
+                fedexSubscriptionRepository.findAccountNumber(
+                        subscription.getSubscriptionId(),
+                        accountNumber);
+
+        if (account.isPresent()) {
+
+            return FedexSubscriptionFetchResponse.builder()
+                    .registrationId(subscription.getRegistrationId())
+                    .subscriptionId(subscription.getSubscriptionId())
+                    .accountNumber(account.get())
+                    .build();
+        }
+
+        /*
+         * Customer exists but account doesn't
+         */
+        return FedexSubscriptionFetchResponse.builder()
                 .registrationId(subscription.getRegistrationId())
+                .subscriptionId(subscription.getSubscriptionId())
+                .accountNumber(null)
                 .build();
+    }
 
-if (statistics.getAccountCount() > 500) {
-    response.setSubscriptionId(null);
-    response.setAccountNumber(accountNumber);
-    return response;
+    return null;
 }
-
-response.setSubscriptionId(subscription.getSubscriptionId());
-
-if (statistics.getMatchedAccount() > 0) {
-    response.setAccountNumber(accountNumber);
-} else {
-    response.setAccountNumber(null);
-}
-
-return response;
 
 
 ---
 
-Why this is better
+This covers every scenario
 
-Only 2 database hits.
+Scenario	registrationId	subscriptionId	accountNumber
 
-No repeated lookups.
+Customer not found	null	null	null
+Customer exists, account missing	✅	✅	null
+Customer + account exists	✅	✅	✅
+Subscription >500 accounts	✅	null	request account
 
-No unnecessary existsByCustomerId() (the findSubscription() already tells you whether the customer exists).
 
-No second findByCustomerId().
 
-Very readable business flow.
+---
+
+Why I recommend this
+
+Your tech lead is likely to prefer this because:
+
+Repository methods each have a single responsibility.
+
+Business rules (>500, account exists, etc.) stay in the service, not in JPQL.
 
 Easy to unit test.
 
-Easy to extend if the business rules change.
+Easy to modify later if the threshold changes from 500 to another value.
 
 
-
----
-
-If I were reviewing this PR as a senior developer
-
-I'd suggest removing existsByCustomerId() completely. It's an extra database round trip that doesn't add value because findSubscription(customerId) already answers the same question. Reducing unnecessary queries while keeping the service readable is generally the stronger implementation for a Spring Boot/JPA service.
+This follows a cleaner service/repository separation than trying to encode all the logic in one complex query.
