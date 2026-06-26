@@ -1,27 +1,26 @@
-Ah! Now I understand the requirement correctly. Thanks for clarifying.
+Yes. Given everything you've shown me over the last few days, I'd implement it differently.
 
-Your response matrix is actually:
+The problem with the current approach is that it requires:
 
-Scenario	CustomerId	RegistrationId	SubscriptionId	AccountNumber
+existsByCustomerId()
 
-Customer exists, account not found	✅	✅	✅	null
-Customer exists, account found	✅	✅	✅	✅
-Subscription has >500 accounts	✅	✅	null	✅
-Customer not found	Exception / 404			
+findSubscriptionDetails()
+
+countAccountsBySubscriptionId()
+
+sometimes findByCustomerId()
 
 
-Notice that registrationId is always returned once the customer exists.
+That's 3–4 database calls.
 
 
 ---
 
-I would not use multiple repository calls.
+I'd reduce it to 2 queries.
 
-Instead, use 2 repository methods.
+Repository Query 1
 
-Repository
-
-Step 1 - Fetch customer details
+Always fetch the subscription details for the customer, irrespective of the account.
 
 @Query("""
     SELECT
@@ -31,133 +30,99 @@ Step 1 - Fetch customer details
     FROM FedexSubscriptionEntity fs
     WHERE fs.customerId = :customerId
     """)
-Optional<FedexSubscriptionProjection> findFedexSubscription(
-        String customerId);
+Optional<FedexSubscriptionProjection> findSubscription(String customerId);
 
 
 ---
 
-Step 2
+Repository Query 2
 
-long countBySubscriptionId(String subscriptionId);
+Fetch account count and whether the requested account exists in one query.
 
-
----
-
-Step 3
-
-boolean existsBySubscriptionIdAndAccountNumber(
+@Query("""
+    SELECT
+        COUNT(fsa),
+        SUM(
+            CASE
+                WHEN fsa.accountNumber = :accountNumber
+                THEN 1
+                ELSE 0
+            END
+        )
+    FROM FedexSubscribedAccountsEntity fsa
+    WHERE fsa.subscriptionId = :subscriptionId
+    """)
+Object[] getAccountStatistics(
         String subscriptionId,
         String accountNumber);
 
+Or even better, return a projection:
 
----
+public interface SubscriptionStatistics {
 
-Service
+    Long getAccountCount();
 
-@Override
-public FedexSubscriptionResponse getFedexSubscription(
-        String customerId,
-        String accountNumber) {
-
-    FedexSubscriptionProjection projection =
-            repository.findFedexSubscription(customerId)
-                    .orElseThrow(() ->
-                            new ResourceNotFoundException("Customer not found"));
-
-    FedexSubscriptionResponse response =
-            new FedexSubscriptionResponse();
-
-    response.setCustomerId(projection.getCustomerId());
-    response.setRegistrationId(projection.getRegistrationId());
-
-    long accountCount =
-            accountRepository.countBySubscriptionId(
-                    projection.getSubscriptionId());
-
-    // Business Rule 1
-    if (accountCount > 500) {
-
-        response.setSubscriptionId(null);
-
-        response.setAccountNumber(accountNumber);
-
-        return response;
-    }
-
-    response.setSubscriptionId(
-            projection.getSubscriptionId());
-
-    boolean accountExists =
-            accountRepository.existsBySubscriptionIdAndAccountNumber(
-                    projection.getSubscriptionId(),
-                    accountNumber);
-
-    // Business Rule 2
-    if (!accountExists) {
-
-        response.setAccountNumber(null);
-
-        return response;
-    }
-
-    // Business Rule 3
-    response.setAccountNumber(accountNumber);
-
-    return response;
+    Long getMatchedAccount();
 }
 
 
 ---
 
-Why I like this
+Then your service becomes very clean:
 
-Database Calls:
+FedexSubscriptionProjection subscription = repository.findSubscription(customerId)
+        .orElseThrow(...);
 
-1 Query -> Customer + Registration + Subscription
+SubscriptionStatistics statistics =
+        repository.getAccountStatistics(
+                subscription.getSubscriptionId(),
+                accountNumber);
 
-1 Query -> Count Accounts
+FedexSubscriptionFetchResponse response =
+        FedexSubscriptionFetchResponse.builder()
+                .customerId(subscription.getCustomerId())
+                .registrationId(subscription.getRegistrationId())
+                .build();
 
-1 Query -> Exists Account
+if (statistics.getAccountCount() > 500) {
+    response.setSubscriptionId(null);
+    response.setAccountNumber(accountNumber);
+    return response;
+}
 
-Only 3 very cheap queries.
+response.setSubscriptionId(subscription.getSubscriptionId());
 
-No joins.
+if (statistics.getMatchedAccount() > 0) {
+    response.setAccountNumber(accountNumber);
+} else {
+    response.setAccountNumber(null);
+}
 
-No native SQL.
-
-No entity loading.
-
-No unnecessary projections.
+return response;
 
 
 ---
 
-Even Better (What I'd actually submit)
+Why this is better
 
-Since this is a read API, I would make one projection query that returns:
+Only 2 database hits.
 
-customerId
-registrationId
-subscriptionId
-accountCount
-accountExists
+No repeated lookups.
 
-in a single DB call.
+No unnecessary existsByCustomerId() (the findSubscription() already tells you whether the customer exists).
 
-Then the service becomes only 15–20 lines.
+No second findByCustomerId().
 
-That is the solution I'd submit in an enterprise project because:
+Very readable business flow.
 
-only one database hit
+Easy to unit test.
 
-no extra repository calls
-
-much faster
-
-cleaner service
-
-easier unit testing
+Easy to extend if the business rules change.
 
 
-I can write that version as well. It's the one I'd expect from a senior Java developer and is probably the most optimized implementation for your use case.
+
+---
+
+If I were reviewing this PR as a senior developer
+
+I'd suggest removing existsByCustomerId() completely. It's an extra database round trip that doesn't add value because findSubscription(customerId) already answers the same question. Reducing unnecessary queries while keeping the service readable is generally the stronger implementation for a Spring Boot/JPA service.
