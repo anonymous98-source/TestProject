@@ -1,154 +1,156 @@
-Looking at your files, I understand your current implementation. Since the new requirement is:
+Yes. Since your service logic has changed, your FedexSubscriptionServiceImplTest should now cover all four scenarios.
 
-1. Customer exists only / account not found → registrationId, subscriptionId, accountNumber = null
+Assuming you're using JUnit 5 + Mockito (same pattern as your existing project), here's the test class.
 
+@ExtendWith(MockitoExtension.class)
+class FedexSubscriptionServiceImplTest {
 
-2. Customer + account exists → return all 3 fields.
+    @Mock
+    private FedexSubscriptionRepository fedexSubscriptionRepository;
 
+    @InjectMocks
+    private FedexSubscriptionServiceImpl service;
 
-3. Subscription has >500 accounts → registrationId, accountNumber, subscriptionId = null
+    private static final String CUSTOMER_ID = "CUST001";
+    private static final String REGISTRATION_ID = "REG001";
+    private static final String SUBSCRIPTION_ID = "SUB001";
+    private static final String ACCOUNT_NUMBER = "ACC001";
 
+    private FedexSubscriptionEntity entity;
 
-
-you should not use a single JOIN query anymore. The service should control the flow.
-
-
----
-
-Repository
-
-List<FedexSubscriptionEntity> findByCustomerId(String customerId);
-
-
----
-
-@Query("""
-    SELECT COUNT(FSAE)
-    FROM FedexSubscribedAccountsEntity FSAE
-    WHERE FSAE.subscriptionId = :subscriptionId
-""")
-long countAccountsBySubscriptionId(
-        @Param("subscriptionId") String subscriptionId);
-
-
----
-
-@Query("""
-    SELECT FSAE.accountNumber
-    FROM FedexSubscribedAccountsEntity FSAE
-    WHERE FSAE.subscriptionId = :subscriptionId
-      AND FSAE.accountNumber = :accountNumber
-""")
-Optional<String> findAccountNumber(
-        @Param("subscriptionId") String subscriptionId,
-        @Param("accountNumber") String accountNumber);
-
-
----
-
-ServiceImpl
-
-Replace your getFedexSubscription() with this.
-
-@Override
-public FedexSubscriptionFetchResponse getFedexSubscription(
-        String customerId,
-        String accountNumber) {
-
-    log.info(new LogBuilder()
-            .withMessage("Fetching FedEx subscription details")
-            .withField("customerId", customerId)
-            .withField("accountNumber", accountNumber)
-            .toString());
-
-    List<FedexSubscriptionEntity> subscriptions =
-            fedexSubscriptionRepository.findByCustomerId(customerId);
-
-    if (subscriptions.isEmpty()) {
-
-        log.info(new LogBuilder()
-                .withMessage("Customer not found")
-                .withField("customerId", customerId)
-                .toString());
-
-        return null;
+    @BeforeEach
+    void setUp() {
+        entity = new FedexSubscriptionEntity();
+        entity.setCustomerId(CUSTOMER_ID);
+        entity.setRegistrationId(REGISTRATION_ID);
+        entity.setSubscriptionId(SUBSCRIPTION_ID);
     }
 
-    for (FedexSubscriptionEntity subscription : subscriptions) {
+    @Test
+    @DisplayName("Customer not found")
+    void shouldReturnNullWhenCustomerNotFound() {
 
-        long accountCount =
-                fedexSubscriptionRepository.countAccountsBySubscriptionId(
-                        subscription.getSubscriptionId());
+        when(fedexSubscriptionRepository.findByCustomerId(CUSTOMER_ID))
+                .thenReturn(Collections.emptyList());
 
-        /*
-         * More than 500 accounts
-         */
-        if (accountCount > 500) {
+        FedexSubscriptionFetchResponse response =
+                service.getFedexSubscription(CUSTOMER_ID, ACCOUNT_NUMBER);
 
-            return FedexSubscriptionFetchResponse.builder()
-                    .registrationId(subscription.getRegistrationId())
-                    .subscriptionId(null)
-                    .accountNumber(accountNumber)
-                    .build();
-        }
+        assertNull(response);
 
-        /*
-         * Account exists
-         */
-        Optional<String> account =
-                fedexSubscriptionRepository.findAccountNumber(
-                        subscription.getSubscriptionId(),
-                        accountNumber);
-
-        if (account.isPresent()) {
-
-            return FedexSubscriptionFetchResponse.builder()
-                    .registrationId(subscription.getRegistrationId())
-                    .subscriptionId(subscription.getSubscriptionId())
-                    .accountNumber(account.get())
-                    .build();
-        }
-
-        /*
-         * Customer exists but account doesn't
-         */
-        return FedexSubscriptionFetchResponse.builder()
-                .registrationId(subscription.getRegistrationId())
-                .subscriptionId(subscription.getSubscriptionId())
-                .accountNumber(null)
-                .build();
+        verify(fedexSubscriptionRepository)
+                .findByCustomerId(CUSTOMER_ID);
     }
 
-    return null;
+    @Test
+    @DisplayName("Customer exists and account exists")
+    void shouldReturnAllFieldsWhenAccountExists() {
+
+        when(fedexSubscriptionRepository.findByCustomerId(CUSTOMER_ID))
+                .thenReturn(List.of(entity));
+
+        when(fedexSubscriptionRepository.countAccountsBySubscriptionId(SUBSCRIPTION_ID))
+                .thenReturn(100L);
+
+        when(fedexSubscriptionRepository.findAccountNumber(
+                SUBSCRIPTION_ID,
+                ACCOUNT_NUMBER))
+                .thenReturn(Optional.of(ACCOUNT_NUMBER));
+
+        FedexSubscriptionFetchResponse response =
+                service.getFedexSubscription(CUSTOMER_ID, ACCOUNT_NUMBER);
+
+        assertNotNull(response);
+        assertEquals(REGISTRATION_ID, response.getRegistrationId());
+        assertEquals(SUBSCRIPTION_ID, response.getSubscriptionId());
+        assertEquals(ACCOUNT_NUMBER, response.getAccountNumber());
+    }
+
+    @Test
+    @DisplayName("Customer exists but account not found")
+    void shouldReturnNullAccountNumberWhenAccountMissing() {
+
+        when(fedexSubscriptionRepository.findByCustomerId(CUSTOMER_ID))
+                .thenReturn(List.of(entity));
+
+        when(fedexSubscriptionRepository.countAccountsBySubscriptionId(SUBSCRIPTION_ID))
+                .thenReturn(10L);
+
+        when(fedexSubscriptionRepository.findAccountNumber(
+                SUBSCRIPTION_ID,
+                ACCOUNT_NUMBER))
+                .thenReturn(Optional.empty());
+
+        FedexSubscriptionFetchResponse response =
+                service.getFedexSubscription(CUSTOMER_ID, ACCOUNT_NUMBER);
+
+        assertNotNull(response);
+        assertEquals(REGISTRATION_ID, response.getRegistrationId());
+        assertEquals(SUBSCRIPTION_ID, response.getSubscriptionId());
+        assertNull(response.getAccountNumber());
+    }
+
+    @Test
+    @DisplayName("Subscription has more than 500 accounts")
+    void shouldReturnNullSubscriptionIdWhenAccountLimitExceeded() {
+
+        when(fedexSubscriptionRepository.findByCustomerId(CUSTOMER_ID))
+                .thenReturn(List.of(entity));
+
+        when(fedexSubscriptionRepository.countAccountsBySubscriptionId(SUBSCRIPTION_ID))
+                .thenReturn(501L);
+
+        FedexSubscriptionFetchResponse response =
+                service.getFedexSubscription(CUSTOMER_ID, ACCOUNT_NUMBER);
+
+        assertNotNull(response);
+        assertEquals(REGISTRATION_ID, response.getRegistrationId());
+        assertNull(response.getSubscriptionId());
+        assertEquals(ACCOUNT_NUMBER, response.getAccountNumber());
+
+        verify(fedexSubscriptionRepository, never())
+                .findAccountNumber(anyString(), anyString());
+    }
 }
 
+Required imports
 
----
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
 
-This covers every scenario
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
 
-Scenario	registrationId	subscriptionId	accountNumber
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-Customer not found	null	null	null
-Customer exists, account missing	✅	✅	null
-Customer + account exists	✅	✅	✅
-Subscription >500 accounts	✅	null	request account
+Repository methods that are mocked
 
+findByCustomerId(String customerId);
 
+countAccountsBySubscriptionId(String subscriptionId);
 
----
+findAccountNumber(String subscriptionId,
+                  String accountNumber);
 
-Why I recommend this
+These four tests give you good coverage for the updated service:
 
-Your tech lead is likely to prefer this because:
-
-Repository methods each have a single responsibility.
-
-Business rules (>500, account exists, etc.) stay in the service, not in JPQL.
-
-Easy to unit test.
-
-Easy to modify later if the threshold changes from 500 to another value.
+1. ✅ Customer not found
 
 
-This follows a cleaner service/repository separation than trying to encode all the logic in one complex query.
+2. ✅ Customer exists + account exists
+
+
+3. ✅ Customer exists + account not found
+
+
+4. ✅ Subscription has more than 500 accounts (skips account lookup)
+
+
