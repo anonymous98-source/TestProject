@@ -1,156 +1,151 @@
-Yes. Since your service logic has changed, your FedexSubscriptionServiceImplTest should now cover all four scenarios.
+That's a much better business rule than the previous implementation. Your current logic returns as soon as it encounters a subscription with >500 accounts, which is no longer correct.
 
-Assuming you're using JUnit 5 + Mockito (same pattern as your existing project), here's the test class.
+New business rule
 
-@ExtendWith(MockitoExtension.class)
-class FedexSubscriptionServiceImplTest {
+For a given customerId:
 
-    @Mock
-    private FedexSubscriptionRepository fedexSubscriptionRepository;
+1. Fetch all subscriptions for the customer.
 
-    @InjectMocks
-    private FedexSubscriptionServiceImpl service;
 
-    private static final String CUSTOMER_ID = "CUST001";
-    private static final String REGISTRATION_ID = "REG001";
-    private static final String SUBSCRIPTION_ID = "SUB001";
-    private static final String ACCOUNT_NUMBER = "ACC001";
+2. Sort them by latest (preferably createdAt DESC, or by ID if that's how your data is ordered).
 
-    private FedexSubscriptionEntity entity;
 
-    @BeforeEach
-    void setUp() {
-        entity = new FedexSubscriptionEntity();
-        entity.setCustomerId(CUSTOMER_ID);
-        entity.setRegistrationId(REGISTRATION_ID);
-        entity.setSubscriptionId(SUBSCRIPTION_ID);
+3. For each subscription:
+
+If it has >500 accounts, skip it and check the next latest subscription.
+
+If it has ≤500 accounts:
+
+If the requested account exists → return all fields.
+
+If the account doesn't exist → return registrationId + subscriptionId, accountNumber = null.
+
+
+
+
+4. If every subscription has >500 accounts:
+
+Return the latest subscription's registrationId.
+
+Return subscriptionId = null.
+
+Return accountNumber = request account number.
+
+
+
+
+
+---
+
+Repository
+
+Instead of
+
+List<FedexSubscriptionEntity> findByCustomerId(String customerId);
+
+use
+
+List<FedexSubscriptionEntity> findByCustomerIdOrderByCreatedAtDesc(String customerId);
+
+If createdAt isn't available, use another field that defines the newest subscription, such as the primary key or registration creation order.
+
+
+---
+
+Service logic
+
+List<FedexSubscriptionEntity> subscriptions =
+        repository.findByCustomerIdOrderByCreatedAtDesc(customerId);
+
+FedexSubscriptionEntity latestSubscription = subscriptions.get(0);
+
+for (FedexSubscriptionEntity subscription : subscriptions) {
+
+    long accountCount =
+            repository.countAccountsBySubscriptionId(subscription.getSubscriptionId());
+
+    if (accountCount > 500) {
+        continue;   // Skip this subscription
     }
 
-    @Test
-    @DisplayName("Customer not found")
-    void shouldReturnNullWhenCustomerNotFound() {
+    Optional<String> account =
+            repository.findAccountNumber(
+                    subscription.getSubscriptionId(),
+                    accountNumber);
 
-        when(fedexSubscriptionRepository.findByCustomerId(CUSTOMER_ID))
-                .thenReturn(Collections.emptyList());
-
-        FedexSubscriptionFetchResponse response =
-                service.getFedexSubscription(CUSTOMER_ID, ACCOUNT_NUMBER);
-
-        assertNull(response);
-
-        verify(fedexSubscriptionRepository)
-                .findByCustomerId(CUSTOMER_ID);
+    if (account.isPresent()) {
+        return FedexSubscriptionFetchResponse.builder()
+                .registrationId(subscription.getRegistrationId())
+                .subscriptionId(subscription.getSubscriptionId())
+                .accountNumber(account.get())
+                .build();
     }
 
-    @Test
-    @DisplayName("Customer exists and account exists")
-    void shouldReturnAllFieldsWhenAccountExists() {
-
-        when(fedexSubscriptionRepository.findByCustomerId(CUSTOMER_ID))
-                .thenReturn(List.of(entity));
-
-        when(fedexSubscriptionRepository.countAccountsBySubscriptionId(SUBSCRIPTION_ID))
-                .thenReturn(100L);
-
-        when(fedexSubscriptionRepository.findAccountNumber(
-                SUBSCRIPTION_ID,
-                ACCOUNT_NUMBER))
-                .thenReturn(Optional.of(ACCOUNT_NUMBER));
-
-        FedexSubscriptionFetchResponse response =
-                service.getFedexSubscription(CUSTOMER_ID, ACCOUNT_NUMBER);
-
-        assertNotNull(response);
-        assertEquals(REGISTRATION_ID, response.getRegistrationId());
-        assertEquals(SUBSCRIPTION_ID, response.getSubscriptionId());
-        assertEquals(ACCOUNT_NUMBER, response.getAccountNumber());
-    }
-
-    @Test
-    @DisplayName("Customer exists but account not found")
-    void shouldReturnNullAccountNumberWhenAccountMissing() {
-
-        when(fedexSubscriptionRepository.findByCustomerId(CUSTOMER_ID))
-                .thenReturn(List.of(entity));
-
-        when(fedexSubscriptionRepository.countAccountsBySubscriptionId(SUBSCRIPTION_ID))
-                .thenReturn(10L);
-
-        when(fedexSubscriptionRepository.findAccountNumber(
-                SUBSCRIPTION_ID,
-                ACCOUNT_NUMBER))
-                .thenReturn(Optional.empty());
-
-        FedexSubscriptionFetchResponse response =
-                service.getFedexSubscription(CUSTOMER_ID, ACCOUNT_NUMBER);
-
-        assertNotNull(response);
-        assertEquals(REGISTRATION_ID, response.getRegistrationId());
-        assertEquals(SUBSCRIPTION_ID, response.getSubscriptionId());
-        assertNull(response.getAccountNumber());
-    }
-
-    @Test
-    @DisplayName("Subscription has more than 500 accounts")
-    void shouldReturnNullSubscriptionIdWhenAccountLimitExceeded() {
-
-        when(fedexSubscriptionRepository.findByCustomerId(CUSTOMER_ID))
-                .thenReturn(List.of(entity));
-
-        when(fedexSubscriptionRepository.countAccountsBySubscriptionId(SUBSCRIPTION_ID))
-                .thenReturn(501L);
-
-        FedexSubscriptionFetchResponse response =
-                service.getFedexSubscription(CUSTOMER_ID, ACCOUNT_NUMBER);
-
-        assertNotNull(response);
-        assertEquals(REGISTRATION_ID, response.getRegistrationId());
-        assertNull(response.getSubscriptionId());
-        assertEquals(ACCOUNT_NUMBER, response.getAccountNumber());
-
-        verify(fedexSubscriptionRepository, never())
-                .findAccountNumber(anyString(), anyString());
-    }
+    return FedexSubscriptionFetchResponse.builder()
+            .registrationId(subscription.getRegistrationId())
+            .subscriptionId(subscription.getSubscriptionId())
+            .accountNumber(null)
+            .build();
 }
 
-Required imports
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.*;
-
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
-
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
-Repository methods that are mocked
-
-findByCustomerId(String customerId);
-
-countAccountsBySubscriptionId(String subscriptionId);
-
-findAccountNumber(String subscriptionId,
-                  String accountNumber);
-
-These four tests give you good coverage for the updated service:
-
-1. ✅ Customer not found
+/*
+ * If execution reaches here, every subscription had >500 accounts.
+ */
+return FedexSubscriptionFetchResponse.builder()
+        .registrationId(latestSubscription.getRegistrationId())
+        .subscriptionId(null)
+        .accountNumber(accountNumber)
+        .build();
 
 
-2. ✅ Customer exists + account exists
+---
+
+Example
+
+Suppose:
+
+Subscription	Created	Accounts
+
+SUB-5	Latest	780
+SUB-4		650
+SUB-3		501
+SUB-2		300
+SUB-1	Oldest	120
 
 
-3. ✅ Customer exists + account not found
+Your service will:
+
+Skip SUB-5 ❌
+
+Skip SUB-4 ❌
+
+Skip SUB-3 ❌
+
+Select SUB-2 ✅
 
 
-4. ✅ Subscription has more than 500 accounts (skips account lookup)
+If the requested account exists in SUB-2:
 
+{
+  "registrationId": "REG-2",
+  "subscriptionId": "SUB-2",
+  "accountNumber": "ACC-101"
+}
 
+If it doesn't exist:
+
+{
+  "registrationId": "REG-2",
+  "subscriptionId": "SUB-2",
+  "accountNumber": null
+}
+
+If all subscriptions have more than 500 accounts:
+
+{
+  "registrationId": "REG-5",
+  "subscriptionId": null,
+  "accountNumber": "ACC-101"
+}
+
+This is the implementation I'd recommend because it correctly handles customers with multiple subscriptions while always preferring the latest eligible subscription.
