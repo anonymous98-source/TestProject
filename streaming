@@ -1,151 +1,75 @@
-That's a much better business rule than the previous implementation. Your current logic returns as soon as it encounters a subscription with >500 accounts, which is no longer correct.
+Add these 11 records to the end of your records array:
 
-New business rule
+{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "200767207" },
+{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "469426823" },
+{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "477654827" },
+{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "477662668" },
+{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "481653363" },
+{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "481664128" },
+{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "589650085" },
+{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "956956960" },
+{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "956961300" },
+{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "957169040" },
+{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "957177700" }
 
-For a given customerId:
+After adding these, your payload will contain 59 records in total.
 
-1. Fetch all subscriptions for the customer.
-
-
-2. Sort them by latest (preferably createdAt DESC, or by ID if that's how your data is ordered).
-
-
-3. For each subscription:
-
-If it has >500 accounts, skip it and check the next latest subscription.
-
-If it has ≤500 accounts:
-
-If the requested account exists → return all fields.
-
-If the account doesn't exist → return registrationId + subscriptionId, accountNumber = null.
-
-
-
-
-4. If every subscription has >500 accounts:
-
-Return the latest subscription's registrationId.
-
-Return subscriptionId = null.
-
-Return accountNumber = request account number.
-
-
-
-
-
----
-
-Repository
-
-Instead of
-
-List<FedexSubscriptionEntity> findByCustomerId(String customerId);
-
-use
-
-List<FedexSubscriptionEntity> findByCustomerIdOrderByCreatedAtDesc(String customerId);
-
-If createdAt isn't available, use another field that defines the newest subscription, such as the primary key or registration creation order.
-
-
----
-
-Service logic
-
-List<FedexSubscriptionEntity> subscriptions =
-        repository.findByCustomerIdOrderByCreatedAtDesc(customerId);
-
-FedexSubscriptionEntity latestSubscription = subscriptions.get(0);
-
-for (FedexSubscriptionEntity subscription : subscriptions) {
-
-    long accountCount =
-            repository.countAccountsBySubscriptionId(subscription.getSubscriptionId());
-
-    if (accountCount > 500) {
-        continue;   // Skip this subscription
-    }
-
-    Optional<String> account =
-            repository.findAccountNumber(
-                    subscription.getSubscriptionId(),
-                    accountNumber);
-
-    if (account.isPresent()) {
-        return FedexSubscriptionFetchResponse.builder()
-                .registrationId(subscription.getRegistrationId())
-                .subscriptionId(subscription.getSubscriptionId())
-                .accountNumber(account.get())
-                .build();
-    }
-
-    return FedexSubscriptionFetchResponse.builder()
-            .registrationId(subscription.getRegistrationId())
-            .subscriptionId(subscription.getSubscriptionId())
-            .accountNumber(null)
-            .build();
-}
-
-/*
- * If execution reaches here, every subscription had >500 accounts.
- */
-return FedexSubscriptionFetchResponse.builder()
-        .registrationId(latestSubscription.getRegistrationId())
-        .subscriptionId(null)
-        .accountNumber(accountNumber)
-        .build();
-
-
----
-
-Example
-
-Suppose:
-
-Subscription	Created	Accounts
-
-SUB-5	Latest	780
-SUB-4		650
-SUB-3		501
-SUB-2		300
-SUB-1	Oldest	120
-
-
-Your service will:
-
-Skip SUB-5 ❌
-
-Skip SUB-4 ❌
-
-Skip SUB-3 ❌
-
-Select SUB-2 ✅
-
-
-If the requested account exists in SUB-2:
+The images are much clearer now. I extracted the UUIDs and account numbers visible.
 
 {
-  "registrationId": "REG-2",
-  "subscriptionId": "SUB-2",
-  "accountNumber": "ACC-101"
+  "batchId": "394d07ac-a234-453e-a934-9e76f28a980f",
+  "records": [
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "111220867" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "118368010" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "200771470" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "232176598" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "233354856" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "242973313" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "255766570" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "255802895" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "267168830" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "270698905" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "274669802" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "281832450" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "284714695" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "304335831" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "317520140" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "317520247" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "340386388" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "391134049" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "423933887" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "452794969" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "456545122" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "456545785" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "469428702" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "476181607" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "880258389" },
+    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "903157003" },
+
+    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "200765171" },
+    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "200771529" },
+    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "205628753" },
+    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "367885238" },
+    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "957181520" },
+    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "967633178" },
+    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "967633453" },
+
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "200771500" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "337872581" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "337880967" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "337890881" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "371736450" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "371736530" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "371737030" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "371737090" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "371737170" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "371737430" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "446454323" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "659273616" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "763288366" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "967634573" },
+    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "207073346" }
+  ]
 }
 
-If it doesn't exist:
-
-{
-  "registrationId": "REG-2",
-  "subscriptionId": "SUB-2",
-  "accountNumber": null
-}
-
-If all subscriptions have more than 500 accounts:
-
-{
-  "registrationId": "REG-5",
-  "subscriptionId": null,
-  "accountNumber": "ACC-101"
-}
-
-This is the implementation I'd recommend because it correctly handles customers with multiple subscriptions while always preferring the latest eligible subscription.
+This includes all 48 records visible across both images, with customerId and accountNumber as strings.
