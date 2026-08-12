@@ -1,668 +1,256 @@
-@if (hasMultipleFromArray()) {
-  <mat-form-field
-    class="shared-form"
-    [formGroup]="form()"
-    [class.invalid-select]="invalidDropdown()"
-    [ngStyle]="{
-      opacity: isDropdownDisabled() ? '0.6' : '1',
-    }"
+Yes — I can see exactly what is happening from your screenshot.
+
+The important part is this:
+
+<mat-option
+  [disabled]="isOptionDisabled(option)"
+>
+  <opti-checkbox
+    ...
+    (click)="$event.stopPropagation()"
+    (checkboxChange)="toggleSelection(option)"
+    [isDisabled]="isOptionDisabled(option)"
   >
-    <div [formArrayName]="parentFormArray()">
-      <div [formArrayName]="groupName()" class="relative">
-        <mat-select
-          [panelClass]="
-            useSingleSelect()
-              ? 'single-select'
-              : nonPopupSelect()
-                ? 'multiselect-formfield-non-popup'
-                : notificationDropdown()
-                  ? 'notification-dropdown'
-                  : 'multiselect-formfield'
-          "
-          [placeholder]="placeholder()"
-          (valueChange)="onValueChange($event)"
-          (blur)="onBlur()"
-          [formControlName]="fieldControlName()"
-          class="custom-placeholder"
-          [multiple]="multiple()"
-        >
-          @if (packageDropdown()) {
-            <mat-select-trigger>
-              <ng-container>
-                {{ selectedPackageName }}
-              </ng-container>
-            </mat-select-trigger>
-          }
-          <div
-            *ngFor="
-              let dropdownItem of dropdownList;
-              let j = index;
-              let isLast = last
-            "
-          >
-            @if (dropdownItem?.title) {
-              <div
-                [ngClass]="{ 'last-child': isLast }"
-                class="selected-slot-list"
-              >
-                {{ dropdownItem?.title }}
-              </div>
-            }
-            <mat-option
-              *ngFor="let items of dropdownItem.list; let i = index"
-              [value]="items.value"
-              [disabled]="items.disabled"
-              [class.pointer-events-none]="
-                isLastOption && i == this.indexOfLastOption
-              "
-              [ngClass]="{
-                'pointer-events-none':
-                  isLastOption && i == this.indexOfLastOption,
-                'has-labels': items.tags?.length,
-                'disabled-notify-option':
-                  notificationDropdown() &&
-                  isLastOption &&
-                  i == this.indexOfLastOption,
-              }"
-            >
-              <div class="option-label-wrapper option-label-wrapper-column">
-                <div #tooltip [matTooltip]="items.tooltipDescription ?? ''">
-                  {{ items.viewValue }}
-                </div>
-                @if (items.tags?.length) {
-                  <div class="label-pills">
-                    <span class="label-pill" *ngFor="let tag of items.tags">
-                      {{ tag.tagName }}
-                    </span>
-                  </div>
-                }
-              </div>
-            </mat-option>
-          </div>
-        </mat-select>
-      </div>
-    </div>
-  </mat-form-field>
-} @else if (isModifiedDropdown()) {
-  <mat-form-field
-    class="shared-form valid-select modified-dropdown"
-    [class.is-modified-dropdown]="isModifiedDropdown()"
-    [class.select-option-selected]="isSelectOptionSelected"
-    [formGroup]="form()"
-    [class.relative]="hasIcons()"
-    [ngStyle]="{
-      opacity: isDropdownDisabled() ? '0.6' : '1',
-    }"
-    [ngClass]="
-      getSelectedViewOptionalProperty('viewValueSecondLine')
-        ? 'dropdown-arrow'
-        : 'dropdown-arrow-with-subtext'
+  </opti-checkbox>
+</mat-option>
+
+You are disabling the mat-option, but the opti-checkbox is a separate interactive component inside it. Its checkboxChange can still fire.
+
+So you need to handle this at the checkbox level as well as the option level.
+
+1. First change your toggleSelection()
+
+This is the most important fix.
+
+Currently you have something like:
+
+toggleSelection(option: any) {
+  const current = this.control.value || [];
+
+  if (this.isSelected(option)) {
+    this.control.setValue(
+      current.filter((item) => item.id !== option.id)
+    );
+  } else {
+    this.control.setValue([...current, option]);
+  }
+}
+
+Change it to:
+
+toggleSelection(option: any): void {
+  // Do nothing if the option is inactive
+  if (this.isOptionDisabled(option)) {
+    return;
+  }
+
+  const current = this.control.value || [];
+
+  if (this.isSelected(option)) {
+    this.control.setValue(
+      current.filter((item) => item.id !== option.id)
+    );
+  } else {
+    this.control.setValue([...current, option]);
+  }
+}
+
+This guarantees that even if checkboxChange fires, the inactive option will never be added to your selected values.
+
+
+---
+
+2. Keep [disabled] on mat-option
+
+Keep:
+
+[disabled]="isOptionDisabled(option)"
+
+So:
+
+<mat-option
+  *ngFor="let option of options"
+  [value]="option"
+  [disabled]="isOptionDisabled(option)"
+  class="custom-option"
+>
+
+This handles the dropdown option itself.
+
+
+---
+
+3. Your checkbox
+
+You currently have:
+
+<opti-checkbox
+  [checked]="isSelected(option)"
+  (click)="$event.stopPropagation()"
+  (checkboxChange)="toggleSelection(option)"
+  [noFormGroup]="true"
+  [title]="
+    searchPlaceholder() === AddPanelType.BillingGroup
+      ? option.name + ' (' + option.id + ')'
+      : option.name
+  "
+  [isDisabled]="isOptionDisabled(option)"
+>
+</opti-checkbox>
+
+If opti-checkbox actually supports isDisabled, keep it.
+
+But based on your earlier statement that the component doesn't expose a disable property, I would not rely on this alone.
+
+The toggleSelection() guard above is still required.
+
+
+---
+
+4. I would also change the click handler
+
+Instead of:
+
+(click)="$event.stopPropagation()"
+
+use:
+
+(click)="onCheckboxClick($event, option)"
+
+Then add this to your TS:
+
+onCheckboxClick(event: MouseEvent, option: any): void {
+  if (this.isOptionDisabled(option)) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
+  event.stopPropagation();
+}
+
+So your checkbox becomes:
+
+<opti-checkbox
+  [checked]="isSelected(option)"
+  (click)="onCheckboxClick($event, option)"
+  (checkboxChange)="toggleSelection(option)"
+  [noFormGroup]="true"
+  [title]="
+    searchPlaceholder() === AddPanelType.BillingGroup
+      ? option.name + ' (' + option.id + ')'
+      : option.name
+  "
+  [isDisabled]="isOptionDisabled(option)"
+>
+</opti-checkbox>
+
+
+---
+
+5. Make sure isOptionDisabled() is correct
+
+You haven't shown this method, but it should simply be:
+
+isOptionDisabled(option: any): boolean {
+  return option?.active === false;
+}
+
+Or, if you're using a more strongly typed object:
+
+isOptionDisabled(option: { active?: boolean }): boolean {
+  return option.active === false;
+}
+
+Don't use:
+
+return !option.active;
+
+unless you're certain active is always present.
+
+Because:
+
+undefined
+
+would also become disabled with !option.active.
+
+
+---
+
+6. Your final relevant code
+
+HTML
+
+<mat-option
+  *ngFor="let option of options"
+  [value]="option"
+  [disabled]="isOptionDisabled(option)"
+  class="custom-option"
+>
+  <opti-checkbox
+    [checked]="isSelected(option)"
+    (click)="onCheckboxClick($event, option)"
+    (checkboxChange)="toggleSelection(option)"
+    [noFormGroup]="true"
+    [title]="
+      searchPlaceholder() === AddPanelType.BillingGroup
+        ? option.name + ' (' + option.id + ')'
+        : option.name
     "
+    [isDisabled]="isOptionDisabled(option)"
   >
-    <mat-select
-      [placeholder]="placeholder()"
-      [formControlName]="fieldControlName()"
-      (valueChange)="onValueChange($event)"
-      (blur)="onBlur()"
-      panelClass="custom-select-panel"
-    >
-      <mat-select-trigger class="trigger-text-padding">
-        <div
-          class="dropdown-label-wrapper-selected dropdown-label-wrapper-flex"
-          [ngClass]="{ 'with-border': displaySubText() }"
-        >
-          <div
-            *ngIf="prefixColorBar()"
-            [ngStyle]="{
-              'background-color': getSelectedViewOptionalProperty(
-                'visualIdentifierColor'
-              ),
-            }"
-            class="absolute prefix-color-bar"
-          ></div>
-          <div
-            class="margin-left-17"
-            *ngIf="hasIcons() && form().get(fieldControlName())?.value"
-          >
-            <img
-              [src]="getSelectedViewOptionalProperty('visualIdentifierIcon')"
-              class="prefixicon absolute"
-              alt="prefix"
-            />
-          </div>
-          <div
-            class="flex-box"
-            [ngClass]="{
-              'margin-left-10': isSelectOptionSelected,
-              'margin-left-17': !isSelectOptionSelected,
-              'margin-top-7': getSelectedViewOptionalProperty(
-                'viewValueSecondLine'
-              ),
-            }"
-          >
-            <div
-              class="dropdown-firstline dropdown-flex-space-between"
-              [ngClass]="
-                getSelectedViewOptionalProperty('viewValueSecondLine')
-                  ? ''
-                  : 'full-height'
-              "
-            >
-              <div
-                class="dropdown-firstline-text"
-                #firstLine
-                [matTooltip]="firstLineTooltipText"
-                [matTooltipPosition]="'above'"
-              >
-                {{ getSelectedViewValue() }}
-              </div>
-              <ng-container *ngIf="showTooltip() && !hideTooltipOnChange">
-                <img
-                  src="assets/images/blue-indicator-icon.svg"
-                  alt="info"
-                  class="custom-tooltip-icon"
-                  [matTooltip]="PROFILE_TOOLTIP_TEXT.TOOLTIP_TEXT"
-                  [matTooltipPosition]="'above'"
-                />
-              </ng-container>
-            </div>
-            <div
-              *ngIf="
-                displaySubText() &&
-                getSelectedViewOptionalProperty('viewValueSecondLine')
-              "
-              #secondLine
-              class="dropdown-secondline"
-              [matTooltip]="secondLineTooltipText"
-              [matTooltipPosition]="'above'"
-            >
-              {{ getSelectedViewOptionalProperty("viewValueSecondLine") }}
-            </div>
-          </div>
-        </div>
-      </mat-select-trigger>
-      <div
-        *ngFor="
-          let dropdownItems of dropdownList;
-          let j = index;
-          let isLast = last
-        "
-      >
-        <mat-option
-          *ngFor="let item of dropdownItems?.list; let i = index"
-          [value]="item?.value"
-          [disabled]="item.disabled"
-          [class.pointer-events-none]="
-            isLastOption && i == this.indexOfLastOption
-          "
-          [matTooltip]="item.tooltipDescription ? item.tooltipDescription : ''"
-          class="nopadding"
-        >
-          <div class="dropdown-row-flex">
-            @if (item.visualIdentifierColor) {
-              <ng-container>
-                <div
-                  [ngStyle]="{
-                    'background-color': item.visualIdentifierColor,
-                  }"
-                  class="dropdown-color-bar"
-                ></div>
-              </ng-container>
-            }
-            <ng-container *ngIf="hasIcons() && item.visualIdentifierIcon">
-              <img
-                [src]="item.visualIdentifierIcon"
-                class="dropdown-prefix-icon"
-                alt="prefix"
-              />
-            </ng-container>
-            <div
-              class="dropdown-label-wrapper-list"
-              [class.select-option]="item.isSelectOption"
-            >
-              <div
-                #dropdownFirstLine
-                [matTooltip]="
-                  checkEllipsis(dropdownFirstLine, item?.viewValue || '')
-                "
-                [matTooltipPosition]="'above'"
-                class="dropdown-firstline-text"
-              >
-                {{ item?.viewValue }}
-              </div>
-              <div
-                *ngIf="displaySubText() && item.viewValueSecondLine"
-                class="dropdown-secondline"
-                #dropdownSecondLine
-                [matTooltip]="
-                  checkEllipsis(
-                    dropdownSecondLine,
-                    item?.viewValueSecondLine || ''
-                  )
-                "
-                [matTooltipPosition]="'above'"
-              >
-                {{ item.viewValueSecondLine }}
-              </div>
-            </div>
-          </div>
-        </mat-option>
-      </div>
-    </mat-select>
-  </mat-form-field>
-} @else {
-  <mat-form-field
-    class="shared-form valid-select"
-    [formGroup]="form()"
-    [class.relative]="hasIcons()"
-    [ngStyle]="{
-      opacity: isDropdownDisabled() ? '0.6' : '1',
-    }"
-  >
-    @if (hasIcons()) {
-      <img
-        *ngIf="prefixIcon()"
-        [src]="prefixIcon()"
-        class="prefix absolute"
-        alt="prefix"
-      />
-    }
-    @if (suffixIcons().length) {
-      <div class="mid absolute flex flex-gap-8">
-        @for (icon of suffixIcons(); track $index) {
-          <img [src]="icon" [alt]="'suffixIcon' + $index"/>
-        }
-      </div>
-    }
-    <mat-select
-      [panelClass]="
-        useSingleSelect()
-          ? 'single-select'
-          : nonPopupSelect()
-            ? 'multiselect-formfield-non-popup'
-            : notificationDropdown()
-              ? 'notification-dropdown'
-              : showCheckBox()
-                ? 'multiselect-formfield checkbox'
-                : 'multiselect-formfield'
-      "
-      [placeholder]="placeholder()"
-      [formControlName]="fieldControlName()"
-      (valueChange)="onValueChange($event)"
-      (blur)="onBlur()"
-      [multiple]="multiple()"
-    >
-      @if (showCrossIcon()) {
-        <mat-select-trigger>
-          <div class="selected-chips">
-            <mat-chip
-              *ngFor="
-                let item of this.form().get(this.fieldControlName())?.value
-              "
-              [removable]="true"
-              (removed)="removeItem(item)"
-            >
-              {{ getChipViewValue(item) }}
-              <img matChipRemove src="assets/images/cross-icon.svg" alt=""/>
-            </mat-chip>
-          </div>
-        </mat-select-trigger>
-      }
-      <div *ngIf="multiple() && selectAllHtml()">
-        <mat-checkbox class="select-all-checkbox" [checked]="isAllOptionsSelected()" (change)="selectAll($event)"
-                      [attr.aria-label]="selectAllHtml()">
-          <span [innerHTML]="selectAllHtml()"></span>
-        </mat-checkbox>
-        <hr>
-      </div>
-      <div
-        *ngFor="
-          let dropdownItems of dropdownList;
-          let j = index;
-          let isLast = last
-        "
-      >
-        @if (dropdownItems?.title) {
-          <div [ngClass]="{ 'last-child': isLast }" class="selected-slot-list">
-            {{ dropdownItems?.title }}
-          </div>
-        }
-        <mat-option
-          *ngFor="let item of dropdownItems?.list; let i = index"
-          [value]="item?.value"
-          [disabled]="item.disabled"
-          [class.pointer-events-none]="
-            isLastOption && i == this.indexOfLastOption
-          "
-          [matTooltip]="item.tooltipDescription ? item.tooltipDescription : ''"
-        >
-          @if (item.isFooter) {
-            <ng-container>
-              <div class="dropdown-footer-divider full-width-divider"></div>
-              <div class="option-content">
-                <span class="option-text">{{ item.viewValue }} </span>
-                <img
-                  [matTooltip]="ADDITIONAL_PACKAGE_CONSTANTS.UNVERIFIED_DATA"
-                  src="assets/images/circle-i.svg"
-                  alt="infoIcon"
-                  class="footer-icon"
-                />
-              </div>
-            </ng-container>
-          } @else if (displayVerifiedIcon) {
-            <div class="option-content">
-              <span class="option-text">{{ item.viewValue }}</span>
-              <img
-                src="assets/images/verifiedCheck.svg"
-                alt="verifiedIcon"
-                class="verified-icon"
-              />
-            </div>
-          } @else {
-            <img
-              *ngIf="optionsIcons()"
-              [src]="
-                isSelected(item.value)
-                  ? item?.iconValueSelected
-                  : item?.iconValue
-              "
-              class="option-icon absolute"
-              alt="optionIcon"
-            />
-            <span
-              [ngClass]="{
-                'dropdown-value': hasIcons() && !noMarginPadding(),
-                'dropdown-icon-value': optionsIcons(),
-              }"
-            >
-              {{ item?.viewValue }}
-            </span>
-            <span
-              #tooltip="matTooltip"
-              [matTooltip]="ADDITIONAL_PACKAGE_CONSTANTS.DROPDOWN_TOOLTIP"
-              [matTooltipPosition]="'right'"
-              *ngIf="item?.viewValue?.includes('Saturday') && !additionalText()"
-              class="saturday-svc"
-            ></span>
-          }
-        </mat-option>
-      </div>
-    </mat-select>
-  </mat-form-field>
-  <p class="field-message" *ngIf="fieldMessage()">{{ fieldMessage() }}</p>
+  </opti-checkbox>
+</mat-option>
+
+TS
+
+isOptionDisabled(option: any): boolean {
+  return option?.active === false;
 }
-import {
-  Component,
-  ElementRef,
-  Input,
-  input,
-  OnInit,
-  output,
-  SimpleChanges,
-  ViewChild,
-  ViewEncapsulation,
-} from '@angular/core';
-import { FormArray, FormGroup, ReactiveFormsModule } from '@angular/forms';
-import { MatChipsModule } from '@angular/material/chips';
-import { CommonModule } from '@angular/common';
-import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatSelectModule } from '@angular/material/select';
-import { MatTooltipModule } from '@angular/material/tooltip';
-import {
-  DropdownListWithTitlesType,
-  DropdownType,
-} from '../../models/shared.model';
-import {
-  ADDITIONAL_PACKAGE_CONSTANTS,
-  DROPDOWN_CONSTANTS,
-  DROPDOWN_DEFAULT_INDEX,
-  DROPDOWN_SINGLE_SELECTION_COUNT,
-  PROFILE_TOOLTIP_TEXT,
-} from '../../constants/shared.constants';
-import { checkEllipsis } from '../../services/opti-utility.service';
-import {
-  MatCheckboxChange,
-  MatCheckboxModule,
-} from '@angular/material/checkbox';
 
-@Component({
-  selector: 'opti-dropdown',
-  standalone: true,
-  imports: [
-    MatSelectModule,
-    MatFormFieldModule,
-    ReactiveFormsModule,
-    MatTooltipModule,
-    CommonModule,
-    MatChipsModule,
-    MatCheckboxModule,
-  ],
-  templateUrl: './opti-dropdown.component.html',
-  styleUrl: './opti-dropdown.component.scss',
-  encapsulation: ViewEncapsulation.None,
-})
-export class OptiDropdownComponent {
-  placeholder = input('');
-  isDropdownDisabled = input<boolean>(false);
-  options = input<DropdownType[]>([]);
-  dropdownListWithTitle = input<DropdownListWithTitlesType[]>([]);
-  multiselect = input<boolean>(false);
-  additionalText = input<boolean>(false);
-  additionalTextTooltip = input<string>('');
-  hasMultipleFromArray = input(false);
-  form = input.required<FormGroup>();
-  parentFormArray = input<string>('');
-  groupName = input<string>('');
-  fieldControlName = input.required<string>();
-  valueChange = output<string>();
-  blurHandler = output();
-  invalidDropdown = input<boolean>(false);
-  noMarginPadding = input<boolean>(false);
-  hasIcons = input<boolean>(false);
-  prefixIcon = input<string>();
-  useSingleSelect = input<boolean>(false);
-  optionsIcons = input<boolean>(false);
-  multiple = input<boolean>(false);
-  isDisableLastOption = input<boolean>(false);
-  isLastOption: boolean = false;
-  indexOfLastOption: number = DROPDOWN_DEFAULT_INDEX;
-  disableDropdown = input<boolean>(false);
-  showCheckBox = input<boolean>(false);
-  showCrossIcon = input(false);
-  packageDropdown = input<boolean>(false);
-  fieldMessage = input<string>('');
-  ADDITIONAL_PACKAGE_CONSTANTS = ADDITIONAL_PACKAGE_CONSTANTS;
-  PROFILE_TOOLTIP_TEXT = PROFILE_TOOLTIP_TEXT;
-  notifyType = input<string>('');
-  nonPopupSelect = input<boolean>(false);
-  notificationDropdown = input<boolean>(false);
-  suffixIcons = input<string[]>([]);
-  @Input() displayVerifiedIcon: boolean = false;
-  isModifiedDropdown = input<boolean>(false);
-  prefixColorBar = input<boolean>(false);
-  displaySubText = input<boolean>(false);
-  selectAllHtml = input<string>('');
+onCheckboxClick(event: MouseEvent, option: any): void {
+  if (this.isOptionDisabled(option)) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
 
-  dropdownList: DropdownListWithTitlesType[] = [];
-  updatedOptions: DropdownType[] = [];
-  isSelectOptionSelected: boolean = false;
-  showTooltip = input<boolean>(false);
-  hideTooltipOnChange: boolean = false;
-  checkEllipsis = checkEllipsis;
-  firstLineTooltipText: string = '';
-  secondLineTooltipText: string = '';
-  @ViewChild('firstLine', { static: false }) firstLineElement!: ElementRef;
-  @ViewChild('secondLine', { static: false }) secondLineElement!: ElementRef;
+  event.stopPropagation();
+}
 
-  onValueChange(value: string) {
-    this.hideTooltipOnChange = true;
-    this.isSelectOptionSelected = value === '';
-    this.valueChange.emit(value);
-    this.indexOfLastOption = this.options().findIndex(
-      (option) => option.value === value?.[0],
+toggleSelection(option: any): void {
+  // Safety check - inactive options can NEVER be selected
+  if (this.isOptionDisabled(option)) {
+    return;
+  }
+
+  const current = this.control.value || [];
+
+  if (this.isSelected(option)) {
+    this.control.setValue(
+      current.filter((item) => item.id !== option.id)
     );
-    this.isLastOption =
-      Array.isArray(value) &&
-      value.length == DROPDOWN_SINGLE_SELECTION_COUNT &&
-      this.isDisableLastOption();
-    this.makeTooltipText();
-  }
-  get selectedPackageName(): string {
-    const dynamicArrayControl = this.form().get('dynamicArray');
-    let name: string | undefined;
-    if (dynamicArrayControl instanceof FormArray) {
-      name = dynamicArrayControl.controls[Number(this.groupName())].get(
-        this.fieldControlName(),
-      )?.value;
-    }
-    return name ?? this.placeholder();
-  }
-
-  isSelected(value: string): boolean {
-    return this.form().get(this.fieldControlName())?.value === value;
-  }
-
-  onBlur() {
-    this.blurHandler.emit();
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes?.['fieldControlName']) {
-      this.isSelectOptionSelected =
-        this.isModifiedDropdown() &&
-        this.form().get(this.fieldControlName())?.value === '';
-
-      if (
-        this.fieldControlName() === 'notifySender' ||
-        this.fieldControlName() === 'notifyRecipient' ||
-        this.fieldControlName() === 'notify'
-      ) {
-        const notifyType =
-          this.notifyType() === 'email' ? 'dynamicArray' : 'phoneArray';
-        const notifyControl = this.form().get(notifyType);
-        if (notifyControl instanceof FormArray) {
-          this.onValueChange(
-            notifyControl.value?.[this.groupName()]?.[this.fieldControlName()],
-          );
-        }
-      }
-    }
-
-    if (changes['options'] || changes['dropdownListWithTitle']) {
-      this.updatedOptions = this.options();
-      if (this.isModifiedDropdown()) {
-        this.updatedOptions = [
-          {
-            value: '',
-            viewValue: DROPDOWN_CONSTANTS.SELECT_OPTION_VALUE,
-            isSelectOption: true,
-          },
-          ...this.options(),
-        ];
-      }
-      if (this.dropdownListWithTitle().length) {
-        this.dropdownList = this.dropdownListWithTitle();
-      } else {
-        this.dropdownList = [
-          {
-            title: '',
-            list: this.updatedOptions,
-          },
-        ];
-      }
-    }
-  }
-
-  ngAfterViewInit() {
-    this.makeTooltipText();
-  }
-
-  makeTooltipText() {
-    requestAnimationFrame(() => {
-      if (this.firstLineElement) {
-        this.firstLineTooltipText = checkEllipsis(
-          this.firstLineElement.nativeElement,
-          this.getSelectedViewValue(),
-        );
-      }
-      if (this.secondLineElement) {
-        this.secondLineTooltipText = checkEllipsis(
-          this.secondLineElement?.nativeElement,
-          this.getSelectedViewOptionalProperty('viewValueSecondLine'),
-        );
-      }
-    });
-  }
-
-  getChipViewValue(value: string) {
-    return this.options().find((item) => item.value === value)?.viewValue;
-  }
-
-  removeItem(item: string) {
-    const current = this.form().get(this.fieldControlName())?.value as string[];
-    if (current.length === DROPDOWN_SINGLE_SELECTION_COUNT) return;
-    this.form()
-      .get(this.fieldControlName())
-      ?.setValue(current.filter((i) => i !== item));
-    const valueAfterRemoving = this.form().get(this.fieldControlName())
-      ?.value as string[];
-    if (valueAfterRemoving.length === DROPDOWN_SINGLE_SELECTION_COUNT) {
-      this.indexOfLastOption = this.options().findIndex(
-        (option) => option.value === valueAfterRemoving[0],
-      );
-      this.isLastOption = true;
-    }
-  }
-
-  getSelectedViewValue(): string {
-    const value = this.form().get(this.fieldControlName())?.value;
-    if (!Array.isArray(value)) {
-      return (
-        this.updatedOptions.find((item) => item.value === value)?.viewValue ||
-        ''
-      );
-    }
-    return '';
-  }
-
-  getSelectedViewOptionalProperty(property: string): string {
-    const value = this.form().get(this.fieldControlName())?.value;
-    if (!Array.isArray(value)) {
-      const selected = this.options().find((item) => item.value === value);
-      if (selected && property in selected) {
-        return selected[property as keyof DropdownType];
-      }
-    }
-    return '';
-  }
-
-  private getSelectableOptions(): DropdownType[] {
-    return this.options().filter(
-      (option) =>
-        !option.disabled && !option.isSelectOption && !option.isFooter,
-    );
-  }
-
-  selectAll($event: MatCheckboxChange) {
-    const allValues: string[] = [];
-    if ($event.checked) {
-      this.getSelectableOptions().forEach((option) => {
-        allValues.push(option.value);
-      });
-    }
-    this.form().get(this.fieldControlName())?.setValue(allValues);
-  }
-
-  isAllOptionsSelected() {
-    const selectedValues: string[] =
-      this.form().get(this.fieldControlName())?.value || [];
-    const selectableOptions = this.getSelectableOptions();
-    if (selectableOptions && selectableOptions.length > 0) {
-      const unselectedOption = selectableOptions.find(
-        (dropdownOption) => !selectedValues.includes(dropdownOption.value),
-      );
-      return unselectedOption === undefined;
-    }
-    return false;
+  } else {
+    this.control.setValue([...current, option]);
   }
 }
+
+Why I'm recommending all three
+
+You effectively have two controls:
+
+mat-option
+    |
+    └── opti-checkbox
+
+Disabling the parent mat-option doesn't necessarily disable the custom checkbox's internal interaction.
+
+Therefore:
+
+mat-option [disabled] → visually/semantically disables the option
+
+onCheckboxClick() → prevents interaction with the checkbox
+
+toggleSelection() guard → final safety net so inactive data can never enter your FormControl
+
+That last one is especially important because even if the UI component behaves unexpectedly, your application state remains correct.
