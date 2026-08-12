@@ -1,167 +1,107 @@
-Yes. Since you want to temporarily bypass the real Location BE API and use a hardcoded demo response, you only need to change the Location case in search-autocomplete.component.ts.
+Right — then do not add [disabled] to opti-checkbox. Since mat-option itself supports [disabled], we can use that to prevent selection, and the TS guard ensures the checkbox event cannot accidentally select an inactive Location.
 
-1. Add the demo response
+1. search-autocomplete.component.html
 
-Inside SearchAutocompleteComponent, add:
+Use this:
 
-private readonly demoLocationResponse = {
-  customerLocations: [
-    {
-      id: 'LOC001',
-      name: 'Pune',
-      active: true,
-    },
-    {
-      id: 'LOC002',
-      name: 'Mumbai',
-      active: false,
-    },
-    {
-      id: 'LOC003',
-      name: 'Bangalore',
-      active: true,
-    },
-    {
-      id: 'LOC004',
-      name: 'Delhi',
-      active: false,
-    },
-    {
-      id: 'LOC005',
-      name: 'Hyderabad',
-      active: true,
-    },
-  ],
-};
+<ng-container *ngIf="filteredOptions | async as options">
+  <mat-option
+    *ngFor="let option of options"
+    [value]="option"
+    [disabled]="isOptionDisabled(option)"
+    class="custom-option"
+  >
+    <opti-checkbox
+      [checked]="isSelected(option)"
+      (click)="$event.stopPropagation()"
+      (checkboxChange)="toggleSelection(option)"
+      [noFormGroup]="true"
+      [title]="
+        searchPlaceholder() === AddPanelType.BillingGroup
+          ? option.name + ' (' + option.id + ')'
+          : option.name
+      "
+    >
+    </opti-checkbox>
+  </mat-option>
+</ng-container>
 
-You can put it just below:
-
-inputMaxCharacters = 100;
+Notice that opti-checkbox has no [disabled].
 
 
 ---
 
-2. Replace ONLY the Location case
+2. search-autocomplete.component.ts
 
-Currently you have:
+Add:
 
-case AddPanelType.Location:
-  return this.locationService.search(this.searchValue).pipe(
-    map((res) =>
-      (res?.customerLocations || []).map((loc: any) => ({
-        id: loc.id,
-        name: loc.name,
-        active: loc.active,
-      }))
-    ),
-    switchMap((transformed) => this.handleSearch(of(transformed)))
+isOptionDisabled(option: any): boolean {
+  return (
+    this.searchPlaceholder() === AddPanelType.Location &&
+    option?.active === false
   );
+}
 
-Temporarily replace it with:
+Then protect toggleSelection():
 
-case AddPanelType.Location:
-  return of(this.demoLocationResponse).pipe(
-    map((res) =>
-      (res?.customerLocations || []).map((loc: any) => ({
-        id: loc.id,
-        name: loc.name,
-        active: loc.active,
-      }))
-    ),
-    switchMap((transformed) => this.handleSearch(of(transformed)))
-  );
+toggleSelection(option: any): void {
+  if (this.isOptionDisabled(option)) {
+    return;
+  }
 
-That's it.
+  const current = this.control.value || [];
 
-3. What happens now
+  if (this.isSelected(option)) {
+    this.control.setValue(
+      current.filter((item) => item.id !== option.id)
+    );
+  } else {
+    this.control.setValue([...current, option]);
+  }
+}
 
-When the selected panel is:
+Also protect onOptionSelected():
 
-AddPanelType.Location
+onOptionSelected(event: MatAutocompleteSelectedEvent): void {
+  const selectedEntry = event.option.value;
 
-your flow becomes:
+  if (this.isOptionDisabled(selectedEntry)) {
+    return;
+  }
 
-Search "pune"
-     ↓
-getSearchObservable()
-     ↓
-AddPanelType.Location
-     ↓
-demoLocationResponse
-     ↓
-handleSearch()
-     ↓
-Autocomplete
+  const current = this.control.value || [];
 
-It will not call:
+  if (!current.some((item) => item.id === selectedEntry.id)) {
+    this.control.setValue([...current, selectedEntry]);
+  }
 
-this.locationService.search(this.searchValue)
+  this.searchInputControl.setValue('');
+}
 
-for Location.
+Why both are needed
 
-Customer and Billing Group are completely untouched and will continue calling their real APIs.
+You have two selection paths:
 
-
----
-
-4. Demo data behavior
-
-With the demo response:
-
-Pune        active: true   → selectable
-Mumbai      active: false  → disabled
-Bangalore   active: true   → selectable
-Delhi       active: false  → disabled
-Hyderabad   active: true   → selectable
-
-If you type m, you'll get Mumbai, but it should be disabled.
-
-If you type p, you'll get Pune, and it should be selectable.
-
-
----
-
-5. One important thing about your current search
-
-Your existing handleSearch() does:
-
-options.filter((item) =>
-  item?.name?.toLowerCase().includes(this.searchValue)
-)
-
-So the demo response still behaves like a real search.
-
-For example:
-
-Search: "mum"
-        ↓
-Mumbai only
+mat-option click
+       ↓
+onOptionSelected()
 
 and:
 
-Search: "del"
-        ↓
-Delhi only
+opti-checkbox click
+       ↓
+toggleSelection()
 
-This is good because you're testing the actual autocomplete behavior rather than simply displaying all five locations.
+So both need the protection.
 
+And because:
 
----
+[disabled]="isOptionDisabled(option)"
 
-When you're finished testing
+is on the mat-option, Angular Material will prevent the inactive Location option from being selected and should display it in the disabled state.
 
-Restore just this:
+Most importantly, this condition guarantees only Locations are affected:
 
-case AddPanelType.Location:
-  return this.locationService.search(this.searchValue).pipe(
+this.searchPlaceholder() === AddPanelType.Location
 
-instead of:
-
-case AddPanelType.Location:
-  return of(this.demoLocationResponse).pipe(
-
-You can then remove:
-
-private readonly demoLocationResponse = ...
-
-Do not change your Customer or Billing Group cases.    
+So inactive Customers and Billing Groups remain selectable.
