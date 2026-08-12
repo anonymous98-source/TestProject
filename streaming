@@ -1,322 +1,434 @@
-<form>
-  <div
-    matAutocompleteOrigin
-    #origin="matAutocompleteOrigin"
-    class="opti-form-field-origin"
+Now that you've shared the actual SearchAutocompleteComponent, we can implement this exactly in this component. You do not need to modify the AdditionPanelComponent HTML/TS for this requirement.
+
+The good news is that your Location API response is already mapping active correctly:
+
+{
+  id: loc.id,
+  name: loc.name,
+  active: loc.active,
+}
+
+So we only need to make inactive Location options disabled.
+
+There is one important detail in your code: you have an opti-checkbox inside the mat-option, and its click handler directly calls toggleSelection(option). Therefore, just adding [disabled] to mat-option is not sufficient. We should disable it visually and also protect toggleSelection().
+
+
+---
+
+1. Change your HTML
+
+Replace this existing section:
+
+<ng-container *ngIf="filteredOptions | async as options">
+  <mat-option
+    *ngFor="let option of options"
+    [value]="option"
+    class="custom-option"
   >
-    <opti-form-field
-      [label]="''"
-      [forAttribute]="''"
-      [fieldName]="control"
-      [showInlineFields]="true"
+    <opti-checkbox
+      [checked]="isSelected(option)"
+      (click)="$event.stopPropagation()"
+      (checkboxChange)="toggleSelection(option)"
+      [noFormGroup]="true"
+      [title]="
+        searchPlaceholder() === AddPanelType.BillingGroup
+          ? option.name + ' (' + option.id + ')'
+          : option.name
+      "
     >
-      <mat-icon matPrefix class="input-mat-icon">search</mat-icon>
-      <input
-        type="text"
-        matInput
-        [formControl]="searchInputControl"
-        [matAutocomplete]="auto"
-        [matAutocompleteConnectedTo]="origin"
-        class="custom-input"
-        [placeholder]="modifiedPlaceHolder()"
-        [maxlength]="inputMaxCharacters"
-        (focus)="onFocus()"
-        (blur)="onBlur()"
-      />
-      <div
-        matSuffix
-        mat-icon-button
-        *ngIf="searchInputControl.value"
-        (click)="clearInput()"
-        class="input-mat-icon"
-      >
-        <mat-icon>close</mat-icon>
-      </div>
+    </opti-checkbox>
+  </mat-option>
+</ng-container>
 
-      <mat-autocomplete
-        #auto="matAutocomplete"
-        (optionSelected)="onOptionSelected($event)"
-        class="search-box"
-      >
-        <mat-option *ngIf="isLoading">
-          <div class="spinner-option">
-            <mat-spinner diameter="18" class="custom-spinner"></mat-spinner>
-            <span style="margin-left: 10px">
-              {{ loadingPlaceholder() }}
-            </span>
-          </div>
-        </mat-option>
+with this:
 
-        <mat-option *ngIf="noResults" class="no-result">
-          No results found
-        </mat-option>
+<ng-container *ngIf="filteredOptions | async as options">
+  <mat-option
+    *ngFor="let option of options"
+    [value]="option"
+    [disabled]="isOptionDisabled(option)"
+    class="custom-option"
+  >
+    <opti-checkbox
+      [checked]="isSelected(option)"
+      [disabled]="isOptionDisabled(option)"
+      (click)="$event.stopPropagation()"
+      (checkboxChange)="toggleSelection(option)"
+      [noFormGroup]="true"
+      [title]="
+        searchPlaceholder() === AddPanelType.BillingGroup
+          ? option.name + ' (' + option.id + ')'
+          : option.name
+      "
+    >
+    </opti-checkbox>
+  </mat-option>
+</ng-container>
 
-        <ng-container *ngIf="filteredOptions | async as options">
-          <mat-option
-            *ngFor="let option of options"
-            [value]="option"
-            class="custom-option"
-          >
-            <opti-checkbox
-              [checked]="isSelected(option)"
-              (click)="$event.stopPropagation()"
-              (checkboxChange)="toggleSelection(option)"
-              [noFormGroup]="true"
-              [title]="
-                searchPlaceholder() === AddPanelType.BillingGroup
-                  ? option.name + ' (' + option.id + ')'
-                  : option.name
-              "
-            >
-            </opti-checkbox>
-          </mat-option>
-        </ng-container>
-      </mat-autocomplete>
-    </opti-form-field>
-  </div>
-</form>
+The two important additions are:
+
+[disabled]="isOptionDisabled(option)"
+
+on mat-option, and:
+
+[disabled]="isOptionDisabled(option)"
+
+on opti-checkbox.
 
 
+---
 
+2. Add this method to your TS
 
+Add this inside SearchAutocompleteComponent:
 
-
-import { AsyncPipe, CommonModule } from '@angular/common';
-import {
-  Component,
-  computed,
-  DestroyRef,
-  EventEmitter,
-  input,
-  Input,
-  OnInit,
-  Output,
-  ViewChild,
-} from '@angular/core';
-import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { FormControl, ReactiveFormsModule } from '@angular/forms';
-import {
-  MatAutocompleteModule,
-  MatAutocompleteSelectedEvent,
-  MatAutocompleteTrigger,
-} from '@angular/material/autocomplete';
-import { MatDividerModule } from '@angular/material/divider';
-import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatIconModule } from '@angular/material/icon';
-import { MatInputModule } from '@angular/material/input';
-import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { merge, Observable, of } from 'rxjs';
-import {
-  catchError,
-  debounceTime,
-  distinctUntilChanged,
-  map,
-  startWith,
-  switchMap,
-  tap,
-} from 'rxjs/operators';
-import { BillingGroupService } from '../../../services/billing-group/billing-group.service';
-import { CustomerService } from '../../../services/customer/customer.service';
-import { LocationService } from '../../../services/location/location.service';
-import { UtilityService } from '../../../services/utility.service';
-import { AddPanelType } from '../../enums/search-autocomplete.enum';
-import {
-  OptiFormFieldComponent,
-  OptiCheckboxComponent,
-} from '@ofl-next/advship-core-components';
-
-@Component({
-  selector: 'cah-search-autocomplete',
-  imports: [
-    CommonModule,
-    ReactiveFormsModule,
-    MatFormFieldModule,
-    MatInputModule,
-    MatAutocompleteModule,
-    AsyncPipe,
-    MatIconModule,
-    OptiFormFieldComponent,
-    MatDividerModule,
-    MatProgressSpinnerModule,
-    OptiCheckboxComponent,
-  ],
-
-  templateUrl: './search-autocomplete.component.html',
-  styleUrls: ['./search-autocomplete.component.scss'],
-})
-export class SearchAutocompleteComponent implements OnInit {
-  readonly searchPlaceholder = input.required<string>();
-  @Input({ required: true }) control!: FormControl<
-    { id: string; name: string }[] | null
-  >;
-  @Output() focusEvent = new EventEmitter<void>();
-  @Output() blurEvent = new EventEmitter<void>();
-  @ViewChild(MatAutocompleteTrigger)
-  autocompleteTrigger!: MatAutocompleteTrigger;
-  searchInputControl = new FormControl<string | null>('');
-  isLoading = false;
-  hasError = false;
-  noResults = false;
-  filteredOptions: Observable<any[]> | undefined;
-  filteredOptionsArray: any[] = [];
-  AddPanelType = AddPanelType;
-
-  private readonly lowerCasePlaceholder = computed(() =>
-    this.searchPlaceholder().toLowerCase()
+isOptionDisabled(option: any): boolean {
+  return (
+    this.searchPlaceholder() === AddPanelType.Location &&
+    option?.active === false
   );
+}
 
-  readonly modifiedPlaceHolder = computed(
-    () => `Enter ${this.lowerCasePlaceholder()} name`
-  );
-  readonly loadingPlaceholder = computed(
-    () => `Searching ${this.lowerCasePlaceholder()}`
-  );
+So the logic is specifically:
 
-  searchValue = '';
-  inputMaxCharacters = 100;
+Panel = Location
+        +
+active = false
+        ↓
+disabled = true
 
-  private readonly placeholderInput$ = toObservable(this.searchPlaceholder);
+For Customer and Billing Group, this method returns false, so their existing behavior doesn't change.
 
-  constructor(
-    private readonly customerService: CustomerService,
-    private readonly billingGroupService: BillingGroupService,
-    private readonly locationService: LocationService,
-    private readonly utilService: UtilityService,
-    private readonly destroyRef: DestroyRef
-  ) {}
 
-  ngOnInit() {
-    merge(this.placeholderInput$, this.utilService.selectedContext$)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => this.initializeSearch());
+---
+
+3. Modify onOptionSelected()
+
+Your current method is:
+
+onOptionSelected(event: MatAutocompleteSelectedEvent): void {
+  const selectedEntry = event.option.value;
+  const current = this.control.value || [];
+  if (!current.some((item) => item.id === selectedEntry.id)) {
+    this.control.setValue([...current, selectedEntry]);
+  }
+  this.searchInputControl.setValue('');
+}
+
+Change it to:
+
+onOptionSelected(event: MatAutocompleteSelectedEvent): void {
+  const selectedEntry = event.option.value;
+
+  // Safety check: inactive locations must never be selected
+  if (this.isOptionDisabled(selectedEntry)) {
+    return;
   }
 
-  initializeSearch() {
-    this.setupFilteredOptions();
-    this.control.reset();
+  const current = this.control.value || [];
+
+  if (!current.some((item) => item.id === selectedEntry.id)) {
+    this.control.setValue([...current, selectedEntry]);
   }
 
-  setupFilteredOptions() {
-    this.filteredOptions = this.searchInputControl.valueChanges.pipe(
-      startWith(''),
-      debounceTime(300),
-      distinctUntilChanged(),
-      tap(() => {
-        this.filteredOptionsArray = [];
-        this.isLoading = true;
-        this.hasError = false;
-        this.noResults = false;
-      }),
-      switchMap((value: any) => this.getSearchObservable(value)),
-      tap((options: any[]) => (this.filteredOptionsArray = options))
-    );
-  }
+  this.searchInputControl.setValue('');
+}
 
-  onFocus() {
-    this.focusEvent.emit();
-  }
+This is a second layer of protection.
 
-  onBlur() {
-    this.blurEvent.emit();
-  }
 
-  onOptionSelected(event: MatAutocompleteSelectedEvent): void {
-    const selectedEntry = event.option.value;
-    const current = this.control.value || [];
-    if (!current.some((item) => item.id === selectedEntry.id)) {
-      this.control.setValue([...current, selectedEntry]);
-    }
-    this.searchInputControl.setValue('');
-  }
+---
 
-  clearInput() {
-    this.searchInputControl.setValue('');
-  }
+4. Modify toggleSelection()
 
-  hasMoreThanTenOptions(): boolean {
-    return this.filteredOptionsArray.length > 10;
-  }
+This is actually very important in your implementation because your checkbox has:
 
-  isSelected(option: any): boolean {
-    const current = this.control.value || [];
-    return current.some((item) => item.id === option.id);
-  }
+(checkboxChange)="toggleSelection(option)"
 
-  toggleSelection(option: any) {
-    const current = this.control.value || [];
-    if (this.isSelected(option)) {
-      this.control.setValue(current.filter((item) => item.id !== option.id));
-    } else {
-      this.control.setValue([...current, option]);
-    }
-  }
+So change your current method:
 
-  private getSearchObservable(value: string): Observable<any[]> {
-    if (typeof value !== 'string') {
-      this.isLoading = false;
-      return of([]);
-    }
-
-    this.searchValue = value.toLowerCase();
-    this.isLoading = true;
-    this.hasError = false;
-
-    switch (this.searchPlaceholder()) {
-      case AddPanelType.Customer:
-        return this.customerService.search(this.searchValue).pipe(
-          map((res) =>
-            (res?.customers || []).map((val: any) => ({
-              id: val.customerId,
-              name: val.name,
-              active: val.active,
-            }))
-          ),
-          switchMap((transformed) => this.handleSearch(of(transformed)))
-        );
-      case AddPanelType.BillingGroup:
-        return this.billingGroupService.search(this.searchValue).pipe(
-          map((res) =>
-            (res?.customerBillingGroups || []).map((bg: any) => ({
-              id: bg.id,
-              name: bg.billingGroupName,
-              active: bg.active,
-            }))
-          ),
-          switchMap((transformed) => this.handleSearch(of(transformed)))
-        );
-      case AddPanelType.Location:
-        return this.locationService.search(this.searchValue).pipe(
-          map((res) =>
-            (res?.customerLocations || []).map((loc: any) => ({
-              id: loc.id,
-              name: loc.name,
-              active: loc.active,
-            }))
-          ),
-          switchMap((transformed) => this.handleSearch(of(transformed)))
-        );
-      default:
-        this.isLoading = false;
-        return of([]);
-    }
-  }
-
-  private handleSearch(search$: Observable<any[]>): Observable<any[]> {
-    return search$.pipe(
-      map((options) =>
-        options.filter((item) =>
-          item?.name?.toLowerCase().includes(this.searchValue)
-        )
-      ),
-      tap((filtered) => {
-        this.noResults = filtered.length === 0;
-        this.isLoading = false;
-      }),
-      catchError(() => {
-        this.isLoading = false;
-        this.hasError = true;
-        return of([]);
-      })
-    );
+toggleSelection(option: any) {
+  const current = this.control.value || [];
+  if (this.isSelected(option)) {
+    this.control.setValue(current.filter((item) => item.id !== option.id));
+  } else {
+    this.control.setValue([...current, option]);
   }
 }
+
+to:
+
+toggleSelection(option: any): void {
+  // Do not allow inactive locations to be selected
+  if (this.isOptionDisabled(option)) {
+    return;
+  }
+
+  const current = this.control.value || [];
+
+  if (this.isSelected(option)) {
+    this.control.setValue(
+      current.filter((item) => item.id !== option.id)
+    );
+  } else {
+    this.control.setValue([...current, option]);
+  }
+}
+
+Now even if somebody somehow triggers the checkbox event, an inactive Location cannot enter selectedItemsControl.
+
+
+---
+
+5. Your Location API mapping is already correct
+
+Keep this exactly as you currently have it:
+
+case AddPanelType.Location:
+  return this.locationService.search(this.searchValue).pipe(
+    map((res) =>
+      (res?.customerLocations || []).map((loc: any) => ({
+        id: loc.id,
+        name: loc.name,
+        active: loc.active,
+      }))
+    ),
+    switchMap((transformed) => this.handleSearch(of(transformed)))
+  );
+
+You do not need to filter this response.
+
+That's important because you want inactive locations visible but disabled.
+
+
+---
+
+6. For testing without the API
+
+You can temporarily mock the Location API response directly in your TS.
+
+Add this property inside your class:
+
+private readonly mockLocationResponse = {
+  customerLocations: [
+    {
+      id: 'LOC001',
+      name: 'Pune',
+      active: true,
+    },
+    {
+      id: 'LOC002',
+      name: 'Mumbai',
+      active: false,
+    },
+    {
+      id: 'LOC003',
+      name: 'Bangalore',
+      active: true,
+    },
+    {
+      id: 'LOC004',
+      name: 'Delhi',
+      active: false,
+    },
+    {
+      id: 'LOC005',
+      name: 'Hyderabad',
+      active: true,
+    },
+  ],
+};
+
+Put it somewhere around:
+
+searchValue = '';
+inputMaxCharacters = 100;
+
+For example:
+
+searchValue = '';
+inputMaxCharacters = 100;
+
+private readonly mockLocationResponse = {
+  customerLocations: [
+    {
+      id: 'LOC001',
+      name: 'Pune',
+      active: true,
+    },
+    {
+      id: 'LOC002',
+      name: 'Mumbai',
+      active: false,
+    },
+    {
+      id: 'LOC003',
+      name: 'Bangalore',
+      active: true,
+    },
+    {
+      id: 'LOC004',
+      name: 'Delhi',
+      active: false,
+    },
+    {
+      id: 'LOC005',
+      name: 'Hyderabad',
+      active: true,
+    },
+  ],
+};
+
+
+---
+
+7. Temporarily use the mock response
+
+Now temporarily replace your Location case with:
+
+case AddPanelType.Location:
+  return of(this.mockLocationResponse).pipe(
+    map((res) =>
+      (res?.customerLocations || []).map((loc: any) => ({
+        id: loc.id,
+        name: loc.name,
+        active: loc.active,
+      }))
+    ),
+    switchMap((transformed) => this.handleSearch(of(transformed)))
+  );
+
+You already import:
+
+import { merge, Observable, of } from 'rxjs';
+
+so no new import is required.
+
+
+---
+
+8. What you should see
+
+When you select Location and click the search field, you should get:
+
+Pune          ☑ / selectable
+Mumbai        ☐ / disabled
+Bangalore     ☑ / selectable
+Delhi         ☐ / disabled
+Hyderabad     ☑ / selectable
+
+The inactive ones:
+
+Mumbai
+Delhi
+
+should remain visible but be disabled.
+
+You should not be able to select them either by clicking the row or by clicking the checkbox.
+
+
+---
+
+9. Full relevant TS after changes
+
+So your important methods should look like this:
+
+isOptionDisabled(option: any): boolean {
+  return (
+    this.searchPlaceholder() === AddPanelType.Location &&
+    option?.active === false
+  );
+}
+
+onOptionSelected(event: MatAutocompleteSelectedEvent): void {
+  const selectedEntry = event.option.value;
+
+  if (this.isOptionDisabled(selectedEntry)) {
+    return;
+  }
+
+  const current = this.control.value || [];
+
+  if (!current.some((item) => item.id === selectedEntry.id)) {
+    this.control.setValue([...current, selectedEntry]);
+  }
+
+  this.searchInputControl.setValue('');
+}
+
+isSelected(option: any): boolean {
+  const current = this.control.value || [];
+  return current.some((item) => item.id === option.id);
+}
+
+toggleSelection(option: any): void {
+  if (this.isOptionDisabled(option)) {
+    return;
+  }
+
+  const current = this.control.value || [];
+
+  if (this.isSelected(option)) {
+    this.control.setValue(
+      current.filter((item) => item.id !== option.id)
+    );
+  } else {
+    this.control.setValue([...current, option]);
+  }
+}
+
+And the HTML:
+
+<ng-container *ngIf="filteredOptions | async as options">
+  <mat-option
+    *ngFor="let option of options"
+    [value]="option"
+    [disabled]="isOptionDisabled(option)"
+    class="custom-option"
+  >
+    <opti-checkbox
+      [checked]="isSelected(option)"
+      [disabled]="isOptionDisabled(option)"
+      (click)="$event.stopPropagation()"
+      (checkboxChange)="toggleSelection(option)"
+      [noFormGroup]="true"
+      [title]="
+        searchPlaceholder() === AddPanelType.BillingGroup
+          ? option.name + ' (' + option.id + ')'
+          : option.name
+      "
+    >
+    </opti-checkbox>
+  </mat-option>
+</ng-container>
+
+One thing to verify
+
+Your OptiCheckboxComponent needs to support a disabled input. If IntelliSense/compiler gives an error on:
+
+[disabled]="isOptionDisabled(option)"
+
+for opti-checkbox, don't remove the protection from toggleSelection(). The selection will still be prevented, but we'll need to check the OptiCheckboxComponent API to get the correct property for its disabled/greyed-out appearance.
+
+Also, once you're done testing, remove mockLocationResponse and restore the real:
+
+this.locationService.search(this.searchValue)
+
+The actual API response you need is essentially:
+
+{
+  "customerLocations": [
+    {
+      "id": "LOC001",
+      "name": "Pune",
+      "active": true
+    },
+    {
+      "id": "LOC002",
+      "name": "Mumbai",
+      "active": false
+    }
+  ]
+}
+
+Your existing mapping already converts this into exactly the structure required.
