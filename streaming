@@ -1,91 +1,79 @@
-Yes. Since you want to test the ConfigurationManagementComponent Location dropdown without depending on the real BE, you can temporarily replace the real locationService.list() response with a demo response.
+Perfect — now that we can see the actual Location model, the demo response should use all four fields:
 
-Your existing generateDropdownOptions() already supports both disabled and tooltip, so this is a good way to test the complete behavior.
+name
+id
+active
+facilityId
 
-1. Add this demo response in configuration-management.component.ts
+For your current ConfigurationManagementComponent, I recommend mocking the response as Location[].
 
-Add it inside ConfigurationManagementComponent, preferably just below:
+1. Import Location
 
-protected isFechingBillingGroups = false;
-protected isFechingLocations = false;
+At the top of configuration-management.component.ts, you currently have:
+
+import { ContextEntity } from '../../types/context-entity';
 
 Add:
 
-private readonly demoLocations: ContextEntity[] = [
-  {
-    facilityId: 'LOC-001',
-    name: 'Pune Location',
-    active: true,
-  },
-  {
-    facilityId: 'LOC-002',
-    name: 'Mumbai Location',
-    active: false,
-  },
-  {
-    facilityId: 'LOC-003',
-    name: 'Bangalore Location',
-    active: true,
-  },
-  {
-    facilityId: 'LOC-004',
-    name: 'Delhi Location',
-    active: false,
-  },
-  {
-    facilityId: 'LOC-005',
-    name: 'Hyderabad Location',
-    active: true,
-  },
-];
-
-One thing to check
-
-I'm assuming your ContextEntity interface has:
-
-facilityId
-name
-active
-
-because your existing code already uses:
-
-entity.facilityId
-entity.name
-entity.active
-
-If TypeScript complains about the demo object's shape, temporarily use:
-
-private readonly demoLocations: any[] = [
-
-instead.
+import { Location } from '../../models/location';
 
 
 ---
 
-2. Replace only the Location API call
+2. Add the demo response
+
+Inside ConfigurationManagementComponent, add this near your other properties:
+
+private readonly demoLocations: Location[] = [
+  {
+    name: 'Pune Location',
+    id: 'LOC001',
+    active: true,
+    facilityId: 'FAC001',
+  },
+  {
+    name: 'Mumbai Location',
+    id: 'LOC002',
+    active: false,
+    facilityId: 'FAC002',
+  },
+  {
+    name: 'Bangalore Location',
+    id: 'LOC003',
+    active: true,
+    facilityId: 'FAC003',
+  },
+  {
+    name: 'Delhi Location',
+    id: 'LOC004',
+    active: false,
+    facilityId: 'FAC004',
+  },
+  {
+    name: 'Hyderabad Location',
+    id: 'LOC005',
+    active: true,
+    facilityId: 'FAC005',
+  },
+];
+
+This gives you:
+
+Location	id	active	facilityId
+
+Pune Location	LOC001	true	FAC001
+Mumbai Location	LOC002	false	FAC002
+Bangalore Location	LOC003	true	FAC003
+Delhi Location	LOC004	false	FAC004
+Hyderabad Location	LOC005	true	FAC005
+
+
+
+---
+
+3. Replace the real Location API temporarily
 
 You currently have:
-
-this.billingGroupControl.valueChanges
-  .pipe(
-    tap(() => this.locationControl.reset()),
-    filter((billingGroup) => billingGroup !== null),
-    tap(() => (this.isFechingLocations = true)),
-    switchMap((billingGroup) =>
-      this.locationService.list(
-        this.customerControl.value!.customerId,
-        billingGroup.billingGroupId
-      )
-    ),
-    map((locations) =>
-      this.generateDropdownOptions(locations, AddPanelType.Location)
-    ),
-    tap(() => (this.isFechingLocations = false))
-  )
-
-Change only the switchMap part.
-
-Current
 
 switchMap((billingGroup) =>
   this.locationService.list(
@@ -94,25 +82,11 @@ switchMap((billingGroup) =>
   )
 ),
 
-Temporarily change to
+Temporarily replace only this part with:
 
 switchMap(() => of(this.demoLocations)),
 
-But you'll need to import of.
-
-Your current import is:
-
-import {
-  debounceTime,
-  filter,
-  map,
-  mergeMap,
-  switchMap,
-  take,
-  tap,
-} from 'rxjs';
-
-Change it to:
+So first add of to your RxJS import:
 
 import {
   debounceTime,
@@ -125,20 +99,24 @@ import {
   tap,
 } from 'rxjs';
 
-So your complete Location subscription becomes:
+Then your complete Location section becomes:
 
 this.billingGroupControl.valueChanges
   .pipe(
     tap(() => this.locationControl.reset()),
     filter((billingGroup) => billingGroup !== null),
     tap(() => (this.isFechingLocations = true)),
+
+    // TEMPORARY DEMO RESPONSE
     switchMap(() => of(this.demoLocations)),
+
     map((locations) =>
       this.generateDropdownOptions(
         locations,
         AddPanelType.Location
       )
     ),
+
     tap(() => (this.isFechingLocations = false))
   )
   .subscribe((locations) => {
@@ -156,25 +134,12 @@ this.billingGroupControl.valueChanges
     }
   });
 
-Now the real Location API will not be called.
-
 
 ---
 
-3. Make sure your generateDropdownOptions() is like this
+4. Make sure generateDropdownOptions() is correct
 
-Since your requirement is:
-
-Location inactive → disabled
-
-Customer inactive → NOT disabled
-
-Billing Group inactive → NOT disabled
-
-Tooltip only Location
-
-
-use:
+Since your requirement is disable inactive Locations only and tooltip only for Locations, use:
 
 private generateDropdownOptions(
   entities: ContextEntity[],
@@ -200,62 +165,43 @@ private generateDropdownOptions(
   }));
 }
 
-This is important because your current code has:
+Now your demo data will test both requirements at the same time:
 
-disabled: !entity.active
+active: false → Location disabled
 
-which disables inactive Customers and Billing Groups too.
+active: true → Location selectable
 
+facilityId → tooltip
 
----
+Customer → no tooltip/no active-based disabling
 
-4. What you should see
+Billing Group → no tooltip/no active-based disabling
 
-Your demo response contains:
-
-Pune Location       active = true
-Mumbai Location     active = false
-Bangalore Location  active = true
-Delhi Location      active = false
-Hyderabad Location  active = true
-
-Therefore the Location dropdown should behave like:
-
-Location	Active	Disabled	Tooltip
-
-Pune Location	✅	❌	LOC-001
-Mumbai Location	❌	✅	LOC-002
-Bangalore Location	✅	❌	LOC-003
-Delhi Location	❌	✅	LOC-004
-Hyderabad Location	✅	❌	LOC-005
-
-
-So when you hover over a Location, the tooltip should show its facilityId.
 
 
 ---
 
-5. After testing
+One thing about id vs facilityId
 
-Once you're happy with it, revert:
+Your Location model has both:
 
-switchMap(() => of(this.demoLocations)),
+id: string;
+facilityId: string;
 
-back to:
+You said you want the ID in the tooltip. If by ID you mean the actual id, change:
 
-switchMap((billingGroup) =>
-  this.locationService.list(
-    this.customerControl.value!.customerId,
-    billingGroup.billingGroupId
-  )
-),
+tooltip:
+  type === AddPanelType.Location
+    ? entity.facilityId
+    : undefined,
 
-Then remove:
+to:
 
-private readonly demoLocations = [...]
+tooltip:
+  type === AddPanelType.Location
+    ? entity.id
+    : undefined,
 
-and remove of from the RxJS import if nothing else uses it.
+If the business requirement specifically says Facility ID, keep entity.facilityId.
 
-One caveat about your tooltip
-
-Your [showTooltip]="true" is already present on the Location opti-dropdown, so that's correct. Whether the tooltip field is actually rendered depends on how OptiDropdownComponent consumes the option object. Your existing code strongly suggests that tooltip is the intended property, so this demo will let you verify it immediately.
+For your current code, I'd use facilityId because your existing prefillLocationId() logic already treats facilityId as the Location identifier.
