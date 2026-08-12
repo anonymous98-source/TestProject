@@ -1,211 +1,180 @@
-Yes. Looking at your actual ConfigurationManagementComponent, you already have almost everything needed. Since you want the tooltip only for Location, and you want the Location ID/facilityId displayed as tooltip text, I would make the following changes.
+Yes. Since you want to test the ConfigurationManagementComponent Location dropdown without depending on the real BE, you can temporarily replace the real locationService.list() response with a demo response.
 
-1. configuration-management.component.html
+Your existing generateDropdownOptions() already supports both disabled and tooltip, so this is a good way to test the complete behavior.
 
-Your Location dropdown already has:
+1. Add this demo response in configuration-management.component.ts
 
-[showTooltip]="true"
+Add it inside ConfigurationManagementComponent, preferably just below:
 
-Keep it exactly as it is:
+protected isFechingBillingGroups = false;
+protected isFechingLocations = false;
 
-<opti-dropdown
-  [class]="
-    'flex flex-align-items-center flex-space-between config-mgmt ' +
-    (isLocationsDropdownDisabled ? 'disabled' : '')
-  "
-  fieldControlName="location"
-  [placeholder]="
-    isFechingLocations ? config.LOADING : config.LOCATION_PLACEHOLDER
-  "
-  [options]="availableLocations"
-  [form]="contextSelectionForm"
-  [disableDropdown]="isLocationsDropdownDisabled"
-  [isDropdownDisabled]="isLocationsDropdownDisabled"
-  [useSingleSelect]="true"
-  [showTooltip]="true"
-></opti-dropdown>
+Add:
 
-Customer and Billing Group
-
-Do not add [showTooltip]="true" to these.
-
-So:
-
-<opti-dropdown
-  ...
-  [options]="availableCustomers"
-  [form]="contextSelectionForm"
-  [useSingleSelect]="true"
-></opti-dropdown>
-
-and:
-
-<opti-dropdown
-  ...
-  [options]="availableBillingGroups"
-  [form]="contextSelectionForm"
-  [disableDropdown]="isBillingGroupsDropdownDisabled"
-  [isDropdownDisabled]="isBillingGroupsDropdownDisabled"
-  [useSingleSelect]="true"
-></opti-dropdown>
-
-remain unchanged.
-
-
----
-
-2. configuration-management.component.ts
-
-You already have this:
-
-private generateDropdownOptions(
-  entites: ContextEntity[],
-  type: AddPanelType
-) {
-  return entites.map((entity: any) => ({
-    value: entity,
-    viewValue:
-      type === AddPanelType.BillingGroup
-        ? `${entity.name} (${(entity as BillingGroup).billingGroupId})`
-        : entity.name,
-    disabled: !entity.active,
-
-    tooltip:
-      type === AddPanelType.Location
-        ? entity.facilityId
-        : undefined,
-  }));
-}
-
-The tooltip part is already correct if facilityId is the ID you want displayed.
-
-I'd just clean it up slightly:
-
-private generateDropdownOptions(
-  entities: ContextEntity[],
-  type: AddPanelType
-) {
-  return entities.map((entity: any) => ({
-    value: entity,
-    viewValue:
-      type === AddPanelType.BillingGroup
-        ? `${entity.name} (${(entity as BillingGroup).billingGroupId})`
-        : entity.name,
-
-    disabled: !entity.active,
-
-    tooltip:
-      type === AddPanelType.Location
-        ? entity.facilityId
-        : undefined,
-  }));
-}
-
-So your resulting Location option will look conceptually like:
-
-{
-  value: {
-    facilityId: 'LOC123',
-    name: 'Pune',
-    active: true
+private readonly demoLocations: ContextEntity[] = [
+  {
+    facilityId: 'LOC-001',
+    name: 'Pune Location',
+    active: true,
   },
-  viewValue: 'Pune',
-  disabled: false,
-  tooltip: 'LOC123'
-}
-
-While Customer will be:
-
-{
-  value: {
-    customerId: 'CUS123',
-    name: 'ABC',
-    active: true
+  {
+    facilityId: 'LOC-002',
+    name: 'Mumbai Location',
+    active: false,
   },
-  viewValue: 'ABC',
-  disabled: false,
-  tooltip: undefined
-}
-
-And Billing Group:
-
-{
-  value: {
-    billingGroupId: 'BG123',
-    name: 'BG One',
-    active: true
+  {
+    facilityId: 'LOC-003',
+    name: 'Bangalore Location',
+    active: true,
   },
-  viewValue: 'BG One',
-  disabled: false,
-  tooltip: undefined
-}
+  {
+    facilityId: 'LOC-004',
+    name: 'Delhi Location',
+    active: false,
+  },
+  {
+    facilityId: 'LOC-005',
+    name: 'Hyderabad Location',
+    active: true,
+  },
+];
 
-Therefore only Location gets tooltip text.
+One thing to check
 
+I'm assuming your ContextEntity interface has:
 
----
+facilityId
+name
+active
 
-3. If by "ID" you mean id instead of facilityId
-
-This is important because your code uses:
+because your existing code already uses:
 
 entity.facilityId
+entity.name
+entity.active
 
-for Location.
+If TypeScript complains about the demo object's shape, temporarily use:
 
-You also have:
+private readonly demoLocations: any[] = [
 
-const foundLocation = this.availableLocations.find(
-  (location) => location.value.facilityId === this.prefillLocationId()
-);
-
-So based on your current model, facilityId appears to be the Location identifier.
-
-If the API actually gives:
-
-{
-  "id": "12345",
-  "name": "Pune",
-  "active": true
-}
-
-and you specifically want id, then change:
-
-tooltip:
-  type === AddPanelType.Location
-    ? entity.facilityId
-    : undefined,
-
-to:
-
-tooltip:
-  type === AddPanelType.Location
-    ? entity.id
-    : undefined,
-
-If the Location API gives facilityId, keep your current implementation.
+instead.
 
 
 ---
 
-4. One issue I noticed in your current code
+2. Replace only the Location API call
 
 You currently have:
 
-disabled: !entity.active,
+this.billingGroupControl.valueChanges
+  .pipe(
+    tap(() => this.locationControl.reset()),
+    filter((billingGroup) => billingGroup !== null),
+    tap(() => (this.isFechingLocations = true)),
+    switchMap((billingGroup) =>
+      this.locationService.list(
+        this.customerControl.value!.customerId,
+        billingGroup.billingGroupId
+      )
+    ),
+    map((locations) =>
+      this.generateDropdownOptions(locations, AddPanelType.Location)
+    ),
+    tap(() => (this.isFechingLocations = false))
+  )
 
-This applies to Customer, Billing Group AND Location.
+Change only the switchMap part.
 
-So if your requirement is still what you mentioned earlier — inactive locations should be disabled, but Customers and Billing Groups should not be affected — then you should change this too.
+Current
 
-Use:
+switchMap((billingGroup) =>
+  this.locationService.list(
+    this.customerControl.value!.customerId,
+    billingGroup.billingGroupId
+  )
+),
 
-disabled:
-  type === AddPanelType.Location
-    ? entity.active === false
-    : false,
+Temporarily change to
 
-So the complete method becomes:
+switchMap(() => of(this.demoLocations)),
+
+But you'll need to import of.
+
+Your current import is:
+
+import {
+  debounceTime,
+  filter,
+  map,
+  mergeMap,
+  switchMap,
+  take,
+  tap,
+} from 'rxjs';
+
+Change it to:
+
+import {
+  debounceTime,
+  filter,
+  map,
+  mergeMap,
+  of,
+  switchMap,
+  take,
+  tap,
+} from 'rxjs';
+
+So your complete Location subscription becomes:
+
+this.billingGroupControl.valueChanges
+  .pipe(
+    tap(() => this.locationControl.reset()),
+    filter((billingGroup) => billingGroup !== null),
+    tap(() => (this.isFechingLocations = true)),
+    switchMap(() => of(this.demoLocations)),
+    map((locations) =>
+      this.generateDropdownOptions(
+        locations,
+        AddPanelType.Location
+      )
+    ),
+    tap(() => (this.isFechingLocations = false))
+  )
+  .subscribe((locations) => {
+    this.availableLocations = locations;
+
+    if (this.prefillLocationId()) {
+      const foundLocation = this.availableLocations.find(
+        (location) =>
+          location.value.facilityId === this.prefillLocationId()
+      );
+
+      if (foundLocation) {
+        this.locationControl.setValue(foundLocation.value);
+      }
+    }
+  });
+
+Now the real Location API will not be called.
+
+
+---
+
+3. Make sure your generateDropdownOptions() is like this
+
+Since your requirement is:
+
+Location inactive → disabled
+
+Customer inactive → NOT disabled
+
+Billing Group inactive → NOT disabled
+
+Tooltip only Location
+
+
+use:
 
 private generateDropdownOptions(
   entities: ContextEntity[],
@@ -219,13 +188,11 @@ private generateDropdownOptions(
         ? `${entity.name} (${(entity as BillingGroup).billingGroupId})`
         : entity.name,
 
-    // Disable inactive options only for Location
     disabled:
       type === AddPanelType.Location
         ? entity.active === false
         : false,
 
-    // Tooltip only for Location
     tooltip:
       type === AddPanelType.Location
         ? entity.facilityId
@@ -233,16 +200,62 @@ private generateDropdownOptions(
   }));
 }
 
-This gives you exactly:
+This is important because your current code has:
 
-Dropdown	Inactive	Disabled	Tooltip
+disabled: !entity.active
 
-Customer	Yes	❌ No	❌ No
-Customer	No	❌ No	❌ No
-Billing Group	Yes	❌ No	❌ No
-Billing Group	No	❌ No	❌ No
-Location	Yes	✅ Yes	✅ ID
-Location	No	❌ No	✅ ID
+which disables inactive Customers and Billing Groups too.
 
 
-So you don't need to touch updateDropdown() either. It already calls generateDropdownOptions(), meaning newly added Locations will automatically receive the tooltip and disabled state.
+---
+
+4. What you should see
+
+Your demo response contains:
+
+Pune Location       active = true
+Mumbai Location     active = false
+Bangalore Location  active = true
+Delhi Location      active = false
+Hyderabad Location  active = true
+
+Therefore the Location dropdown should behave like:
+
+Location	Active	Disabled	Tooltip
+
+Pune Location	✅	❌	LOC-001
+Mumbai Location	❌	✅	LOC-002
+Bangalore Location	✅	❌	LOC-003
+Delhi Location	❌	✅	LOC-004
+Hyderabad Location	✅	❌	LOC-005
+
+
+So when you hover over a Location, the tooltip should show its facilityId.
+
+
+---
+
+5. After testing
+
+Once you're happy with it, revert:
+
+switchMap(() => of(this.demoLocations)),
+
+back to:
+
+switchMap((billingGroup) =>
+  this.locationService.list(
+    this.customerControl.value!.customerId,
+    billingGroup.billingGroupId
+  )
+),
+
+Then remove:
+
+private readonly demoLocations = [...]
+
+and remove of from the RxJS import if nothing else uses it.
+
+One caveat about your tooltip
+
+Your [showTooltip]="true" is already present on the Location opti-dropdown, so that's correct. Whether the tooltip field is actually rendered depends on how OptiDropdownComponent consumes the option object. Your existing code strongly suggests that tooltip is the intended property, so this demo will let you verify it immediately.
