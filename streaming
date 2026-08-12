@@ -1,75 +1,322 @@
-Add these 11 records to the end of your records array:
+<form>
+  <div
+    matAutocompleteOrigin
+    #origin="matAutocompleteOrigin"
+    class="opti-form-field-origin"
+  >
+    <opti-form-field
+      [label]="''"
+      [forAttribute]="''"
+      [fieldName]="control"
+      [showInlineFields]="true"
+    >
+      <mat-icon matPrefix class="input-mat-icon">search</mat-icon>
+      <input
+        type="text"
+        matInput
+        [formControl]="searchInputControl"
+        [matAutocomplete]="auto"
+        [matAutocompleteConnectedTo]="origin"
+        class="custom-input"
+        [placeholder]="modifiedPlaceHolder()"
+        [maxlength]="inputMaxCharacters"
+        (focus)="onFocus()"
+        (blur)="onBlur()"
+      />
+      <div
+        matSuffix
+        mat-icon-button
+        *ngIf="searchInputControl.value"
+        (click)="clearInput()"
+        class="input-mat-icon"
+      >
+        <mat-icon>close</mat-icon>
+      </div>
 
-{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "200767207" },
-{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "469426823" },
-{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "477654827" },
-{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "477662668" },
-{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "481653363" },
-{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "481664128" },
-{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "589650085" },
-{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "956956960" },
-{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "956961300" },
-{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "957169040" },
-{ "customerId": "f709af99-6e86-4ac4-953d-5b203a3baf1a", "accountNumber": "957177700" }
+      <mat-autocomplete
+        #auto="matAutocomplete"
+        (optionSelected)="onOptionSelected($event)"
+        class="search-box"
+      >
+        <mat-option *ngIf="isLoading">
+          <div class="spinner-option">
+            <mat-spinner diameter="18" class="custom-spinner"></mat-spinner>
+            <span style="margin-left: 10px">
+              {{ loadingPlaceholder() }}
+            </span>
+          </div>
+        </mat-option>
 
-After adding these, your payload will contain 59 records in total.
+        <mat-option *ngIf="noResults" class="no-result">
+          No results found
+        </mat-option>
 
-The images are much clearer now. I extracted the UUIDs and account numbers visible.
+        <ng-container *ngIf="filteredOptions | async as options">
+          <mat-option
+            *ngFor="let option of options"
+            [value]="option"
+            class="custom-option"
+          >
+            <opti-checkbox
+              [checked]="isSelected(option)"
+              (click)="$event.stopPropagation()"
+              (checkboxChange)="toggleSelection(option)"
+              [noFormGroup]="true"
+              [title]="
+                searchPlaceholder() === AddPanelType.BillingGroup
+                  ? option.name + ' (' + option.id + ')'
+                  : option.name
+              "
+            >
+            </opti-checkbox>
+          </mat-option>
+        </ng-container>
+      </mat-autocomplete>
+    </opti-form-field>
+  </div>
+</form>
 
-{
-  "batchId": "394d07ac-a234-453e-a934-9e76f28a980f",
-  "records": [
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "111220867" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "118368010" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "200771470" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "232176598" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "233354856" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "242973313" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "255766570" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "255802895" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "267168830" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "270698905" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "274669802" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "281832450" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "284714695" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "304335831" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "317520140" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "317520247" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "340386388" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "391134049" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "423933887" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "452794969" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "456545122" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "456545785" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "469428702" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "476181607" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "880258389" },
-    { "customerId": "134ce9e8-c44d-441c-83f2-d18082e63b2f", "accountNumber": "903157003" },
 
-    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "200765171" },
-    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "200771529" },
-    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "205628753" },
-    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "367885238" },
-    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "957181520" },
-    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "967633178" },
-    { "customerId": "44db461f-9d7d-4afe-9e08-c0b69642bf52", "accountNumber": "967633453" },
 
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "200771500" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "337872581" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "337880967" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "337890881" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "371736450" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "371736530" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "371737030" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "371737090" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "371737170" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "371737430" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "446454323" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "659273616" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "763288366" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "967634573" },
-    { "customerId": "767226f2-cbd3-4dc5-8373-d60aa9c83ada", "accountNumber": "207073346" }
-  ]
+
+
+
+import { AsyncPipe, CommonModule } from '@angular/common';
+import {
+  Component,
+  computed,
+  DestroyRef,
+  EventEmitter,
+  input,
+  Input,
+  OnInit,
+  Output,
+  ViewChild,
+} from '@angular/core';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { FormControl, ReactiveFormsModule } from '@angular/forms';
+import {
+  MatAutocompleteModule,
+  MatAutocompleteSelectedEvent,
+  MatAutocompleteTrigger,
+} from '@angular/material/autocomplete';
+import { MatDividerModule } from '@angular/material/divider';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatIconModule } from '@angular/material/icon';
+import { MatInputModule } from '@angular/material/input';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { merge, Observable, of } from 'rxjs';
+import {
+  catchError,
+  debounceTime,
+  distinctUntilChanged,
+  map,
+  startWith,
+  switchMap,
+  tap,
+} from 'rxjs/operators';
+import { BillingGroupService } from '../../../services/billing-group/billing-group.service';
+import { CustomerService } from '../../../services/customer/customer.service';
+import { LocationService } from '../../../services/location/location.service';
+import { UtilityService } from '../../../services/utility.service';
+import { AddPanelType } from '../../enums/search-autocomplete.enum';
+import {
+  OptiFormFieldComponent,
+  OptiCheckboxComponent,
+} from '@ofl-next/advship-core-components';
+
+@Component({
+  selector: 'cah-search-autocomplete',
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    MatFormFieldModule,
+    MatInputModule,
+    MatAutocompleteModule,
+    AsyncPipe,
+    MatIconModule,
+    OptiFormFieldComponent,
+    MatDividerModule,
+    MatProgressSpinnerModule,
+    OptiCheckboxComponent,
+  ],
+
+  templateUrl: './search-autocomplete.component.html',
+  styleUrls: ['./search-autocomplete.component.scss'],
+})
+export class SearchAutocompleteComponent implements OnInit {
+  readonly searchPlaceholder = input.required<string>();
+  @Input({ required: true }) control!: FormControl<
+    { id: string; name: string }[] | null
+  >;
+  @Output() focusEvent = new EventEmitter<void>();
+  @Output() blurEvent = new EventEmitter<void>();
+  @ViewChild(MatAutocompleteTrigger)
+  autocompleteTrigger!: MatAutocompleteTrigger;
+  searchInputControl = new FormControl<string | null>('');
+  isLoading = false;
+  hasError = false;
+  noResults = false;
+  filteredOptions: Observable<any[]> | undefined;
+  filteredOptionsArray: any[] = [];
+  AddPanelType = AddPanelType;
+
+  private readonly lowerCasePlaceholder = computed(() =>
+    this.searchPlaceholder().toLowerCase()
+  );
+
+  readonly modifiedPlaceHolder = computed(
+    () => `Enter ${this.lowerCasePlaceholder()} name`
+  );
+  readonly loadingPlaceholder = computed(
+    () => `Searching ${this.lowerCasePlaceholder()}`
+  );
+
+  searchValue = '';
+  inputMaxCharacters = 100;
+
+  private readonly placeholderInput$ = toObservable(this.searchPlaceholder);
+
+  constructor(
+    private readonly customerService: CustomerService,
+    private readonly billingGroupService: BillingGroupService,
+    private readonly locationService: LocationService,
+    private readonly utilService: UtilityService,
+    private readonly destroyRef: DestroyRef
+  ) {}
+
+  ngOnInit() {
+    merge(this.placeholderInput$, this.utilService.selectedContext$)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.initializeSearch());
+  }
+
+  initializeSearch() {
+    this.setupFilteredOptions();
+    this.control.reset();
+  }
+
+  setupFilteredOptions() {
+    this.filteredOptions = this.searchInputControl.valueChanges.pipe(
+      startWith(''),
+      debounceTime(300),
+      distinctUntilChanged(),
+      tap(() => {
+        this.filteredOptionsArray = [];
+        this.isLoading = true;
+        this.hasError = false;
+        this.noResults = false;
+      }),
+      switchMap((value: any) => this.getSearchObservable(value)),
+      tap((options: any[]) => (this.filteredOptionsArray = options))
+    );
+  }
+
+  onFocus() {
+    this.focusEvent.emit();
+  }
+
+  onBlur() {
+    this.blurEvent.emit();
+  }
+
+  onOptionSelected(event: MatAutocompleteSelectedEvent): void {
+    const selectedEntry = event.option.value;
+    const current = this.control.value || [];
+    if (!current.some((item) => item.id === selectedEntry.id)) {
+      this.control.setValue([...current, selectedEntry]);
+    }
+    this.searchInputControl.setValue('');
+  }
+
+  clearInput() {
+    this.searchInputControl.setValue('');
+  }
+
+  hasMoreThanTenOptions(): boolean {
+    return this.filteredOptionsArray.length > 10;
+  }
+
+  isSelected(option: any): boolean {
+    const current = this.control.value || [];
+    return current.some((item) => item.id === option.id);
+  }
+
+  toggleSelection(option: any) {
+    const current = this.control.value || [];
+    if (this.isSelected(option)) {
+      this.control.setValue(current.filter((item) => item.id !== option.id));
+    } else {
+      this.control.setValue([...current, option]);
+    }
+  }
+
+  private getSearchObservable(value: string): Observable<any[]> {
+    if (typeof value !== 'string') {
+      this.isLoading = false;
+      return of([]);
+    }
+
+    this.searchValue = value.toLowerCase();
+    this.isLoading = true;
+    this.hasError = false;
+
+    switch (this.searchPlaceholder()) {
+      case AddPanelType.Customer:
+        return this.customerService.search(this.searchValue).pipe(
+          map((res) =>
+            (res?.customers || []).map((val: any) => ({
+              id: val.customerId,
+              name: val.name,
+              active: val.active,
+            }))
+          ),
+          switchMap((transformed) => this.handleSearch(of(transformed)))
+        );
+      case AddPanelType.BillingGroup:
+        return this.billingGroupService.search(this.searchValue).pipe(
+          map((res) =>
+            (res?.customerBillingGroups || []).map((bg: any) => ({
+              id: bg.id,
+              name: bg.billingGroupName,
+              active: bg.active,
+            }))
+          ),
+          switchMap((transformed) => this.handleSearch(of(transformed)))
+        );
+      case AddPanelType.Location:
+        return this.locationService.search(this.searchValue).pipe(
+          map((res) =>
+            (res?.customerLocations || []).map((loc: any) => ({
+              id: loc.id,
+              name: loc.name,
+              active: loc.active,
+            }))
+          ),
+          switchMap((transformed) => this.handleSearch(of(transformed)))
+        );
+      default:
+        this.isLoading = false;
+        return of([]);
+    }
+  }
+
+  private handleSearch(search$: Observable<any[]>): Observable<any[]> {
+    return search$.pipe(
+      map((options) =>
+        options.filter((item) =>
+          item?.name?.toLowerCase().includes(this.searchValue)
+        )
+      ),
+      tap((filtered) => {
+        this.noResults = filtered.length === 0;
+        this.isLoading = false;
+      }),
+      catchError(() => {
+        this.isLoading = false;
+        this.hasError = true;
+        return of([]);
+      })
+    );
+  }
 }
-
-This includes all 48 records visible across both images, with customerId and accountNumber as strings.
