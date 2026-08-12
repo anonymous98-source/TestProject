@@ -1,1 +1,248 @@
-ghh
+Yes. Looking at your actual ConfigurationManagementComponent, you already have almost everything needed. Since you want the tooltip only for Location, and you want the Location ID/facilityId displayed as tooltip text, I would make the following changes.
+
+1. configuration-management.component.html
+
+Your Location dropdown already has:
+
+[showTooltip]="true"
+
+Keep it exactly as it is:
+
+<opti-dropdown
+  [class]="
+    'flex flex-align-items-center flex-space-between config-mgmt ' +
+    (isLocationsDropdownDisabled ? 'disabled' : '')
+  "
+  fieldControlName="location"
+  [placeholder]="
+    isFechingLocations ? config.LOADING : config.LOCATION_PLACEHOLDER
+  "
+  [options]="availableLocations"
+  [form]="contextSelectionForm"
+  [disableDropdown]="isLocationsDropdownDisabled"
+  [isDropdownDisabled]="isLocationsDropdownDisabled"
+  [useSingleSelect]="true"
+  [showTooltip]="true"
+></opti-dropdown>
+
+Customer and Billing Group
+
+Do not add [showTooltip]="true" to these.
+
+So:
+
+<opti-dropdown
+  ...
+  [options]="availableCustomers"
+  [form]="contextSelectionForm"
+  [useSingleSelect]="true"
+></opti-dropdown>
+
+and:
+
+<opti-dropdown
+  ...
+  [options]="availableBillingGroups"
+  [form]="contextSelectionForm"
+  [disableDropdown]="isBillingGroupsDropdownDisabled"
+  [isDropdownDisabled]="isBillingGroupsDropdownDisabled"
+  [useSingleSelect]="true"
+></opti-dropdown>
+
+remain unchanged.
+
+
+---
+
+2. configuration-management.component.ts
+
+You already have this:
+
+private generateDropdownOptions(
+  entites: ContextEntity[],
+  type: AddPanelType
+) {
+  return entites.map((entity: any) => ({
+    value: entity,
+    viewValue:
+      type === AddPanelType.BillingGroup
+        ? `${entity.name} (${(entity as BillingGroup).billingGroupId})`
+        : entity.name,
+    disabled: !entity.active,
+
+    tooltip:
+      type === AddPanelType.Location
+        ? entity.facilityId
+        : undefined,
+  }));
+}
+
+The tooltip part is already correct if facilityId is the ID you want displayed.
+
+I'd just clean it up slightly:
+
+private generateDropdownOptions(
+  entities: ContextEntity[],
+  type: AddPanelType
+) {
+  return entities.map((entity: any) => ({
+    value: entity,
+    viewValue:
+      type === AddPanelType.BillingGroup
+        ? `${entity.name} (${(entity as BillingGroup).billingGroupId})`
+        : entity.name,
+
+    disabled: !entity.active,
+
+    tooltip:
+      type === AddPanelType.Location
+        ? entity.facilityId
+        : undefined,
+  }));
+}
+
+So your resulting Location option will look conceptually like:
+
+{
+  value: {
+    facilityId: 'LOC123',
+    name: 'Pune',
+    active: true
+  },
+  viewValue: 'Pune',
+  disabled: false,
+  tooltip: 'LOC123'
+}
+
+While Customer will be:
+
+{
+  value: {
+    customerId: 'CUS123',
+    name: 'ABC',
+    active: true
+  },
+  viewValue: 'ABC',
+  disabled: false,
+  tooltip: undefined
+}
+
+And Billing Group:
+
+{
+  value: {
+    billingGroupId: 'BG123',
+    name: 'BG One',
+    active: true
+  },
+  viewValue: 'BG One',
+  disabled: false,
+  tooltip: undefined
+}
+
+Therefore only Location gets tooltip text.
+
+
+---
+
+3. If by "ID" you mean id instead of facilityId
+
+This is important because your code uses:
+
+entity.facilityId
+
+for Location.
+
+You also have:
+
+const foundLocation = this.availableLocations.find(
+  (location) => location.value.facilityId === this.prefillLocationId()
+);
+
+So based on your current model, facilityId appears to be the Location identifier.
+
+If the API actually gives:
+
+{
+  "id": "12345",
+  "name": "Pune",
+  "active": true
+}
+
+and you specifically want id, then change:
+
+tooltip:
+  type === AddPanelType.Location
+    ? entity.facilityId
+    : undefined,
+
+to:
+
+tooltip:
+  type === AddPanelType.Location
+    ? entity.id
+    : undefined,
+
+If the Location API gives facilityId, keep your current implementation.
+
+
+---
+
+4. One issue I noticed in your current code
+
+You currently have:
+
+disabled: !entity.active,
+
+This applies to Customer, Billing Group AND Location.
+
+So if your requirement is still what you mentioned earlier — inactive locations should be disabled, but Customers and Billing Groups should not be affected — then you should change this too.
+
+Use:
+
+disabled:
+  type === AddPanelType.Location
+    ? entity.active === false
+    : false,
+
+So the complete method becomes:
+
+private generateDropdownOptions(
+  entities: ContextEntity[],
+  type: AddPanelType
+) {
+  return entities.map((entity: any) => ({
+    value: entity,
+
+    viewValue:
+      type === AddPanelType.BillingGroup
+        ? `${entity.name} (${(entity as BillingGroup).billingGroupId})`
+        : entity.name,
+
+    // Disable inactive options only for Location
+    disabled:
+      type === AddPanelType.Location
+        ? entity.active === false
+        : false,
+
+    // Tooltip only for Location
+    tooltip:
+      type === AddPanelType.Location
+        ? entity.facilityId
+        : undefined,
+  }));
+}
+
+This gives you exactly:
+
+Dropdown	Inactive	Disabled	Tooltip
+
+Customer	Yes	❌ No	❌ No
+Customer	No	❌ No	❌ No
+Billing Group	Yes	❌ No	❌ No
+Billing Group	No	❌ No	❌ No
+Location	Yes	✅ Yes	✅ ID
+Location	No	❌ No	✅ ID
+
+
+So you don't need to touch updateDropdown() either. It already calls generateDropdownOptions(), meaning newly added Locations will automatically receive the tooltip and disabled state.
