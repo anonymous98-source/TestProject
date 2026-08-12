@@ -1,46 +1,56 @@
-Now that you've shared the actual SearchAutocompleteComponent, we can implement this exactly in this component. You do not need to modify the AdditionPanelComponent HTML/TS for this requirement.
+Based on the actual SearchAutocompleteComponent code you shared, you only need changes in 2 files. Your addition-panel.component.ts/html does not need changes.
 
-The good news is that your Location API response is already mapping active correctly:
+1. search-autocomplete.component.html
 
-{
-  id: loc.id,
-  name: loc.name,
-  active: loc.active,
-}
+Change this
 
-So we only need to make inactive Location options disabled.
+<mat-option
+  *ngFor="let option of options"
+  [value]="option"
+  class="custom-option"
+>
 
-There is one important detail in your code: you have an opti-checkbox inside the mat-option, and its click handler directly calls toggleSelection(option). Therefore, just adding [disabled] to mat-option is not sufficient. We should disable it visually and also protect toggleSelection().
+To this
 
+<mat-option
+  *ngFor="let option of options"
+  [value]="option"
+  [disabled]="isOptionDisabled(option)"
+  class="custom-option"
+>
 
----
+Then your checkbox currently is:
 
-1. Change your HTML
+<opti-checkbox
+  [checked]="isSelected(option)"
+  (click)="$event.stopPropagation()"
+  (checkboxChange)="toggleSelection(option)"
+  [noFormGroup]="true"
+  [title]="
+    searchPlaceholder() === AddPanelType.BillingGroup
+      ? option.name + ' (' + option.id + ')'
+      : option.name
+  "
+>
+</opti-checkbox>
 
-Replace this existing section:
+Change it to:
 
-<ng-container *ngIf="filteredOptions | async as options">
-  <mat-option
-    *ngFor="let option of options"
-    [value]="option"
-    class="custom-option"
-  >
-    <opti-checkbox
-      [checked]="isSelected(option)"
-      (click)="$event.stopPropagation()"
-      (checkboxChange)="toggleSelection(option)"
-      [noFormGroup]="true"
-      [title]="
-        searchPlaceholder() === AddPanelType.BillingGroup
-          ? option.name + ' (' + option.id + ')'
-          : option.name
-      "
-    >
-    </opti-checkbox>
-  </mat-option>
-</ng-container>
+<opti-checkbox
+  [checked]="isSelected(option)"
+  [disabled]="isOptionDisabled(option)"
+  (click)="$event.stopPropagation()"
+  (checkboxChange)="toggleSelection(option)"
+  [noFormGroup]="true"
+  [title]="
+    searchPlaceholder() === AddPanelType.BillingGroup
+      ? option.name + ' (' + option.id + ')'
+      : option.name
+  "
+>
+</opti-checkbox>
 
-with this:
+So the relevant final section becomes:
 
 <ng-container *ngIf="filteredOptions | async as options">
   <mat-option
@@ -65,22 +75,16 @@ with this:
   </mat-option>
 </ng-container>
 
-The two important additions are:
-
-[disabled]="isOptionDisabled(option)"
-
-on mat-option, and:
-
-[disabled]="isOptionDisabled(option)"
-
-on opti-checkbox.
-
 
 ---
 
-2. Add this method to your TS
+2. search-autocomplete.component.ts
 
-Add this inside SearchAutocompleteComponent:
+You need 3 changes here.
+
+Change 1 — Add isOptionDisabled()
+
+Put this method near isSelected():
 
 isOptionDisabled(option: any): boolean {
   return (
@@ -89,22 +93,23 @@ isOptionDisabled(option: any): boolean {
   );
 }
 
-So the logic is specifically:
+This means:
 
-Panel = Location
-        +
-active = false
-        ↓
-disabled = true
+Customer → never disabled based on active
 
-For Customer and Billing Group, this method returns false, so their existing behavior doesn't change.
+Billing Group → never disabled based on active
+
+Location + active: true → enabled
+
+Location + active: false → disabled
+
 
 
 ---
 
-3. Modify onOptionSelected()
+Change 2 — Protect onOptionSelected()
 
-Your current method is:
+Replace your current:
 
 onOptionSelected(event: MatAutocompleteSelectedEvent): void {
   const selectedEntry = event.option.value;
@@ -115,12 +120,11 @@ onOptionSelected(event: MatAutocompleteSelectedEvent): void {
   this.searchInputControl.setValue('');
 }
 
-Change it to:
+with:
 
 onOptionSelected(event: MatAutocompleteSelectedEvent): void {
   const selectedEntry = event.option.value;
 
-  // Safety check: inactive locations must never be selected
   if (this.isOptionDisabled(selectedEntry)) {
     return;
   }
@@ -134,18 +138,12 @@ onOptionSelected(event: MatAutocompleteSelectedEvent): void {
   this.searchInputControl.setValue('');
 }
 
-This is a second layer of protection.
-
 
 ---
 
-4. Modify toggleSelection()
+Change 3 — Protect toggleSelection()
 
-This is actually very important in your implementation because your checkbox has:
-
-(checkboxChange)="toggleSelection(option)"
-
-So change your current method:
+Replace:
 
 toggleSelection(option: any) {
   const current = this.control.value || [];
@@ -156,10 +154,9 @@ toggleSelection(option: any) {
   }
 }
 
-to:
+with:
 
 toggleSelection(option: any): void {
-  // Do not allow inactive locations to be selected
   if (this.isOptionDisabled(option)) {
     return;
   }
@@ -175,14 +172,12 @@ toggleSelection(option: any): void {
   }
 }
 
-Now even if somebody somehow triggers the checkbox event, an inactive Location cannot enter selectedItemsControl.
-
 
 ---
 
-5. Your Location API mapping is already correct
+3. Location API mapping — NO CHANGE
 
-Keep this exactly as you currently have it:
+You already have the correct code:
 
 case AddPanelType.Location:
   return this.locationService.search(this.searchValue).pipe(
@@ -196,225 +191,57 @@ case AddPanelType.Location:
     switchMap((transformed) => this.handleSearch(of(transformed)))
   );
 
-You do not need to filter this response.
+Keep it exactly as it is.
 
-That's important because you want inactive locations visible but disabled.
-
-
----
-
-6. For testing without the API
-
-You can temporarily mock the Location API response directly in your TS.
-
-Add this property inside your class:
-
-private readonly mockLocationResponse = {
-  customerLocations: [
-    {
-      id: 'LOC001',
-      name: 'Pune',
-      active: true,
-    },
-    {
-      id: 'LOC002',
-      name: 'Mumbai',
-      active: false,
-    },
-    {
-      id: 'LOC003',
-      name: 'Bangalore',
-      active: true,
-    },
-    {
-      id: 'LOC004',
-      name: 'Delhi',
-      active: false,
-    },
-    {
-      id: 'LOC005',
-      name: 'Hyderabad',
-      active: true,
-    },
-  ],
-};
-
-Put it somewhere around:
-
-searchValue = '';
-inputMaxCharacters = 100;
-
-For example:
-
-searchValue = '';
-inputMaxCharacters = 100;
-
-private readonly mockLocationResponse = {
-  customerLocations: [
-    {
-      id: 'LOC001',
-      name: 'Pune',
-      active: true,
-    },
-    {
-      id: 'LOC002',
-      name: 'Mumbai',
-      active: false,
-    },
-    {
-      id: 'LOC003',
-      name: 'Bangalore',
-      active: true,
-    },
-    {
-      id: 'LOC004',
-      name: 'Delhi',
-      active: false,
-    },
-    {
-      id: 'LOC005',
-      name: 'Hyderabad',
-      active: true,
-    },
-  ],
-};
+This is important because active is being carried from API → autocomplete.
 
 
 ---
 
-7. Temporarily use the mock response
+4. addition-panel.component.html — NO CHANGE
 
-Now temporarily replace your Location case with:
+Keep:
 
-case AddPanelType.Location:
-  return of(this.mockLocationResponse).pipe(
-    map((res) =>
-      (res?.customerLocations || []).map((loc: any) => ({
-        id: loc.id,
-        name: loc.name,
-        active: loc.active,
-      }))
-    ),
-    switchMap((transformed) => this.handleSearch(of(transformed)))
-  );
+<cah-search-autocomplete
+  [searchPlaceholder]="panelType"
+  [control]="selectedItemsControl">
+</cah-search-autocomplete>
 
-You already import:
-
-import { merge, Observable, of } from 'rxjs';
-
-so no new import is required.
+You don't need to add anything here.
 
 
 ---
 
-8. What you should see
+5. addition-panel.component.ts — NO CHANGE
 
-When you select Location and click the search field, you should get:
+Your existing Location save code is already correct:
 
-Pune          ☑ / selectable
-Mumbai        ☐ / disabled
-Bangalore     ☑ / selectable
-Delhi         ☐ / disabled
-Hyderabad     ☑ / selectable
+payload = selectedItems.map((item: ContextEntity) => ({
+  id: item.id,
+  name: item.name,
+  active: item.active,
+}));
 
-The inactive ones:
-
-Mumbai
-Delhi
-
-should remain visible but be disabled.
-
-You should not be able to select them either by clicking the row or by clicking the checkbox.
+Don't touch it.
 
 
 ---
 
-9. Full relevant TS after changes
+Final file-wise summary
 
-So your important methods should look like this:
+File	Change
 
-isOptionDisabled(option: any): boolean {
-  return (
-    this.searchPlaceholder() === AddPanelType.Location &&
-    option?.active === false
-  );
-}
+search-autocomplete.component.html	Add [disabled]="isOptionDisabled(option)" to mat-option and checkbox
+search-autocomplete.component.ts	Add isOptionDisabled()
+search-autocomplete.component.ts	Add protection to onOptionSelected()
+search-autocomplete.component.ts	Add protection to toggleSelection()
+addition-panel.component.html	No change
+addition-panel.component.ts	No change
+location.service.ts	No change
+API	Must return active for each location
 
-onOptionSelected(event: MatAutocompleteSelectedEvent): void {
-  const selectedEntry = event.option.value;
 
-  if (this.isOptionDisabled(selectedEntry)) {
-    return;
-  }
-
-  const current = this.control.value || [];
-
-  if (!current.some((item) => item.id === selectedEntry.id)) {
-    this.control.setValue([...current, selectedEntry]);
-  }
-
-  this.searchInputControl.setValue('');
-}
-
-isSelected(option: any): boolean {
-  const current = this.control.value || [];
-  return current.some((item) => item.id === option.id);
-}
-
-toggleSelection(option: any): void {
-  if (this.isOptionDisabled(option)) {
-    return;
-  }
-
-  const current = this.control.value || [];
-
-  if (this.isSelected(option)) {
-    this.control.setValue(
-      current.filter((item) => item.id !== option.id)
-    );
-  } else {
-    this.control.setValue([...current, option]);
-  }
-}
-
-And the HTML:
-
-<ng-container *ngIf="filteredOptions | async as options">
-  <mat-option
-    *ngFor="let option of options"
-    [value]="option"
-    [disabled]="isOptionDisabled(option)"
-    class="custom-option"
-  >
-    <opti-checkbox
-      [checked]="isSelected(option)"
-      [disabled]="isOptionDisabled(option)"
-      (click)="$event.stopPropagation()"
-      (checkboxChange)="toggleSelection(option)"
-      [noFormGroup]="true"
-      [title]="
-        searchPlaceholder() === AddPanelType.BillingGroup
-          ? option.name + ' (' + option.id + ')'
-          : option.name
-      "
-    >
-    </opti-checkbox>
-  </mat-option>
-</ng-container>
-
-One thing to verify
-
-Your OptiCheckboxComponent needs to support a disabled input. If IntelliSense/compiler gives an error on:
-
-[disabled]="isOptionDisabled(option)"
-
-for opti-checkbox, don't remove the protection from toggleSelection(). The selection will still be prevented, but we'll need to check the OptiCheckboxComponent API to get the correct property for its disabled/greyed-out appearance.
-
-Also, once you're done testing, remove mockLocationResponse and restore the real:
-
-this.locationService.search(this.searchValue)
-
-The actual API response you need is essentially:
+Expected API response
 
 {
   "customerLocations": [
@@ -427,8 +254,20 @@ The actual API response you need is essentially:
       "id": "LOC002",
       "name": "Mumbai",
       "active": false
+    },
+    {
+      "id": "LOC003",
+      "name": "Bangalore",
+      "active": true
+    },
+    {
+      "id": "LOC004",
+      "name": "Delhi",
+      "active": false
     }
   ]
 }
 
-Your existing mapping already converts this into exactly the structure required.
+Result: Pune and Bangalore remain selectable; Mumbai and Delhi remain visible but disabled.
+
+One caveat: if your OptiCheckboxComponent does not expose a [disabled] input, Angular will give you a template error. In that case, remove only [disabled]="isOptionDisabled(option)" from opti-checkbox; keep it on mat-option and keep the TS guards.
