@@ -1,256 +1,221 @@
-Yes — I can see exactly what is happening from your screenshot.
+Yes. Based on the screenshots, the cleanest approach is:
 
-The important part is this:
+1. Add address to CustomerFacilitiesDTO.
 
-<mat-option
-  [disabled]="isOptionDisabled(option)"
->
-  <opti-checkbox
-    ...
-    (click)="$event.stopPropagation()"
-    (checkboxChange)="toggleSelection(option)"
-    [isDisabled]="isOptionDisabled(option)"
-  >
-  </opti-checkbox>
-</mat-option>
 
-You are disabling the mat-option, but the opti-checkbox is a separate interactive component inside it. Its checkboxChange can still fire.
+2. Create a separate buildAddress() method.
 
-So you need to handle this at the checkbox level as well as the option level.
 
-1. First change your toggleSelection()
+3. While mapping customerFacilities, get the corresponding FacilityDetails from facilityDetailsMap using facilityId.
 
-This is the most important fix.
 
-Currently you have something like:
+4. Build the address from address1, address2, city, state, zip.
 
-toggleSelection(option: any) {
-  const current = this.control.value || [];
 
-  if (this.isSelected(option)) {
-    this.control.setValue(
-      current.filter((item) => item.id !== option.id)
-    );
-  } else {
-    this.control.setValue([...current, option]);
-  }
+5. Keep the address populated even when isLocationActive() returns false. The active flag should only indicate whether the location is active; it should not affect whether its address is returned.
+
+
+
+1. Modify CustomerFacilitiesDTO
+
+Your current DTO:
+
+public class CustomerFacilitiesDTO {
+    private String id;
+    private String facilityId;
+    private String name;
+    private Boolean active;
 }
 
 Change it to:
 
-toggleSelection(option: any): void {
-  // Do nothing if the option is inactive
-  if (this.isOptionDisabled(option)) {
-    return;
-  }
-
-  const current = this.control.value || [];
-
-  if (this.isSelected(option)) {
-    this.control.setValue(
-      current.filter((item) => item.id !== option.id)
-    );
-  } else {
-    this.control.setValue([...current, option]);
-  }
+public class CustomerFacilitiesDTO {
+    private String id;
+    private String facilityId;
+    private String name;
+    private Boolean active;
+    private String address;
 }
 
-This guarantees that even if checkboxChange fires, the inactive option will never be added to your selected values.
+Lombok @Data and @Builder will automatically handle the new field.
 
 
 ---
 
-2. Keep [disabled] on mat-option
+2. Modify the mapping in getAllLocationsFromPreferenceDB()
 
-Keep:
+You currently have essentially:
 
-[disabled]="isOptionDisabled(option)"
+customerFacilities = customerFacilities.stream()
+        .map(CustomerFacilitiesDTO data -> CustomerFacilitiesDTO.builder()
+                .id(data.getId())
+                .facilityId(data.getFacilityId())
+                .name(data.getName())
+                .active(isLocationActive(
+                        facilityDetailsMap,
+                        billingGroupDetailsMap,
+                        data.getFacilityId(),
+                        billingGroupId,
+                        customerId))
+                .build())
+        .sorted(Comparator.comparing(CustomerFacilitiesDTO::getName))
+        .toList();
 
-So:
+Change it to:
 
-<mat-option
-  *ngFor="let option of options"
-  [value]="option"
-  [disabled]="isOptionDisabled(option)"
-  class="custom-option"
->
+customerFacilities = customerFacilities.stream()
+        .map(data -> {
+            var facilityDetails = facilityDetailsMap.get(data.getFacilityId());
 
-This handles the dropdown option itself.
+            return CustomerFacilitiesDTO.builder()
+                    .id(data.getId())
+                    .facilityId(data.getFacilityId())
+                    .name(data.getName())
+                    .active(isLocationActive(
+                            facilityDetailsMap,
+                            billingGroupDetailsMap,
+                            data.getFacilityId(),
+                            billingGroupId,
+                            customerId))
+                    .address(buildAddress(facilityDetails))
+                    .build();
+        })
+        .sorted(Comparator.comparing(CustomerFacilitiesDTO::getName))
+        .toList();
+
+The important part is:
+
+var facilityDetails = facilityDetailsMap.get(data.getFacilityId());
+
+and then:
+
+.address(buildAddress(facilityDetails))
+
+This happens independently of isLocationActive().
+
+So even if:
+
+isLocationActive(...) == false
+
+the response will still contain:
+
+{
+  "id": "...",
+  "facilityId": "...",
+  "name": "...",
+  "active": false,
+  "address": "..."
+}
 
 
 ---
 
-3. Your checkbox
+3. Add separate buildAddress() method
 
-You currently have:
+Since your FacilityDetails has:
 
-<opti-checkbox
-  [checked]="isSelected(option)"
-  (click)="$event.stopPropagation()"
-  (checkboxChange)="toggleSelection(option)"
-  [noFormGroup]="true"
-  [title]="
-    searchPlaceholder() === AddPanelType.BillingGroup
-      ? option.name + ' (' + option.id + ')'
-      : option.name
-  "
-  [isDisabled]="isOptionDisabled(option)"
->
-</opti-checkbox>
+private String address1;
+private String address2;
+private String city;
+private String state;
+private String zip;
 
-If opti-checkbox actually supports isDisabled, keep it.
+I'd recommend building the address while safely ignoring null/empty fields:
 
-But based on your earlier statement that the component doesn't expose a disable property, I would not rely on this alone.
+private String buildAddress(CustomerHierarchyResponse.FacilityDetails facilityDetails) {
 
-The toggleSelection() guard above is still required.
+    if (facilityDetails == null) {
+        return "";
+    }
+
+    return Stream.of(
+            facilityDetails.getAddress1(),
+            facilityDetails.getAddress2(),
+            facilityDetails.getCity(),
+            facilityDetails.getState(),
+            facilityDetails.getZip())
+            .filter(value -> value != null && !value.isBlank())
+            .collect(Collectors.joining(", "));
+}
+
+You'll need:
+
+import java.util.stream.Collectors;
+
+If Stream is already imported in your class, you're good.
 
 
 ---
 
-4. I would also change the click handler
+4. Why this also handles inactive/filtered locations
 
-Instead of:
+Your current isLocationActive() does this:
 
-(click)="$event.stopPropagation()"
+var isActive = false;
 
-use:
+var facilityDetails = activeFacilities.get(facilityId);
 
-(click)="onCheckboxClick($event, option)"
-
-Then add this to your TS:
-
-onCheckboxClick(event: MouseEvent, option: any): void {
-  if (this.isOptionDisabled(option)) {
-    event.preventDefault();
-    event.stopPropagation();
-    return;
-  }
-
-  event.stopPropagation();
+if (facilityDetails != null && Boolean.TRUE.equals(facilityDetails.getActive())) {
+    ...
 }
 
-So your checkbox becomes:
+return isActive;
 
-<opti-checkbox
-  [checked]="isSelected(option)"
-  (click)="onCheckboxClick($event, option)"
-  (checkboxChange)="toggleSelection(option)"
-  [noFormGroup]="true"
-  [title]="
-    searchPlaceholder() === AddPanelType.BillingGroup
-      ? option.name + ' (' + option.id + ')'
-      : option.name
-  "
-  [isDisabled]="isOptionDisabled(option)"
->
-</opti-checkbox>
+So if the facility isn't active, it returns:
 
+false
 
----
+But it doesn't need to be changed for the address requirement.
 
-5. Make sure isOptionDisabled() is correct
+The address comes directly from:
 
-You haven't shown this method, but it should simply be:
+facilityDetailsMap.get(data.getFacilityId())
 
-isOptionDisabled(option: any): boolean {
-  return option?.active === false;
-}
+while active comes from:
 
-Or, if you're using a more strongly typed object:
+isLocationActive(...)
 
-isOptionDisabled(option: { active?: boolean }): boolean {
-  return option.active === false;
-}
+Therefore they are independent:
 
-Don't use:
+Customer Facility
+       |
+       +---- facilityId
+       |
+       +----> facilityDetailsMap
+       |          |
+       |          +-- address1
+       |          +-- address2
+       |          +-- city
+       |          +-- state
+       |          +-- zip
+       |                    |
+       |                    v
+       |              buildAddress()
+       |                    |
+       |                    v
+       |                 address
+       |
+       +----> isLocationActive()
+                    |
+                    v
+                 active
 
-return !option.active;
+One important point
 
-unless you're certain active is always present.
+If by "filtered out in isLocationActive" you mean that some locations are actually being removed from the customerFacilities list somewhere else based on active, then that filtering needs to be removed.
 
-Because:
+For example, don't do this:
 
-undefined
+.filter(CustomerFacilitiesDTO::getActive)
 
-would also become disabled with !option.active.
+because that would completely remove inactive locations from the response.
 
+Instead, return them with:
 
----
+"active": false
 
-6. Your final relevant code
+and still include their:
 
-HTML
+"address": "Address 1, Address 2, City, State, ZIP"
 
-<mat-option
-  *ngFor="let option of options"
-  [value]="option"
-  [disabled]="isOptionDisabled(option)"
-  class="custom-option"
->
-  <opti-checkbox
-    [checked]="isSelected(option)"
-    (click)="onCheckboxClick($event, option)"
-    (checkboxChange)="toggleSelection(option)"
-    [noFormGroup]="true"
-    [title]="
-      searchPlaceholder() === AddPanelType.BillingGroup
-        ? option.name + ' (' + option.id + ')'
-        : option.name
-    "
-    [isDisabled]="isOptionDisabled(option)"
-  >
-  </opti-checkbox>
-</mat-option>
-
-TS
-
-isOptionDisabled(option: any): boolean {
-  return option?.active === false;
-}
-
-onCheckboxClick(event: MouseEvent, option: any): void {
-  if (this.isOptionDisabled(option)) {
-    event.preventDefault();
-    event.stopPropagation();
-    return;
-  }
-
-  event.stopPropagation();
-}
-
-toggleSelection(option: any): void {
-  // Safety check - inactive options can NEVER be selected
-  if (this.isOptionDisabled(option)) {
-    return;
-  }
-
-  const current = this.control.value || [];
-
-  if (this.isSelected(option)) {
-    this.control.setValue(
-      current.filter((item) => item.id !== option.id)
-    );
-  } else {
-    this.control.setValue([...current, option]);
-  }
-}
-
-Why I'm recommending all three
-
-You effectively have two controls:
-
-mat-option
-    |
-    └── opti-checkbox
-
-Disabling the parent mat-option doesn't necessarily disable the custom checkbox's internal interaction.
-
-Therefore:
-
-mat-option [disabled] → visually/semantically disables the option
-
-onCheckboxClick() → prevents interaction with the checkbox
-
-toggleSelection() guard → final safety net so inactive data can never enter your FormControl
-
-That last one is especially important because even if the UI component behaves unexpectedly, your application state remains correct.
+So the final response can contain both active and inactive locations, with the inactive ones clearly marked by active: false.
