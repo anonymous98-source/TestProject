@@ -1,10 +1,10 @@
-Hi [Name], I completed the initial analysis for ASP-11029 and looked into possible approaches for handling the retry exception logging.
+Hi Rama, I completed the initial analysis for ASP-11029 and looked into possible approaches for handling the retry exception logging.
 
 I see two possible approaches:
 
-- @Recoverable approach → log the final exception once all retry attempts are exhausted. This would give visibility into the failure after retries are completed.
+- @Recoverable approach → log the final exception once all retry attempts are exhausted.
 - RetryListener approach → centrally log each retry attempt along with the exception details and retry count, giving better visibility into the complete retry flow.
 
 I also checked "RetryConfig.isRetryable()" in P2P Edge. Currently, it logs only the status code for "WebClientResponseException", while other exceptions are not logged.
 
-Since we don't currently have a "RetryListener", I think the listener approach could provide more comprehensive logging without adding duplicate logging across individual APIs. I’ll share these findings and the proposed approach with Rama.
+Since we don’t currently have a "RetryListener", I feel the listener approach would provide more comprehensive logging without adding duplicate logging across individual APIs.
