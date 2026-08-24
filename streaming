@@ -1,221 +1,352 @@
-Yes. Based on the screenshots, the cleanest approach is:
+Yes. With Spring Retry, the important thing is that the exception that triggers the retry is thrown from the method, and Spring Retry intercepts it outside your method. So you have a few good ways to identify it.
 
-1. Add address to CustomerFacilitiesDTO.
+1. Simplest: add a @Recover method
 
+A @Recover method is called after all retry attempts are exhausted, and it receives the exception that caused the retries.
 
-2. Create a separate buildAddress() method.
+@Recover
+public void recover(DataIntegrityViolationException ex,
+                    Set<Long> validZipCodes,
+                    String customerId,
+                    String facilityId,
+                    String serviceLevel) {
 
-
-3. While mapping customerFacilities, get the corresponding FacilityDetails from facilityDetailsMap using facilityId.
-
-
-4. Build the address from address1, address2, city, state, zip.
-
-
-5. Keep the address populated even when isLocationActive() returns false. The active flag should only indicate whether the location is active; it should not affect whether its address is returned.
-
-
-
-1. Modify CustomerFacilitiesDTO
-
-Your current DTO:
-
-public class CustomerFacilitiesDTO {
-    private String id;
-    private String facilityId;
-    private String name;
-    private Boolean active;
+    log.error(
+        "processValidZipCodes failed after retries. customerId={}, facilityId={}, serviceLevel={}",
+        customerId, facilityId, serviceLevel, ex
+    );
 }
 
-Change it to:
+This tells you the final exception that caused the retry sequence to eventually fail.
 
-public class CustomerFacilitiesDTO {
-    private String id;
-    private String facilityId;
-    private String name;
-    private Boolean active;
-    private String address;
-}
-
-Lombok @Data and @Builder will automatically handle the new field.
+However, if you want to know the exception at the moment each retry starts, use a RetryListener.
 
 
 ---
 
-2. Modify the mapping in getAllLocationsFromPreferenceDB()
+2. Best option: RetryListener
 
-You currently have essentially:
+Spring Retry provides RetryListener specifically for this.
 
-customerFacilities = customerFacilities.stream()
-        .map(CustomerFacilitiesDTO data -> CustomerFacilitiesDTO.builder()
-                .id(data.getId())
-                .facilityId(data.getFacilityId())
-                .name(data.getName())
-                .active(isLocationActive(
-                        facilityDetailsMap,
-                        billingGroupDetailsMap,
-                        data.getFacilityId(),
-                        billingGroupId,
-                        customerId))
-                .build())
-        .sorted(Comparator.comparing(CustomerFacilitiesDTO::getName))
-        .toList();
+You can create a listener:
 
-Change it to:
+@Component
+@Slf4j
+public class RetryLoggingListener implements RetryListener {
 
-customerFacilities = customerFacilities.stream()
-        .map(data -> {
-            var facilityDetails = facilityDetailsMap.get(data.getFacilityId());
+    @Override
+    public <T, E extends Throwable> boolean open(
+            RetryContext context,
+            RetryCallback<T, E> callback) {
 
-            return CustomerFacilitiesDTO.builder()
-                    .id(data.getId())
-                    .facilityId(data.getFacilityId())
-                    .name(data.getName())
-                    .active(isLocationActive(
-                            facilityDetailsMap,
-                            billingGroupDetailsMap,
-                            data.getFacilityId(),
-                            billingGroupId,
-                            customerId))
-                    .address(buildAddress(facilityDetails))
-                    .build();
-        })
-        .sorted(Comparator.comparing(CustomerFacilitiesDTO::getName))
-        .toList();
-
-The important part is:
-
-var facilityDetails = facilityDetailsMap.get(data.getFacilityId());
-
-and then:
-
-.address(buildAddress(facilityDetails))
-
-This happens independently of isLocationActive().
-
-So even if:
-
-isLocationActive(...) == false
-
-the response will still contain:
-
-{
-  "id": "...",
-  "facilityId": "...",
-  "name": "...",
-  "active": false,
-  "address": "..."
-}
-
-
----
-
-3. Add separate buildAddress() method
-
-Since your FacilityDetails has:
-
-private String address1;
-private String address2;
-private String city;
-private String state;
-private String zip;
-
-I'd recommend building the address while safely ignoring null/empty fields:
-
-private String buildAddress(CustomerHierarchyResponse.FacilityDetails facilityDetails) {
-
-    if (facilityDetails == null) {
-        return "";
+        return true;
     }
 
-    return Stream.of(
-            facilityDetails.getAddress1(),
-            facilityDetails.getAddress2(),
-            facilityDetails.getCity(),
-            facilityDetails.getState(),
-            facilityDetails.getZip())
-            .filter(value -> value != null && !value.isBlank())
-            .collect(Collectors.joining(", "));
+    @Override
+    public <T, E extends Throwable> void onError(
+            RetryContext context,
+            RetryCallback<T, E> callback,
+            Throwable throwable) {
+
+        log.error(
+            "Retry attempt {} failed for method {}. Exception: {} - {}",
+            context.getRetryCount(),
+            context.getAttribute(RetryContext.NAME),
+            throwable.getClass().getName(),
+            throwable.getMessage(),
+            throwable
+        );
+    }
+
+    @Override
+    public <T, E extends Throwable> void close(
+            RetryContext context,
+            RetryCallback<T, E> callback,
+            Throwable throwable) {
+
+        if (throwable != null) {
+            log.error(
+                "Retry exhausted. Final exception: {} - {}",
+                throwable.getClass().getName(),
+                throwable.getMessage(),
+                throwable
+            );
+        }
+    }
 }
 
-You'll need:
+Then associate it with your retry configuration.
 
-import java.util.stream.Collectors;
+For example:
 
-If Stream is already imported in your class, you're good.
+@Retryable(
+    retryFor = {DataIntegrityViolationException.class},
+    maxAttempts = 3,
+    backoff = @Backoff(delay = 100, maxDelay = 400, random = true),
+    listeners = {"retryLoggingListener"}
+)
+
+Now you'll get something like:
+
+Retry attempt 1 failed for method processValidZipCodes.
+Exception: org.springframework.dao.DataIntegrityViolationException
+Message: could not execute statement
+
+Then:
+
+Retry attempt 2 failed for method processValidZipCodes.
+Exception: org.springframework.dao.DataIntegrityViolationException
+Message: could not execute statement
+
+And finally:
+
+Retry exhausted. Final exception:
+org.springframework.dao.DataIntegrityViolationException
+
+3. If you only want to debug the actual DB exception
+
+DataIntegrityViolationException is often just the outer exception. The actual reason may be buried in its cause.
+
+For example:
+
+DataIntegrityViolationException
+    -> ConstraintViolationException
+        -> SQLException
+            -> ORA-00001: unique constraint violated
+
+So log the complete exception:
+
+log.error("Exception causing retry", throwable);
+
+rather than only:
+
+log.error("Exception causing retry: {}", throwable.getMessage());
+
+The first one will print the full stack trace and cause chain.
 
 
 ---
 
-4. Why this also handles inactive/filtered locations
+One important thing in your code
 
-Your current isLocationActive() does this:
+Your method has:
 
-var isActive = false;
+@Transactional
+@Retryable(...)
+public void processValidZipCodes(...)
 
-var facilityDetails = activeFacilities.get(facilityId);
+Be aware that @Retryable and @Transactional are both implemented using Spring proxies. For retry behavior to work correctly, this method should be called from another Spring bean, not through this.processValidZipCodes(...) inside the same class.
 
-if (facilityDetails != null && Boolean.TRUE.equals(facilityDetails.getActive())) {
-    ...
+Also, because you're using:
+
+zipcodePreferenceRepository.flush();
+
+the DataIntegrityViolationException may actually be thrown at the flush() rather than at saveAll(). That's why your retry may appear to be happening "at the end" of the method.
+
+For your specific requirement, I'd use RetryListener because it lets you see the exception and retry count for every retry attempt, rather than only after all 3 attempts fail.
+
+
+Yes — and this is an important distinction.
+
+Your current configuration:
+
+@Retryable(
+    retryFor = {DataIntegrityViolationException.class},
+    maxAttempts = 3,
+    backoff = @Backoff(delay = 100, maxDelay = 400, random = true)
+)
+
+already means only DataIntegrityViolationException is eligible for retry. A 404, 400 Bad Request, or a generic connection exception will not automatically be retried unless it is wrapped/translated into DataIntegrityViolationException.
+
+If you want to explicitly control which exceptions are retryable
+
+You can define the retryable exceptions:
+
+@Retryable(
+    retryFor = {
+        DataIntegrityViolationException.class
+    },
+    maxAttempts = 3,
+    backoff = @Backoff(
+        delay = 100,
+        maxDelay = 400,
+        random = true
+    )
+)
+
+Then your behavior is essentially:
+
+Exception	Retry?
+
+DataIntegrityViolationException	✅ Yes
+BadRequestException / HTTP 400	❌ No
+NotFoundException / HTTP 404	❌ No
+Generic RuntimeException	❌ No
+Generic connection exception	❌ No
+NullPointerException	❌ No
+
+
+However, if your DataIntegrityViolationException has different root causes, you may want more granular control.
+
+If you want to inspect the actual cause before retrying
+
+For example, you could have:
+
+DataIntegrityViolationException
+    └── ConstraintViolationException
+          └── SQLException
+
+The RetryListener can inspect the exception:
+
+@Override
+public <T, E extends Throwable> void onError(
+        RetryContext context,
+        RetryCallback<T, E> callback,
+        Throwable throwable) {
+
+    log.error(
+        "Retry attempt {}. Exception: {}",
+        context.getRetryCount(),
+        throwable.getClass().getName(),
+        throwable
+    );
 }
 
-return isActive;
+But if your requirement is:
 
-So if the facility isn't active, it returns:
+> "Retry only certain exceptions and completely ignore 400, 404 and connectivity exceptions."
 
-false
 
-But it doesn't need to be changed for the address requirement.
 
-The address comes directly from:
+I'd recommend keeping the retry policy restrictive rather than catching everything and deciding inside the method.
 
-facilityDetailsMap.get(data.getFacilityId())
+For example:
 
-while active comes from:
+@Retryable(
+    retryFor = {
+        DataIntegrityViolationException.class,
+        OptimisticLockingFailureException.class
+    },
+    maxAttempts = 3,
+    backoff = @Backoff(delay = 100, maxDelay = 400, random = true)
+)
 
-isLocationActive(...)
+Only the exceptions that you explicitly put in retryFor will trigger retry.
 
-Therefore they are independent:
+One thing I'd clarify in your case
 
-Customer Facility
-       |
-       +---- facilityId
-       |
-       +----> facilityDetailsMap
-       |          |
-       |          +-- address1
-       |          +-- address2
-       |          +-- city
-       |          +-- state
-       |          +-- zip
-       |                    |
-       |                    v
-       |              buildAddress()
-       |                    |
-       |                    v
-       |                 address
-       |
-       +----> isLocationActive()
-                    |
-                    v
-                 active
+If by "basic connectivity exception" you mean something like:
 
-One important point
+ConnectException
+SocketTimeoutException
+SQLTransientConnectionException
+DataAccessResourceFailureException
 
-If by "filtered out in isLocationActive" you mean that some locations are actually being removed from the customerFacilities list somewhere else based on active, then that filtering needs to be removed.
+then whether you should retry those depends on where they occur.
 
-For example, don't do this:
+For example, a temporary database connection failure is often reasonable to retry, while a permanent configuration/authentication failure is not.
 
-.filter(CustomerFacilitiesDTO::getActive)
+So I wouldn't put a broad:
 
-because that would completely remove inactive locations from the response.
+Exception.class
 
-Instead, return them with:
+in retryFor.
 
-"active": false
+Instead, define a small whitelist of genuinely transient exceptions.
 
-and still include their:
+If you show me the actual exception stack trace you're currently seeing when this retry happens, I can tell you exactly which exception should be in retryFor and which ones you should explicitly exclude.
 
-"address": "Address 1, Address 2, City, State, ZIP"
+Got it. You want retrying to continue normally, but when an exception occurs, you want to capture/log only specific exceptions and ignore things like 400, 404, or generic connectivity exceptions for logging/handling.
 
-So the final response can contain both active and inactive locations, with the inactive ones clearly marked by active: false.
+In that case, don't change your @Retryable configuration. Let Spring Retry do its job, and filter the exception in the RetryListener.
+
+For example:
+
+@Override
+public <T, E extends Throwable> void onError(
+        RetryContext context,
+        RetryCallback<T, E> callback,
+        Throwable throwable) {
+
+    if (throwable instanceof DataIntegrityViolationException) {
+        log.error(
+            "Retry attempt {} due to DataIntegrityViolationException",
+            context.getRetryCount(),
+            throwable
+        );
+    }
+}
+
+Your existing method stays:
+
+@Retryable(
+    retryFor = {DataIntegrityViolationException.class},
+    maxAttempts = 3,
+    backoff = @Backoff(delay = 100, maxDelay = 400, random = true)
+)
+public void processValidZipCodes(
+        Set<Long> validZipCodes,
+        String customerId,
+        String facilityId,
+        String serviceLevel) {
+
+    // existing code
+}
+
+If you want multiple specific exceptions
+
+You can prioritize them:
+
+@Override
+public <T, E extends Throwable> void onError(
+        RetryContext context,
+        RetryCallback<T, E> callback,
+        Throwable throwable) {
+
+    if (throwable instanceof DataIntegrityViolationException ex) {
+
+        log.error(
+            "Data integrity issue on retry attempt {}: {}",
+            context.getRetryCount(),
+            ex.getMessage(),
+            ex
+        );
+
+    } else if (throwable instanceof OptimisticLockingFailureException ex) {
+
+        log.error(
+            "Optimistic locking issue on retry attempt {}: {}",
+            context.getRetryCount(),
+            ex.getMessage(),
+            ex
+        );
+
+    }
+    // Don't do anything for other exceptions
+}
+
+The important point is:
+
+RetryListener.onError() does not decide whether the retry happens. It is just observing the failure.
+
+So:
+
+Exception occurs
+      ↓
+Spring Retry decides whether it is retryable
+      ↓
+onError() gets called
+      ↓
+You inspect/log the exception
+      ↓
+Spring continues with retry
+
+Therefore, you can safely do:
+
+if (throwable instanceof DataIntegrityViolationException) {
+    // catch/log/inspect
+}
+
+without preventing the retry.
+
+Also, if you're trying to identify the actual root cause inside DataIntegrityViolationException, that's slightly different. For example, you may want to distinguish unique constraint violation vs foreign-key violation vs some other DB issue. In that case, I can show you how to extract and prioritize the root SQLException from the exception chain.
