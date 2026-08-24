@@ -1,8 +1,13 @@
 Hi [Name], I did the initial analysis for ASP-9961. The main requirement is to improve logging around the existing retry mechanism so we can identify API failures properly in production.
 
 My initial flow is:
-API exception → RetryConfig / Retry Listener → log exception + retry attempt/details → decide retry → retry if applicable.
+API exception → RetryConfig / Retry handling → log exception + retry attempt/details → decide retry → retry if applicable.
 
 I checked "RetryConfig.isRetryable()" in P2P Edge. Currently, it logs only the status code for "WebClientResponseException", while other exceptions are not logged.
 
-Since we don't currently have a Retry Listener implemented, I’m thinking we can introduce one to handle retry-related logging centrally, along with enhancing "RetryConfig" where required. This should avoid adding duplicate logging in every API and keep the existing retry behavior unchanged.
+For the solution, I see two possible approaches:
+
+- @Recoverable approach → log the final exception once the retry attempts are exhausted.
+- RetryListener approach → centrally log each retry attempt along with the exception details, which gives better visibility into the complete retry flow.
+
+Since we don't currently have a RetryListener implemented, I’m leaning towards evaluating the listener approach along with enhancing "RetryConfig" where required, while keeping the existing retry behavior unchanged.
