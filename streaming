@@ -495,3 +495,223 @@ API failure ───> RetryConfig
                        Retry
 
 Before you start changing code, send me the complete RetryConfig.java (not just the screenshot) and one example of how createRetry() is used in OcmWebClient or AspWebClient. Then I can give you the exact code changes, including where to put them and the exact unit tests, without guessing about your project's Reactor version or existing retry configuration.
+
+
+Based on the RetryConfig you showed, I would keep the change small and centralized. You don't need to modify every API client.
+
+1. Modify createRetry() in RetryConfig
+
+Your current method is approximately:
+
+public Retry createRetry(int maxAttempts, long initialDelaySeconds) {
+    return Retry.backoff(maxAttempts, Duration.ofSeconds(initialDelaySeconds))
+        .onRetryExhaustedThrow((retryBackoffSpec, retrySignal) ->
+            new RuntimeException(
+                "Retries exhausted for the request",
+                retrySignal.failure()
+            )
+        );
+}
+
+Change it to add Reactor's retry hook:
+
+public Retry createRetry(int maxAttempts, long initialDelaySeconds) {
+    return Retry.backoff(maxAttempts, Duration.ofSeconds(initialDelaySeconds))
+        .doBeforeRetry(this::logRetry)
+        .onRetryExhaustedThrow((retryBackoffSpec, retrySignal) -> {
+            logRetryExhausted(retrySignal);
+
+            return new RuntimeException(
+                "Retries exhausted for the request",
+                retrySignal.failure()
+            );
+        });
+}
+
+
+---
+
+2. Add a retry logging method
+
+Inside RetryConfig:
+
+private void logRetry(RetrySignal retrySignal) {
+    Throwable failure = retrySignal.failure();
+
+    LogBuilder logBuilder = LogBuilder
+        .withMessage("Retrying external API request")
+        .withField("retryAttempt", retrySignal.totalRetries() + 1)
+        .withField("exceptionType", failure.getClass().getSimpleName())
+        .withField("exceptionMessage", failure.getMessage());
+
+    if (failure instanceof WebClientResponseException ex) {
+        logBuilder = logBuilder
+            .withField("statusCode", ex.getStatusCode().value());
+    }
+
+    log.error(logBuilder.toString(), failure);
+}
+
+The important difference from your current implementation is that you're now logging:
+
+exceptionType
+exceptionMessage
+stack trace
+retryAttempt
+statusCode (when available)
+
+So instead of only:
+
+Is this request retryable? statusCode=503
+
+you'll get useful information like:
+
+Retrying external API request
+retryAttempt=1
+exceptionType=WebClientResponseException
+exceptionMessage=503 Service Unavailable
+statusCode=503
+
+plus the actual stack trace.
+
+
+---
+
+3. Add logging when retries are exhausted
+
+private void logRetryExhausted(RetrySignal retrySignal) {
+    Throwable failure = retrySignal.failure();
+
+    log.error(
+        LogBuilder
+            .withMessage("Retries exhausted for external API request")
+            .withField("totalRetries", retrySignal.totalRetries())
+            .withField("exceptionType", failure.getClass().getSimpleName())
+            .withField("exceptionMessage", failure.getMessage())
+            .toString(),
+        failure
+    );
+}
+
+This gives you the final failure after all retries.
+
+
+---
+
+4. What about isRetryable()?
+
+I would not put the main retry logging here anymore.
+
+Currently you have:
+
+if (throwable instanceof WebClientResponseException ex) {
+    int statusCode = ex.getStatusCode().value();
+
+    log.error(
+        LogBuilder
+            .withMessage("Is this request retryable?")
+            .withField("statusCode", statusCode)
+            .toString()
+    );
+
+    return statusCode >= 500 && statusCode < 600;
+}
+
+return true;
+
+I would remove/change that logging because doBeforeRetry() becomes your centralized retry logging point.
+
+Keep the decision logic:
+
+public boolean isRetryable(Throwable throwable) {
+    if (throwable instanceof WebClientResponseException ex) {
+        int statusCode = ex.getStatusCode().value();
+        return statusCode >= 500 && statusCode < 600;
+    }
+
+    return true;
+}
+
+So the responsibilities become:
+
+isRetryable()
+      ↓
+"Should I retry?"
+      ↓
+true
+      ↓
+doBeforeRetry()
+      ↓
+"Log the exception + retry attempt"
+      ↓
+retry
+
+That's cleaner.
+
+
+---
+
+5. Your final RetryConfig would roughly look like
+
+public class RetryConfig {
+
+    public Retry createRetry(int maxAttempts, long initialDelaySeconds) {
+        return Retry.backoff(
+                maxAttempts,
+                Duration.ofSeconds(initialDelaySeconds)
+            )
+            .filter(this::isRetryable)
+            .doBeforeRetry(this::logRetry)
+            .onRetryExhaustedThrow((retryBackoffSpec, retrySignal) -> {
+                logRetryExhausted(retrySignal);
+
+                return new RuntimeException(
+                    "Retries exhausted for the request",
+                    retrySignal.failure()
+                );
+            });
+    }
+
+    public boolean isRetryable(Throwable throwable) {
+        if (throwable instanceof WebClientResponseException ex) {
+            int statusCode = ex.getStatusCode().value();
+
+            return statusCode >= 500 && statusCode < 600;
+        }
+
+        return true;
+    }
+
+    private void logRetry(RetrySignal retrySignal) {
+        Throwable failure = retrySignal.failure();
+
+        LogBuilder logBuilder = LogBuilder
+            .withMessage("Retrying external API request")
+            .withField("retryAttempt", retrySignal.totalRetries() + 1)
+            .withField("exceptionType", failure.getClass().getSimpleName())
+            .withField("exceptionMessage", failure.getMessage());
+
+        if (failure instanceof WebClientResponseException ex) {
+            logBuilder = logBuilder
+                .withField("statusCode", ex.getStatusCode().value());
+        }
+
+        log.error(logBuilder.toString(), failure);
+    }
+
+    private void logRetryExhausted(RetrySignal retrySignal) {
+        Throwable failure = retrySignal.failure();
+
+        log.error(
+            LogBuilder
+                .withMessage("Retries exhausted for external API request")
+                .withField("totalRetries", retrySignal.totalRetries())
+                .withField("exceptionType", failure.getClass().getSimpleName())
+                .withField("exceptionMessage", failure.getMessage())
+                .toString(),
+            failure
+        );
+    }
+}
+
+One thing to verify before you paste this: your screenshot's createRetry() showed an onRetryExhaustedThrow, but I can't see the complete method or the imports/version. If you send me the complete RetryConfig.java, I can modify your exact code rather than giving you a generic version.
