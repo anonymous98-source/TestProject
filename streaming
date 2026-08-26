@@ -1,137 +1,197 @@
-Yes, this CMS Integration API RetryConfig is essentially the same pattern as the previous one. You can apply the same Reactor-based solution here.
+Yes, this one follows the same pattern as the previous two. You can apply the same Reactor-based retry logging approach.
 
-I would make these changes:
+I would make the following changes.
 
-1. Add doBeforeRetry()
+Updated class
 
-Your current:
+package com.cardinalhealth.adv.shipping.integration.api.config;
 
-.filter(this::isRetryable)
-.onRetryExhaustedThrow(...)
-
-becomes:
-
-.filter(this::isRetryable)
-.doBeforeRetry(this::logRetry)
-.onRetryExhaustedThrow((retryBackoffSpec, retrySignal) -> {
-    logRetryExhausted(retrySignal);
-
-    return new RuntimeException(
-        "Retries exhausted for the request",
-        retrySignal.failure()
-    );
-});
-
-2. Remove logging from isRetryable()
-
-Keep isRetryable() only for deciding whether to retry:
-
-public boolean isRetryable(Throwable throwable) {
-    if (throwable instanceof WebClientResponseException ex) {
-        int statusCode = ex.getStatusCode().value();
-
-        return statusCode >= 500 && statusCode < 600;
-    }
-
-    return true;
-}
-
-3. Add the retry logging methods
-
-private void logRetry(RetrySignal retrySignal) {
-
-    Throwable failure = retrySignal.failure();
-
-    LogBuilder logBuilder = new LogBuilder()
-            .withMessage("Retrying external API request")
-            .withField(
-                    "retryAttempt",
-                    retrySignal.totalRetries() + 1
-            )
-            .withField(
-                    "exceptionType",
-                    failure.getClass().getSimpleName()
-            )
-            .withField(
-                    "exceptionMessage",
-                    failure.getMessage()
-            );
-
-    if (failure instanceof WebClientResponseException ex) {
-        logBuilder.withField(
-                "statusCode",
-                ex.getStatusCode().value()
-        );
-    }
-
-    log.error(logBuilder.toString(), failure);
-}
-
-private void logRetryExhausted(RetrySignal retrySignal) {
-
-    Throwable failure = retrySignal.failure();
-
-    LogBuilder logBuilder = new LogBuilder()
-            .withMessage("Retries exhausted for the request")
-            .withField(
-                    "totalRetries",
-                    retrySignal.totalRetries()
-            )
-            .withField(
-                    "exceptionType",
-                    failure.getClass().getSimpleName()
-            )
-            .withField(
-                    "exceptionMessage",
-                    failure.getMessage()
-            );
-
-    if (failure instanceof WebClientResponseException ex) {
-        logBuilder.withField(
-                "statusCode",
-                ex.getStatusCode().value()
-        );
-    }
-
-    log.error(logBuilder.toString(), failure);
-}
-
-You'll also need:
-
+import com.cardinalhealth.ofl.next.logging.library.LogBuilder;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.util.retry.Retry;
 import reactor.util.retry.Retry.RetrySignal;
 
-Final flow
+import java.time.Duration;
 
-API exception
-     ↓
-isRetryable()
-     ↓
-5xx / network exception → true
-     ↓
-doBeforeRetry()
-     ↓
-log exception + retryAttempt + status
-     ↓
-retry
-     ↓
-failure again
-     ↓
-doBeforeRetry()
-     ↓
-log retryAttempt 2
-     ↓
-...
-     ↓
-Retries exhausted
-     ↓
-log final exception
+@Slf4j
+@Configuration
+public class RetryConfig {
 
-One thing I'd check before implementing
+    /**
+     * Creates a Retry object with a maximum number of attempts and an initial delay.
+     *
+     * @param maxAttempts the maximum number of retry attempts
+     * @param initialDelaySeconds the initial delay in seconds before the first retry
+     * @return a Retry object configured with the specified parameters
+     */
+    public Retry createRetry(int maxAttempts, long initialDelaySeconds) {
+        return Retry.backoff(
+                    maxAttempts,
+                    Duration.ofSeconds(initialDelaySeconds)
+                )
+                .maxBackoff(Duration.ofSeconds(5))
+                .jitter(0.5)
+                .filter(this::isRetryable)
+                .doBeforeRetry(this::logRetry)
+                .onRetryExhaustedThrow((retryBackoffSpec, retrySignal) -> {
+                    logRetryExhausted(retrySignal);
 
-Since this is CMS Integration API, don't assume every RetryConfig usage needs the same exact message/component fields. First check the callers of:
+                    Throwable lastError = retrySignal.failure();
 
-createRetry(...)
+                    if (lastError instanceof RuntimeException) {
+                        return lastError;
+                    }
 
-If several CMS clients use this configuration, then this centralized change will cover all of them—which is preferable to adding logging individually in CMSApiService, CMSTokenService, CredentialServiceClient, OcmWebClient, etc.
+                    return new RuntimeException(
+                            "Retries exhausted for the request",
+                            lastError
+                    );
+                });
+    }
 
-Also, keep the existing retry behavior unchanged. The only intended behavior change here should be better retry observability.
+    /**
+     * Determines if a request is retryable based on the exception type and status code.
+     * Retry will happen for 5XX errors and also for network issues and unknown exceptions.
+     *
+     * @param throwable the exception thrown during the request
+     * @return true if the request is retryable, false otherwise
+     */
+    public boolean isRetryable(Throwable throwable) {
+        if (throwable instanceof WebClientResponseException ex) {
+            int statusCode = ex.getStatusCode().value();
+
+            return statusCode >= 500 && statusCode < 600;
+        }
+
+        return true;
+    }
+
+    /**
+     * Logs exception details for every retry attempt.
+     */
+    private void logRetry(RetrySignal retrySignal) {
+
+        Throwable failure = retrySignal.failure();
+
+        LogBuilder logBuilder = new LogBuilder()
+                .withMessage("Retrying external API request")
+                .withField(
+                        "retryAttempt",
+                        retrySignal.totalRetries() + 1
+                )
+                .withField(
+                        "exceptionType",
+                        failure.getClass().getSimpleName()
+                )
+                .withField(
+                        "exceptionMessage",
+                        failure.getMessage()
+                );
+
+        if (failure instanceof WebClientResponseException ex) {
+            logBuilder.withField(
+                    "statusCode",
+                    ex.getStatusCode().value()
+            );
+        }
+
+        log.error(logBuilder.toString(), failure);
+    }
+
+    /**
+     * Logs the final exception when all retry attempts are exhausted.
+     */
+    private void logRetryExhausted(RetrySignal retrySignal) {
+
+        Throwable failure = retrySignal.failure();
+
+        LogBuilder logBuilder = new LogBuilder()
+                .withMessage("Retries exhausted for the request")
+                .withField(
+                        "totalRetries",
+                        retrySignal.totalRetries()
+                )
+                .withField(
+                        "exceptionType",
+                        failure.getClass().getSimpleName()
+                )
+                .withField(
+                        "exceptionMessage",
+                        failure.getMessage()
+                );
+
+        if (failure instanceof WebClientResponseException ex) {
+            logBuilder.withField(
+                    "statusCode",
+                    ex.getStatusCode().value()
+            );
+        }
+
+        log.error(logBuilder.toString(), failure);
+    }
+}
+
+What we're changing
+
+The important addition is:
+
+.doBeforeRetry(this::logRetry)
+
+This gives you logging for each actual retry.
+
+And:
+
+logRetryExhausted(retrySignal);
+
+gives you a final log when the retries are exhausted.
+
+We're also removing this from isRetryable():
+
+log.error(new LogBuilder()
+        .withMessage("Is this request retryable?")
+        .withField("statusCode", statusCode)
+        .toString());
+
+because isRetryable() should primarily answer:
+
+Should this exception be retried?
+
+while doBeforeRetry() handles:
+
+A retry is actually happening → log it
+
+Result
+
+For a 503, for example:
+
+API call
+   ↓
+503
+   ↓
+isRetryable() → true
+   ↓
+Retry attempt 1 → LOG
+   ↓
+503
+   ↓
+Retry attempt 2 → LOG
+   ↓
+503
+   ↓
+Retry attempt 3 → LOG
+   ↓
+Retries exhausted → LOG final exception
+
+For a 400:
+
+400
+ ↓
+isRetryable() → false
+ ↓
+No retry
+
+So this follows the same Reactor-based pattern you've already implemented in P2P Edge, and you don't need to introduce a separate listener class for this application.
+
+Before applying it, I would also do a Find Usages on createRetry() in this application. If multiple WebClient services use this RetryConfig, the change will automatically give all of them the centralized retry logging.
