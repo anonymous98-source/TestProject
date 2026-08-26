@@ -1,10 +1,10 @@
-Yes, this one follows the same pattern as the previous two. You can apply the same Reactor-based retry logging approach.
+Yes, this tracking-pod-service RetryConfig is again the same Reactor pattern. You can apply the same centralized retry logging approach.
 
-I would make the following changes.
+I would make only the retry-observability changes and leave the existing retry behavior intact.
 
-Updated class
+Updated RetryConfig
 
-package com.cardinalhealth.adv.shipping.integration.api.config;
+package com.cardinalhealth.advship.tracking.pod.service.config;
 
 import com.cardinalhealth.ofl.next.logging.library.LogBuilder;
 import lombok.extern.slf4j.Slf4j;
@@ -72,7 +72,6 @@ public class RetryConfig {
      * Logs exception details for every retry attempt.
      */
     private void logRetry(RetrySignal retrySignal) {
-
         Throwable failure = retrySignal.failure();
 
         LogBuilder logBuilder = new LogBuilder()
@@ -104,7 +103,6 @@ public class RetryConfig {
      * Logs the final exception when all retry attempts are exhausted.
      */
     private void logRetryExhausted(RetrySignal retrySignal) {
-
         Throwable failure = retrySignal.failure();
 
         LogBuilder logBuilder = new LogBuilder()
@@ -133,65 +131,60 @@ public class RetryConfig {
     }
 }
 
-What we're changing
+Changes compared with the current class
 
-The important addition is:
+1. Add:
 
 .doBeforeRetry(this::logRetry)
 
-This gives you logging for each actual retry.
+This logs every retry attempt.
 
-And:
+2. Add:
 
 logRetryExhausted(retrySignal);
 
-gives you a final log when the retries are exhausted.
+This logs the final failure after retry exhaustion.
 
-We're also removing this from isRetryable():
+3. Remove the logging from isRetryable()
+
+Currently:
 
 log.error(new LogBuilder()
         .withMessage("Is this request retryable?")
         .withField("statusCode", statusCode)
         .toString());
 
-because isRetryable() should primarily answer:
+Remove this because isRetryable() should only determine whether the exception is retryable.
 
-Should this exception be retried?
+The new responsibility is:
 
-while doBeforeRetry() handles:
+isRetryable()
+    ↓
+Should retry?
+    ↓
+YES
+    ↓
+doBeforeRetry()
+    ↓
+Log exception + retry count + status
+    ↓
+Retry
 
-A retry is actually happening → log it
+One thing to check
 
-Result
+Before making this change, do Find Usages → createRetry() in tracking-pod-service.
 
-For a 503, for example:
+If TrackingResourceWebClientService, CmsWebClient, FedexAccessTokenGenerationService, etc. all use this same RetryConfig, then you only need to modify this class, and all those retry calls will get the new logging automatically.
 
-API call
-   ↓
-503
-   ↓
-isRetryable() → true
-   ↓
-Retry attempt 1 → LOG
-   ↓
-503
-   ↓
-Retry attempt 2 → LOG
-   ↓
-503
-   ↓
-Retry attempt 3 → LOG
-   ↓
-Retries exhausted → LOG final exception
+Also test at least:
 
-For a 400:
+500/503 → retry + log each attempt
 
-400
- ↓
-isRetryable() → false
- ↓
-No retry
+Connection/timeout exception → retry + log each attempt
 
-So this follows the same Reactor-based pattern you've already implemented in P2P Edge, and you don't need to introduce a separate listener class for this application.
+400/404 → no retry
 
-Before applying it, I would also do a Find Usages on createRetry() in this application. If multiple WebClient services use this RetryConfig, the change will automatically give all of them the centralized retry logging.
+Retries exhausted → final exception logged
+
+
+This keeps the implementation consistent with the Reactor approach you've already applied to P2P Edge.
