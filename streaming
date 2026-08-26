@@ -1,203 +1,265 @@
-Yes. This one is different from P2P Edge because this is using Spring Retry's @Retryable, not Reactor's Retry.
+Yes. This class is actually a good candidate for extracting the retry configuration into a separate class, especially because you already have the same Reactor retry pattern in P2P Edge.
 
-For this method, I would not try to force the Reactor approach. Since @Retryable is already managing the retries, the cleanest solution is to use a Spring Retry RetryListener.
+I would avoid putting more retry-specific logging into TrackingResourceWebClientHelper. Instead, make the retry configuration reusable.
 
-Recommended flow
+1. Create a separate RetryConfig
 
-processValidZipCodes()
-        ↓
-DataIntegrityViolationException
-        ↓
-@Retryable
-        ↓
-RetryListener → log exception + retry count
-        ↓
-Retry
-        ↓
-Exception again
-        ↓
-RetryListener → log exception + retry count
-        ↓
-Retry
-        ↓
-Exception again
-        ↓
-Retry exhausted
-        ↓
-RetryListener → log final exception
-
-1. Create a RetryListener
-
-For example, create:
+For example:
 
 config/
-   RetryLoggingListener.java
+    RetryConfig.java
+
+package com.cardinalhealth.advship.tracking.api.config;
+
+import com.cardinalhealth.ofl.next.logging.library.LogBuilder;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.util.retry.Retry;
+import reactor.util.retry.Retry.RetrySignal;
+
+import java.time.Duration;
+
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.BACKOFF_MAX_ATTEMPTS;
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.BACKOFF_MIN_DURATION;
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.BOUNDARY_HTTP_ERROR;
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.COMPONENT;
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.ERROR_TYPE;
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.EXCEPTION_CLASS;
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.INTERNAL_SERVER_ERROR;
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.JITTER;
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.MAXBACKOFF_DURATION;
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.MESSAGE;
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.STACK_TRACE;
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.STATUS_CODE;
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.TRACKING_RESOURCE_WEBCLIENT_HELPER;
+import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.UNHANDLED_EXCEPTION;
 
 @Slf4j
-@Component
-public class RetryLoggingListener implements RetryListener {
+@Configuration
+public class RetryConfig {
 
-    @Override
-    public <T, E extends Throwable> boolean open(
-            RetryContext context,
-            RetryCallback<T, E> callback) {
+    public Retry createExponentialRetry() {
+        return Retry.backoff(
+                    BACKOFF_MAX_ATTEMPTS,
+                    Duration.ofSeconds(BACKOFF_MIN_DURATION)
+                )
+                .maxBackoff(Duration.ofSeconds(MAXBACKOFF_DURATION))
+                .jitter(JITTER)
+                .filter(this::isRetryable)
+                .doBeforeRetry(this::logRetry)
+                .onRetryExhaustedThrow((spec, signal) -> {
+                    logRetryExhausted(signal);
+
+                    return new RuntimeException(
+                        "Retries exhausted for the tracking-resource request",
+                        signal.failure()
+                    );
+                });
+    }
+
+    private boolean isRetryable(Throwable throwable) {
+
+        if (throwable instanceof WebClientResponseException ex) {
+            int statusCode = ex.getStatusCode().value();
+
+            return statusCode >= INTERNAL_SERVER_ERROR
+                    && statusCode < BOUNDARY_HTTP_ERROR;
+        }
+
         return true;
     }
 
-    @Override
-    public <T, E extends Throwable> void onError(
-            RetryContext context,
-            RetryCallback<T, E> callback,
-            Throwable throwable) {
+    private void logRetry(RetrySignal signal) {
+
+        Throwable throwable = signal.failure();
+
+        LogBuilder logBuilder = new LogBuilder()
+                .withMessage("Retrying tracking-resource API request")
+                .withField(
+                    "retryAttempt",
+                    signal.totalRetries() + 1
+                )
+                .withField(
+                    ERROR_TYPE,
+                    throwable instanceof WebClientResponseException
+                        ? "WEBCLIENT_EXCEPTION"
+                        : UNHANDLED_EXCEPTION
+                )
+                .withField(
+                    EXCEPTION_CLASS,
+                    throwable.getClass().getName()
+                )
+                .withField(
+                    MESSAGE,
+                    throwable.getMessage()
+                )
+                .withField(
+                    COMPONENT,
+                    TRACKING_RESOURCE_WEBCLIENT_HELPER
+                );
+
+        if (throwable instanceof WebClientResponseException ex) {
+            logBuilder.withField(
+                STATUS_CODE,
+                ex.getStatusCode().value()
+            );
+        }
 
         log.error(
-            "Retry attempt {} failed. Exception: {} - {}",
-            context.getRetryCount(),
-            throwable.getClass().getSimpleName(),
-            throwable.getMessage(),
+            logBuilder.toString(),
             throwable
         );
     }
 
-    @Override
-    public <T, E extends Throwable> void close(
-            RetryContext context,
-            RetryCallback<T, E> callback,
-            Throwable throwable) {
+    private void logRetryExhausted(RetrySignal signal) {
 
-        if (throwable != null) {
-            log.error(
-                "Retry exhausted after {} attempts. Final exception: {} - {}",
-                context.getRetryCount(),
-                throwable.getClass().getSimpleName(),
-                throwable.getMessage(),
-                throwable
-            );
-        }
+        Throwable throwable = signal.failure();
+
+        log.error(
+            new LogBuilder()
+                .withMessage(
+                    "Retries exhausted for tracking-resource API request"
+                )
+                .withField(
+                    "totalRetries",
+                    signal.totalRetries()
+                )
+                .withField(
+                    EXCEPTION_CLASS,
+                    throwable.getClass().getName()
+                )
+                .withField(
+                    MESSAGE,
+                    throwable.getMessage()
+                )
+                .withField(
+                    COMPONENT,
+                    TRACKING_RESOURCE_WEBCLIENT_HELPER
+                )
+                .toString(),
+            throwable
+        );
     }
 }
 
-The important method here is:
+2. Inject it into TrackingResourceWebClientHelper
 
-onError(...)
+Add:
 
-It gets called whenever an attempt fails, so you'll get logging for each retry.
+private final RetryConfig retryConfig;
+
+and update the constructor:
+
+public TrackingResourceWebClientHelper(
+        ObjectMapper objectMapper,
+        RetryConfig retryConfig) {
+
+    this.objectMapper = objectMapper;
+    this.retryConfig = retryConfig;
+}
+
+Then change:
+
+.retryWhen(createExponentialRetry(new LogBuilder()))
+
+to:
+
+.retryWhen(retryConfig.createExponentialRetry())
 
 
 ---
 
-2. Tell @Retryable to use the listener
+3. Remove the retry code from the helper
 
-You can reference the listener using listeners:
+You can completely remove this method:
 
-@Retryable(
-    retryFor = {DataIntegrityViolationException.class},
-    maxAttempts = 3,
-    backoff = @Backoff(
-        delay = 100,
-        maxDelay = 400,
-        random = true
-    ),
-    listeners = {"retryLoggingListener"}
-)
-
-Your method then becomes:
-
-@Override
-@Transactional
-@Retryable(
-    retryFor = {DataIntegrityViolationException.class},
-    maxAttempts = 3,
-    backoff = @Backoff(
-        delay = 100,
-        maxDelay = 400,
-        random = true
-    ),
-    listeners = {"retryLoggingListener"}
-)
-public void processValidZipCodes(
-        Set<Long> validZipCodes,
-        String customerId,
-        String facilityId,
-        String serviceLevel) {
-
-    var zipCodeUpsertSummary =
-            getZipCodeUpsertSummary(
-                    validZipCodes,
-                    customerId,
-                    facilityId);
-
-    var zipCodesToInsert =
-            zipCodeUpsertSummary.getZipCodesToInsert()
-                    .stream()
-                    .map(zipCode ->
-                            constructZipCodeEntity(
-                                    serviceLevel,
-                                    customerId,
-                                    facilityId,
-                                    zipCode))
-                    .toList();
-
-    if (!zipCodesToInsert.isEmpty()) {
-        zipcodePreferenceRepository.saveAll(zipCodesToInsert);
-    }
-
-    if (!zipCodeUpsertSummary.getZipCodesToUpdateTrue().isEmpty()) {
-        updateZipCodePreference(
-                customerId,
-                facilityId,
-                zipCodeUpsertSummary.getZipCodesToUpdateTrue(),
-                serviceLevel,
-                Boolean.TRUE);
-    }
-
-    if (!zipCodeUpsertSummary.getZipCodesToUpdateFalse().isEmpty()) {
-        updateZipCodePreference(
-                customerId,
-                facilityId,
-                zipCodeUpsertSummary.getZipCodesToUpdateFalse(),
-                serviceLevel,
-                Boolean.FALSE);
-    }
-
-    zipcodePreferenceRepository.flush();
+private Retry createExponentialRetry(LogBuilder logBuilder) {
+    ...
 }
 
-One important consideration
+And you can also remove the retry-related isRetryable() from this class because it now belongs in RetryConfig.
 
-Before creating a global listener, check whether this application already has a RetryListener somewhere.
+This makes the helper responsible for the API call, while RetryConfig is responsible for retry behavior:
 
-Search the project for:
+TrackingResourceWebClientHelper
+        |
+        | retryWhen()
+        ↓
+    RetryConfig
+        |
+        ├── isRetryable()
+        ├── doBeforeRetry()
+        └── retry exhausted logging
 
-RetryListener
+4. One important improvement over the current implementation
 
-and:
+Your current isRetryable() logs every exception before deciding whether it is retryable:
 
-RetryConfigurer
+log.error(...);
+if (throwable instanceof WebClientResponseException ...)
 
-If there is already a common listener/configuration, extend that instead of creating another one.
+That means even a 400 or 404 gets logged there.
 
-Also, because this retry is specifically for:
+With the new approach:
 
-DataIntegrityViolationException
+Exception
+   ↓
+isRetryable()
+   ↓
+400 → false → no retry logging
+500 → true
+   ↓
+doBeforeRetry()
+   ↓
+log retry attempt
 
-your listener will only be involved when that retryable exception occurs. You don't need to change the exception list.
+So the retry log specifically represents an actual retry, which is cleaner.
 
-Expected logs
+5. Your existing handleErrorMap() should stay
 
-With maxAttempts = 3, you'd get something similar to:
+I would not remove the logging from handleErrorMap() yet.
 
-Retry attempt 1 failed.
-Exception: DataIntegrityViolationException - ...
+That logging has a different purpose:
 
-then:
+RetryConfig
+    → logs retry attempts
 
-Retry attempt 2 failed.
-Exception: DataIntegrityViolationException - ...
+handleErrorMap()
+    → logs final API error / maps exception
 
-and finally:
+You may eventually find that some of the final-error logging is duplicated because onRetryExhaustedThrow() also logs. After testing the complete flow, we can decide whether the exhaustion log should remain in both places.
 
-Retry exhausted after 3 attempts.
-Final exception: DataIntegrityViolationException - ...
+Expected result
 
-One thing I'd verify before you implement this: the exact Spring Retry version in this project, because listener registration and @Retryable(listeners = ...) behavior can vary slightly between versions. If you share the project's existing retry dependencies (spring-retry version / build.gradle or pom.xml), I can give you the exact implementation for this service.
+For a 503:
+
+API → 503
+ ↓
+isRetryable → true
+ ↓
+Retry attempt 1 → LOG
+ ↓
+API → 503
+ ↓
+Retry attempt 2 → LOG
+ ↓
+API → 503
+ ↓
+Retry attempt 3 → LOG
+ ↓
+Retries exhausted → LOG final exception
+ ↓
+handleErrorMap()
+
+For a 400:
+
+API → 400
+ ↓
+isRetryable → false
+ ↓
+No retry
+ ↓
+handleErrorMap()
+
+This is the approach I'd recommend for this class because it gives you the same Reactor-based pattern as P2P Edge, while keeping the retry configuration out of the WebClient helper.
