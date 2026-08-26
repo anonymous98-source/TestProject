@@ -1,15 +1,8 @@
-Yes. This class is actually a good candidate for extracting the retry configuration into a separate class, especially because you already have the same Reactor retry pattern in P2P Edge.
+Yes — this application is very similar to the P2P Edge RetryConfig, so you can apply the same Reactor-based approach here. I would make the change directly in this RetryConfig rather than creating another listener class.
 
-I would avoid putting more retry-specific logging into TrackingResourceWebClientHelper. Instead, make the retry configuration reusable.
+Recommended updated RetryConfig
 
-1. Create a separate RetryConfig
-
-For example:
-
-config/
-    RetryConfig.java
-
-package com.cardinalhealth.advship.tracking.api.config;
+package com.cardinalhealth.advship.tracking.resource.config;
 
 import com.cardinalhealth.ofl.next.logging.library.LogBuilder;
 import lombok.extern.slf4j.Slf4j;
@@ -20,246 +13,194 @@ import reactor.util.retry.Retry.RetrySignal;
 
 import java.time.Duration;
 
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.BACKOFF_MAX_ATTEMPTS;
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.BACKOFF_MIN_DURATION;
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.BOUNDARY_HTTP_ERROR;
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.COMPONENT;
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.ERROR_TYPE;
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.EXCEPTION_CLASS;
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.INTERNAL_SERVER_ERROR;
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.JITTER;
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.MAXBACKOFF_DURATION;
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.MESSAGE;
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.STACK_TRACE;
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.STATUS_CODE;
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.TRACKING_RESOURCE_WEBCLIENT_HELPER;
-import static com.cardinalhealth.advship.tracking.api.service.webclient.TrackingResourceConstants.UNHANDLED_EXCEPTION;
-
 @Slf4j
 @Configuration
 public class RetryConfig {
 
-    public Retry createExponentialRetry() {
+    /**
+     * Creates a Retry object with a maximum number of attempts and an initial delay.
+     *
+     * @param maxAttempts the maximum number of retry attempts
+     * @param initialDelaySeconds the initial delay in seconds before the first retry
+     * @return a Retry object configured with the specified parameters
+     */
+    public Retry createRetry(int maxAttempts, long initialDelaySeconds) {
         return Retry.backoff(
-                    BACKOFF_MAX_ATTEMPTS,
-                    Duration.ofSeconds(BACKOFF_MIN_DURATION)
+                    maxAttempts,
+                    Duration.ofSeconds(initialDelaySeconds)
                 )
-                .maxBackoff(Duration.ofSeconds(MAXBACKOFF_DURATION))
-                .jitter(JITTER)
+                .maxBackoff(Duration.ofSeconds(5))
+                .jitter(0.5)
                 .filter(this::isRetryable)
+
+                // Log every retry attempt
                 .doBeforeRetry(this::logRetry)
-                .onRetryExhaustedThrow((spec, signal) -> {
-                    logRetryExhausted(signal);
+
+                .onRetryExhaustedThrow((retryBackoffSpec, retrySignal) -> {
+                    logRetryExhausted(retrySignal);
+
+                    Throwable lastError = retrySignal.failure();
+
+                    if (lastError instanceof RuntimeException) {
+                        return lastError;
+                    }
 
                     return new RuntimeException(
-                        "Retries exhausted for the tracking-resource request",
-                        signal.failure()
+                            "Retries exhausted for the request",
+                            lastError
                     );
                 });
     }
 
-    private boolean isRetryable(Throwable throwable) {
+    /**
+     * Determines if a request is retryable based on the exception type and status code.
+     * Retry will happen for 5XX errors and also for network/unknown exceptions.
+     *
+     * @param throwable the exception thrown during the request
+     * @return true if the request is retryable, false otherwise
+     */
+    public boolean isRetryable(Throwable throwable) {
 
         if (throwable instanceof WebClientResponseException ex) {
             int statusCode = ex.getStatusCode().value();
 
-            return statusCode >= INTERNAL_SERVER_ERROR
-                    && statusCode < BOUNDARY_HTTP_ERROR;
+            return statusCode >= 500 && statusCode < 600;
         }
 
         return true;
     }
 
-    private void logRetry(RetrySignal signal) {
+    /**
+     * Logs exception details for every retry attempt.
+     */
+    private void logRetry(RetrySignal retrySignal) {
 
-        Throwable throwable = signal.failure();
+        Throwable failure = retrySignal.failure();
 
         LogBuilder logBuilder = new LogBuilder()
-                .withMessage("Retrying tracking-resource API request")
+                .withMessage("Retrying external API request")
                 .withField(
-                    "retryAttempt",
-                    signal.totalRetries() + 1
+                        "retryAttempt",
+                        retrySignal.totalRetries() + 1
                 )
                 .withField(
-                    ERROR_TYPE,
-                    throwable instanceof WebClientResponseException
-                        ? "WEBCLIENT_EXCEPTION"
-                        : UNHANDLED_EXCEPTION
+                        "exceptionType",
+                        failure.getClass().getSimpleName()
                 )
                 .withField(
-                    EXCEPTION_CLASS,
-                    throwable.getClass().getName()
-                )
-                .withField(
-                    MESSAGE,
-                    throwable.getMessage()
-                )
-                .withField(
-                    COMPONENT,
-                    TRACKING_RESOURCE_WEBCLIENT_HELPER
+                        "exceptionMessage",
+                        failure.getMessage()
                 );
 
-        if (throwable instanceof WebClientResponseException ex) {
+        if (failure instanceof WebClientResponseException ex) {
             logBuilder.withField(
-                STATUS_CODE,
-                ex.getStatusCode().value()
+                    "statusCode",
+                    ex.getStatusCode().value()
             );
         }
 
-        log.error(
-            logBuilder.toString(),
-            throwable
-        );
+        log.error(logBuilder.toString(), failure);
     }
 
-    private void logRetryExhausted(RetrySignal signal) {
+    /**
+     * Logs the final exception when all retry attempts are exhausted.
+     */
+    private void logRetryExhausted(RetrySignal retrySignal) {
 
-        Throwable throwable = signal.failure();
+        Throwable failure = retrySignal.failure();
 
-        log.error(
-            new LogBuilder()
-                .withMessage(
-                    "Retries exhausted for tracking-resource API request"
+        LogBuilder logBuilder = new LogBuilder()
+                .withMessage("Retries exhausted for the request")
+                .withField(
+                        "totalRetries",
+                        retrySignal.totalRetries()
                 )
                 .withField(
-                    "totalRetries",
-                    signal.totalRetries()
+                        "exceptionType",
+                        failure.getClass().getSimpleName()
                 )
                 .withField(
-                    EXCEPTION_CLASS,
-                    throwable.getClass().getName()
-                )
-                .withField(
-                    MESSAGE,
-                    throwable.getMessage()
-                )
-                .withField(
-                    COMPONENT,
-                    TRACKING_RESOURCE_WEBCLIENT_HELPER
-                )
-                .toString(),
-            throwable
-        );
+                        "exceptionMessage",
+                        failure.getMessage()
+                );
+
+        if (failure instanceof WebClientResponseException ex) {
+            logBuilder.withField(
+                    "statusCode",
+                    ex.getStatusCode().value()
+            );
+        }
+
+        log.error(logBuilder.toString(), failure);
     }
 }
 
-2. Inject it into TrackingResourceWebClientHelper
+What changed?
 
-Add:
+The main addition is:
 
-private final RetryConfig retryConfig;
+.doBeforeRetry(this::logRetry)
 
-and update the constructor:
+This acts as your Reactor equivalent of a retry listener.
 
-public TrackingResourceWebClientHelper(
-        ObjectMapper objectMapper,
-        RetryConfig retryConfig) {
+So the flow is:
 
-    this.objectMapper = objectMapper;
-    this.retryConfig = retryConfig;
-}
-
-Then change:
-
-.retryWhen(createExponentialRetry(new LogBuilder()))
-
-to:
-
-.retryWhen(retryConfig.createExponentialRetry())
-
-
----
-
-3. Remove the retry code from the helper
-
-You can completely remove this method:
-
-private Retry createExponentialRetry(LogBuilder logBuilder) {
-    ...
-}
-
-And you can also remove the retry-related isRetryable() from this class because it now belongs in RetryConfig.
-
-This makes the helper responsible for the API call, while RetryConfig is responsible for retry behavior:
-
-TrackingResourceWebClientHelper
-        |
-        | retryWhen()
-        ↓
-    RetryConfig
-        |
-        ├── isRetryable()
-        ├── doBeforeRetry()
-        └── retry exhausted logging
-
-4. One important improvement over the current implementation
-
-Your current isRetryable() logs every exception before deciding whether it is retryable:
-
-log.error(...);
-if (throwable instanceof WebClientResponseException ...)
-
-That means even a 400 or 404 gets logged there.
-
-With the new approach:
-
+API call
+   ↓
 Exception
    ↓
 isRetryable()
    ↓
-400 → false → no retry logging
-500 → true
+true
    ↓
 doBeforeRetry()
    ↓
-log retry attempt
+Log exception + retry attempt
+   ↓
+Backoff
+   ↓
+Retry
 
-So the retry log specifically represents an actual retry, which is cleaner.
+For example:
 
-5. Your existing handleErrorMap() should stay
+Retrying external API request
+retryAttempt=1
+exceptionType=WebClientResponseException
+exceptionMessage=503 Service Unavailable
+statusCode=503
 
-I would not remove the logging from handleErrorMap() yet.
+Then if it fails again:
 
-That logging has a different purpose:
+Retrying external API request
+retryAttempt=2
+...
 
-RetryConfig
-    → logs retry attempts
+And after the final failure:
 
-handleErrorMap()
-    → logs final API error / maps exception
+Retries exhausted for the request
+totalRetries=3
+exceptionType=...
+exceptionMessage=...
 
-You may eventually find that some of the final-error logging is duplicated because onRetryExhaustedThrow() also logs. After testing the complete flow, we can decide whether the exhaustion log should remain in both places.
+Why remove the current log from isRetryable()?
 
-Expected result
+Currently you have:
 
-For a 503:
+log.error(new LogBuilder()
+        .withMessage("Is this request retryable?")
+        .withField("statusCode", statusCode)
+        .toString());
 
-API → 503
- ↓
-isRetryable → true
- ↓
-Retry attempt 1 → LOG
- ↓
-API → 503
- ↓
-Retry attempt 2 → LOG
- ↓
-API → 503
- ↓
-Retry attempt 3 → LOG
- ↓
-Retries exhausted → LOG final exception
- ↓
-handleErrorMap()
+I'd remove it because it doesn't tell you much and can log even when the request won't actually be retried.
 
-For a 400:
+Instead:
 
-API → 400
- ↓
-isRetryable → false
- ↓
-No retry
- ↓
-handleErrorMap()
+isRetryable()
+    → only decides TRUE/FALSE
 
-This is the approach I'd recommend for this class because it gives you the same Reactor-based pattern as P2P Edge, while keeping the retry configuration out of the WebClient helper.
+doBeforeRetry()
+    → logs only when a retry is actually happening
+
+That's a cleaner separation and is consistent with the approach you already implemented in P2P Edge.
+
+One thing to check before changing this: find where createRetry() is being used in this application. If multiple WebClient classes use this same RetryConfig, this change will give them the retry logging centrally, which is exactly what you want for this card.
