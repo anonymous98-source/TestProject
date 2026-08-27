@@ -1,21 +1,25 @@
-Backend – FedEx Surround Data Flow
-FedEx Tracking Event
-→ SurroundTrackingEventController.handleTrackingEvent()
-→ Validate FDX_SIGNATURE and FDX_SUBSCRIPTION_ID headers
-→ Generate expected signature using FedexTrackingEventHashCalculator.encode(requestBody)
-→ Compare FedEx signature with expected signature
-→ If valid, call publish(requestBody)
-→ Parse payload using ObjectMapper
-→ Create SurroundDataDTO and TrackingWebhookDTO
-→ Call TrackingWebhookService.webhookPublisher()
-→ TrackingWebhookServiceImpl.publish()
-→ Serialize TrackingWebhookDTO using ObjectMapper
-→ MessagingPublisher.publish()
-→ Publish message to GCP topic: ADVSHIP_TRACKING_FEDEX_SURROUND
-→ Downstream services consume and process the tracking event.
+Backend – Tracking Data Processor Listener
+Once the FedEx Surround event is published to the GCP topic, the Tracking Data Processor consumes the message through TrackingWebhookFedexListener.
+Flow:
+GCP Pub/Sub Topic
+→ TrackingWebhookFedexListener.configure()
+→ Subscribe using MessagingSubscriber
+→ receiveMessage(PubsubMessage)
+→ Read Pub/Sub message payload
+→ Deserialize payload into FedexWrapper
+→ Extract TrackingFedexDTO using wrapper.getJsonPayload()
+→ Generate GCS file path using Billing Account Number + Tracking Number + Timestamp
+→ If Cold Storage is enabled → Upload complete FedEx payload to GCS bucket
+→ Check Global Subscription configuration
+→ If enabled → RetryableMessageProcessor.processMessage()
+→ If disabled → TrackingWebhookFedexPublisher.trackingFedexPublisher()
+→ Continue with downstream tracking-data processing.
 Key Points
-The Surround Edge Service acts as the entry point for FedEx tracking events.
-Requests are validated for required FedEx headers and signature before publishing.
-The incoming FedEx payload is transformed into the application's TrackingWebhookDTO.
-The validated event is published to GCP Messaging for downstream processing.
-Unknown fields in the FedEx payload are ignored using FAIL_ON_UNKNOWN_PROPERTIES = false, allowing the service to handle additional fields from FedEx without failing.
+TrackingWebhookFedexListener is the Pub/Sub consumer for FedEx Surround tracking events.
+The listener converts the incoming message into FedexWrapper and extracts the actual TrackingFedexDTO.
+The Billing Account Number and Tracking Number are used to construct the GCS cold-storage path.
+When Cold Storage is enabled, the original FedEx payload is stored in GCS for archival/reprocessing purposes.
+Processing behavior is controlled by the Global Subscription Enabled configuration:
+Enabled: Uses the newer RetryableMessageProcessor flow.
+Disabled: Uses the existing TrackingWebhookFedexPublisher flow.
+This listener therefore acts as the bridge between GCP Pub/Sub ingestion and downstream shipment/tracking processing.
