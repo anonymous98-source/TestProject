@@ -1,30 +1,17 @@
-Non-Navigator Originating Shipments
-
-Introduction
-
-Beacon provides tracking and visibility for shipments created through Navigator as well as shipments originating from external systems. These externally created shipments are referred to as Non-Navigator Shipments or Unverified Data.
-
-Non-Navigator shipments are primarily identified by matching the Bill-to Third-Party Account Number with the Billing Group account number associated with the user's location. This allows Beacon to provide a consolidated view of shipments even when they were not created directly through Navigator.
-
-Key Points
-
-1. Shipment Identification
-   Non-Navigator shipments are identified using the Bill-to Third-Party Account Number and the corresponding Billing Group account.
-
-2. Shipment Visibility
-   These shipments are displayed along with Navigator-originating shipments in Shipment Tracking and Shipping History.
-
-3. Include Unverified Data
-   Users with both Navigator and Beacon access can select Include Unverified Data from the Location dropdown to view these shipments.
-
-4. Beacon-Only Users
-   Users who only have Beacon access will not see the Location dropdown and will automatically see the relevant shipment data available to them.
-
-5. Data Availability
-   Since these shipments originate outside Navigator, some Navigator-specific fields may be unavailable and can appear as blank or N/A.
-
-6. External Shipment Data
-   External data, including Surround data, can provide additional shipment and operational information, especially for Beacon+ customers.
-
-7. Broader Beacon Capabilities
-   Non-Navigator shipments can also support features such as POD, notifications, exports, reporting, and data streaming, depending on the shipment type and customer configuration.
+flowchart LR
+    A[External Shipment<br/>Non-Navigator Origin] --> B[Shipment Data<br/>Bill-to Third-Party Account #]
+    
+    B --> C[Billing Group<br/>Account #]
+    
+    C --> D{Account Numbers<br/>Match?}
+    
+    D -- No --> E[Not Included]
+    D -- Yes --> F[Location / Customer]
+    
+    F --> G{Include Unverified<br/>Data Selected?}
+    
+    G -- Yes --> H[Display in Beacon]
+    G -- No --> I[Navigator Shipments Only]
+    
+    H --> J[Shipment Tracking]
+    H --> K[Shipping History]
