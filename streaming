@@ -1,17 +1,21 @@
-flowchart LR
-    A[External Shipment<br/>Non-Navigator Origin] --> B[Shipment Data<br/>Bill-to Third-Party Account #]
-    
-    B --> C[Billing Group<br/>Account #]
-    
-    C --> D{Account Numbers<br/>Match?}
-    
-    D -- No --> E[Not Included]
-    D -- Yes --> F[Location / Customer]
-    
-    F --> G{Include Unverified<br/>Data Selected?}
-    
-    G -- Yes --> H[Display in Beacon]
-    G -- No --> I[Navigator Shipments Only]
-    
-    H --> J[Shipment Tracking]
-    H --> K[Shipping History]
+Backend – FedEx Surround Data Flow
+FedEx Tracking Event
+→ SurroundTrackingEventController.handleTrackingEvent()
+→ Validate FDX_SIGNATURE and FDX_SUBSCRIPTION_ID headers
+→ Generate expected signature using FedexTrackingEventHashCalculator.encode(requestBody)
+→ Compare FedEx signature with expected signature
+→ If valid, call publish(requestBody)
+→ Parse payload using ObjectMapper
+→ Create SurroundDataDTO and TrackingWebhookDTO
+→ Call TrackingWebhookService.webhookPublisher()
+→ TrackingWebhookServiceImpl.publish()
+→ Serialize TrackingWebhookDTO using ObjectMapper
+→ MessagingPublisher.publish()
+→ Publish message to GCP topic: ADVSHIP_TRACKING_FEDEX_SURROUND
+→ Downstream services consume and process the tracking event.
+Key Points
+The Surround Edge Service acts as the entry point for FedEx tracking events.
+Requests are validated for required FedEx headers and signature before publishing.
+The incoming FedEx payload is transformed into the application's TrackingWebhookDTO.
+The validated event is published to GCP Messaging for downstream processing.
+Unknown fields in the FedEx payload are ignored using FAIL_ON_UNKNOWN_PROPERTIES = false, allowing the service to handle additional fields from FedEx without failing.
