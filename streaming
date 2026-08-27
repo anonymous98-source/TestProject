@@ -1,12 +1,31 @@
-Yes, this tracking-pod-service RetryConfig is again the same Reactor pattern. You can apply the same centralized retry logging approach.
+Yes — looking at these three classes together, I would centralize the Reactor retry logging rather than adding the same doBeforeRetry() code separately to each class.
 
-I would make only the retry-observability changes and leave the existing retry behavior intact.
+You have two different patterns:
 
-Updated RetryConfig
+TrackingResourceWebClientHelper
+        └── retry logic inline
 
-package com.cardinalhealth.advship.tracking.pod.service.config;
+OSPWebClientService
+        └── retry logic inline
 
-import com.cardinalhealth.ofl.next.logging.library.LogBuilder;
+RetryableMessageProcessor
+        └── Spring @Retryable
+
+For the first two, you can create one shared Reactor RetryConfig.
+
+For RetryableMessageProcessor, that's different because it uses Spring Retry @Retryable, so it should use a Spring RetryListener separately.
+
+1. Create a common Reactor RetryConfig
+
+Since these classes are in the same application, create:
+
+config/
+    RetryConfig.java
+
+Something like:
+
+package com.cardinalhealth.advship.tracking.data.processor.config;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -19,14 +38,11 @@ import java.time.Duration;
 @Configuration
 public class RetryConfig {
 
-    /**
-     * Creates a Retry object with a maximum number of attempts and an initial delay.
-     *
-     * @param maxAttempts the maximum number of retry attempts
-     * @param initialDelaySeconds the initial delay in seconds before the first retry
-     * @return a Retry object configured with the specified parameters
-     */
-    public Retry createRetry(int maxAttempts, long initialDelaySeconds) {
+    public Retry createRetry(
+            int maxAttempts,
+            long initialDelaySeconds,
+            String serviceName) {
+
         return Retry.backoff(
                     maxAttempts,
                     Duration.ofSeconds(initialDelaySeconds)
@@ -34,31 +50,27 @@ public class RetryConfig {
                 .maxBackoff(Duration.ofSeconds(5))
                 .jitter(0.5)
                 .filter(this::isRetryable)
-                .doBeforeRetry(this::logRetry)
-                .onRetryExhaustedThrow((retryBackoffSpec, retrySignal) -> {
-                    logRetryExhausted(retrySignal);
+                .doBeforeRetry(signal ->
+                        logRetry(signal, serviceName)
+                )
+                .onRetryExhaustedThrow((spec, signal) -> {
+                    logRetryExhausted(signal, serviceName);
 
-                    Throwable lastError = retrySignal.failure();
+                    Throwable failure = signal.failure();
 
-                    if (lastError instanceof RuntimeException) {
-                        return lastError;
+                    if (failure instanceof RuntimeException) {
+                        return failure;
                     }
 
                     return new RuntimeException(
-                            "Retries exhausted for the request",
-                            lastError
+                            "Retries exhausted for " + serviceName,
+                            failure
                     );
                 });
     }
 
-    /**
-     * Determines if a request is retryable based on the exception type and status code.
-     * Retry will happen for 5XX errors and also for network issues and unknown exceptions.
-     *
-     * @param throwable the exception thrown during the request
-     * @return true if the request is retryable, false otherwise
-     */
     public boolean isRetryable(Throwable throwable) {
+
         if (throwable instanceof WebClientResponseException ex) {
             int statusCode = ex.getStatusCode().value();
 
@@ -68,123 +80,285 @@ public class RetryConfig {
         return true;
     }
 
-    /**
-     * Logs exception details for every retry attempt.
-     */
-    private void logRetry(RetrySignal retrySignal) {
-        Throwable failure = retrySignal.failure();
+    private void logRetry(
+            RetrySignal signal,
+            String serviceName) {
 
-        LogBuilder logBuilder = new LogBuilder()
-                .withMessage("Retrying external API request")
-                .withField(
-                        "retryAttempt",
-                        retrySignal.totalRetries() + 1
-                )
-                .withField(
-                        "exceptionType",
-                        failure.getClass().getSimpleName()
-                )
-                .withField(
-                        "exceptionMessage",
-                        failure.getMessage()
-                );
+        Throwable failure = signal.failure();
 
-        if (failure instanceof WebClientResponseException ex) {
-            logBuilder.withField(
-                    "statusCode",
-                    ex.getStatusCode().value()
-            );
-        }
-
-        log.error(logBuilder.toString(), failure);
+        log.error(
+                "Retrying {}. retryAttempt={}, exceptionType={}, " +
+                "message={}, statusCode={}",
+                serviceName,
+                signal.totalRetries() + 1,
+                failure.getClass().getSimpleName(),
+                failure.getMessage(),
+                getStatusCode(failure),
+                failure
+        );
     }
 
-    /**
-     * Logs the final exception when all retry attempts are exhausted.
-     */
-    private void logRetryExhausted(RetrySignal retrySignal) {
-        Throwable failure = retrySignal.failure();
+    private void logRetryExhausted(
+            RetrySignal signal,
+            String serviceName) {
 
-        LogBuilder logBuilder = new LogBuilder()
-                .withMessage("Retries exhausted for the request")
-                .withField(
-                        "totalRetries",
-                        retrySignal.totalRetries()
-                )
-                .withField(
-                        "exceptionType",
-                        failure.getClass().getSimpleName()
-                )
-                .withField(
-                        "exceptionMessage",
-                        failure.getMessage()
-                );
+        Throwable failure = signal.failure();
 
-        if (failure instanceof WebClientResponseException ex) {
-            logBuilder.withField(
-                    "statusCode",
-                    ex.getStatusCode().value()
-            );
+        log.error(
+                "Retries exhausted for {}. totalRetries={}, " +
+                "exceptionType={}, message={}, statusCode={}",
+                serviceName,
+                signal.totalRetries(),
+                failure.getClass().getSimpleName(),
+                failure.getMessage(),
+                getStatusCode(failure),
+                failure
+        );
+    }
+
+    private Integer getStatusCode(Throwable throwable) {
+
+        if (throwable instanceof WebClientResponseException ex) {
+            return ex.getStatusCode().value();
         }
 
-        log.error(logBuilder.toString(), failure);
+        return null;
     }
 }
 
-Changes compared with the current class
+The important part is that the retry configuration is centralized, while the service name allows you to identify which API is retrying.
 
-1. Add:
 
-.doBeforeRetry(this::logRetry)
+---
 
-This logs every retry attempt.
+2. Change TrackingResourceWebClientHelper
 
-2. Add:
+Inject the config:
 
-logRetryExhausted(retrySignal);
+private final RetryConfig retryConfig;
 
-This logs the final failure after retry exhaustion.
+@Autowired
+public TrackingResourceWebClientHelper(
+        ObjectMapper objectMapper,
+        RetryConfig retryConfig) {
 
-3. Remove the logging from isRetryable()
+    this.objectMapper = objectMapper;
+    this.retryConfig = retryConfig;
+}
 
-Currently:
+Then replace:
 
-log.error(new LogBuilder()
-        .withMessage("Is this request retryable?")
-        .withField("statusCode", statusCode)
-        .toString());
+.retryWhen(createExponentialRetry(logBuilder))
 
-Remove this because isRetryable() should only determine whether the exception is retryable.
+with:
 
-The new responsibility is:
+.retryWhen(
+    retryConfig.createRetry(
+        3,
+        2,
+        "Tracking Resource API"
+    )
+)
+
+You can then remove these methods from the helper:
+
+createExponentialRetry()
+isRetryable()
+
+because they're now centralized.
+
+
+---
+
+3. Change OSPWebClientService
+
+Inject the same RetryConfig:
+
+private final RetryConfig retryConfig;
+
+Constructor:
+
+@Autowired
+public OSPWebClientService(
+        @Qualifier("webClientNoAuth") WebClient webClient,
+        TokenGenerationWebClientService tokenGenerationWebClientService,
+        RetryConfig retryConfig) {
+
+    this.webClient = webClient;
+    this.tokenGenerationWebClientService = tokenGenerationWebClientService;
+    this.retryConfig = retryConfig;
+}
+
+Then replace this entire block:
+
+.retryWhen(Retry.backoff(maxRetryAttempts, Duration.ofSeconds(initialDelay))
+        .maxBackoff(...)
+        .jitter(...)
+        .filter(this::isRetryable)
+        .onRetryExhaustedThrow(...))
+
+with:
+
+.retryWhen(
+    retryConfig.createRetry(
+        maxRetryAttempts,
+        initialDelay,
+        "OSP API"
+    )
+)
+
+Then remove:
 
 isRetryable()
-    ↓
-Should retry?
-    ↓
-YES
-    ↓
-doBeforeRetry()
-    ↓
-Log exception + retry count + status
-    ↓
-Retry
 
-One thing to check
+from OSPWebClientService.
 
-Before making this change, do Find Usages → createRetry() in tracking-pod-service.
+This means both APIs now use the same centralized retry logging:
 
-If TrackingResourceWebClientService, CmsWebClient, FedexAccessTokenGenerationService, etc. all use this same RetryConfig, then you only need to modify this class, and all those retry calls will get the new logging automatically.
+TrackingResourceWebClientHelper ──┐
+                                  │
+OSPWebClientService ──────────────┼──> RetryConfig
+                                  │       ↓
+                                  │   isRetryable()
+                                  │       ↓
+                                  │   doBeforeRetry()
+                                  │       ↓
+                                  │   log attempt
+                                  │       ↓
+                                  │   retry
+                                  │
+                                  └──> exhausted → log final exception
 
-Also test at least:
-
-500/503 → retry + log each attempt
-
-Connection/timeout exception → retry + log each attempt
-
-400/404 → no retry
-
-Retries exhausted → final exception logged
+That's much cleaner.
 
 
-This keeps the implementation consistent with the Reactor approach you've already applied to P2P Edge.
+---
+
+4. RetryableMessageProcessor is different
+
+This one:
+
+@Retryable(
+    value = {RuntimeException.class, IllegalArgumentException.class},
+    maxAttempts = 5,
+    backoff = @Backoff(delay = 30000, multiplier = 3.0)
+)
+
+is Spring Retry, not Reactor.
+
+So don't try to use the above RetryConfig here.
+
+For this one, use a Spring RetryListener.
+
+Create:
+
+config/
+    SpringRetryLoggingListener.java
+
+For example:
+
+package com.cardinalhealth.advship.tracking.data.processor.config;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.retry.RetryCallback;
+import org.springframework.retry.RetryContext;
+import org.springframework.retry.RetryListener;
+import org.springframework.stereotype.Component;
+
+@Slf4j
+@Component
+public class SpringRetryLoggingListener implements RetryListener {
+
+    @Override
+    public <T, E extends Throwable> void onError(
+            RetryContext context,
+            RetryCallback<T, E> callback,
+            Throwable throwable) {
+
+        log.error(
+                "Retry attempt failed. retryAttempt={}, exceptionType={}, message={}",
+                context.getRetryCount(),
+                throwable.getClass().getSimpleName(),
+                throwable.getMessage(),
+                throwable
+        );
+    }
+
+    @Override
+    public <T, E extends Throwable> void close(
+            RetryContext context,
+            RetryCallback<T, E> callback,
+            Throwable throwable) {
+
+        if (throwable != null) {
+            log.error(
+                    "Retries exhausted. totalAttempts={}, exceptionType={}, message={}",
+                    context.getRetryCount(),
+                    throwable.getClass().getSimpleName(),
+                    throwable.getMessage(),
+                    throwable
+            );
+        }
+    }
+}
+
+Then associate it with your @Retryable:
+
+@Retryable(
+        value = {
+                RuntimeException.class,
+                IllegalArgumentException.class
+        },
+        maxAttempts = 5,
+        backoff = @Backoff(
+                delay = 30000,
+                multiplier = 3.0
+        ),
+        listeners = "springRetryLoggingListener"
+)
+
+
+---
+
+So you'll have two centralized mechanisms
+
+This is the architecture I'd recommend for this application:
+
+RETRY LOGGING
+                              │
+               ┌──────────────┴──────────────┐
+               │                             │
+        Reactor Retry                  Spring Retry
+               │                             │
+               ↓                             ↓
+        RetryConfig                  RetryLoggingListener
+               │                             │
+       ┌───────┴────────┐                    │
+       ↓                ↓                    ↓
+TrackingResource      OSP             RetryableMessageProcessor
+WebClientHelper       WebClient
+
+Why this is better
+
+You don't end up with:
+
+TrackingResourceWebClientHelper
+    → retry logging
+
+OSPWebClientService
+    → duplicate retry logging
+
+another WebClient
+    → duplicate retry logging
+
+Instead:
+
+All Reactor retry clients
+        ↓
+   RetryConfig
+        ↓
+ one logging implementation
+
+And your Spring @Retryable code gets its own appropriate listener.
+
+One thing I'd change from my earlier suggestions: don't blindly use log.error() for every retry in every service. Since retryable failures are expected behavior, your team's logging standard may prefer warn for individual retry attempts and error only when retries are exhausted. Check what your existing production logging convention is before finalizing the level.
