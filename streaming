@@ -1,25 +1,19 @@
-Backend – Tracking Data Processor Listener
-Once the FedEx Surround event is published to the GCP topic, the Tracking Data Processor consumes the message through TrackingWebhookFedexListener.
-Flow:
-GCP Pub/Sub Topic
-→ TrackingWebhookFedexListener.configure()
-→ Subscribe using MessagingSubscriber
-→ receiveMessage(PubsubMessage)
-→ Read Pub/Sub message payload
-→ Deserialize payload into FedexWrapper
-→ Extract TrackingFedexDTO using wrapper.getJsonPayload()
-→ Generate GCS file path using Billing Account Number + Tracking Number + Timestamp
-→ If Cold Storage is enabled → Upload complete FedEx payload to GCS bucket
-→ Check Global Subscription configuration
-→ If enabled → RetryableMessageProcessor.processMessage()
-→ If disabled → TrackingWebhookFedexPublisher.trackingFedexPublisher()
-→ Continue with downstream tracking-data processing.
-Key Points
-TrackingWebhookFedexListener is the Pub/Sub consumer for FedEx Surround tracking events.
-The listener converts the incoming message into FedexWrapper and extracts the actual TrackingFedexDTO.
-The Billing Account Number and Tracking Number are used to construct the GCS cold-storage path.
-When Cold Storage is enabled, the original FedEx payload is stored in GCS for archival/reprocessing purposes.
-Processing behavior is controlled by the Global Subscription Enabled configuration:
-Enabled: Uses the newer RetryableMessageProcessor flow.
-Disabled: Uses the existing TrackingWebhookFedexPublisher flow.
-This listener therefore acts as the bridge between GCP Pub/Sub ingestion and downstream shipment/tracking processing.
+Yes. Add this as the final part of the Backend flow:
+
+Final Data Persistence
+
+After the FedEx data is consumed and processed by the Tracking Data Processor, the application internally calls the Tracking Resource Application through its POST API. The processed shipment information is then persisted in the shipment table.
+
+Complete flow:
+
+FedEx
+→ Surround Edge Service
+→ GCP Pub/Sub – ADVSHIP_TRACKING_FEDEX_SURROUND
+→ TrackingWebhookFedexListener.receiveMessage()
+→ TrackingFedexDTO
+→ RetryableMessageProcessor / TrackingWebhookFedexPublisher
+→ POST API call to Tracking Resource Application
+→ Shipment data persisted in shipment table
+→ Available for Beacon tracking/history
+
+This is the final persistence point for the FedEx shipment data in the flow being discussed.
