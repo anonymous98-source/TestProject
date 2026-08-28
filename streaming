@@ -1,59 +1,42 @@
-Sure. For this Notification Data Processor RetryConfig, here's the full class with the Reactor-based retry logging added while keeping the existing retry configuration unchanged.
+Absolutely. You can replace the existing RetryConfig completely with this version. It keeps the existing retry behavior/configuration and adds logging for every actual retry attempt.
 
-package com.cardinalhealth.advship.notification.data.processor.config;
+package com.cardinalhealth.advship.webhook.outbound.data.processor.config;
 
-import com.cardinalhealth.advship.notification.data.processor.constant.NotificationDataProcessorConstants;
-import com.cardinalhealth.advship.notification.data.processor.exception.ResourceNotFoundException;
-import com.cardinalhealth.advship.notification.data.processor.exception.UnAuthorizedException;
-import com.cardinalhealth.advship.notification.data.processor.exception.ValidationException;
+import com.cardinalhealth.advship.webhook.outbound.data.processor.constant.WebhookOutboundDataProcessorConstants;
 import com.cardinalhealth.ofl.next.logging.library.LogBuilder;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Duration;
 import lombok.RequiredArgsConstructor;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.util.retry.Retry;
 import reactor.util.retry.Retry.RetrySignal;
 
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
-
 @Slf4j
 @Configuration
 @RequiredArgsConstructor
 public class RetryConfig {
 
-    private final NotificationDataProcessorProperties notificationDataProcessorProperties;
+    private final WebhookOutboundDataProcessorProperties properties;
 
     /**
-     * Creates a Retry object with a maximum number of attempts and an initial delay.
+     * Creates a Retry object with config driven maximum number of attempts
+     * and an initial delay for internal API calls.
      *
      * @return a Retry object configured with the specified parameters
      */
     public Retry createRetry() {
         return Retry.backoff(
-                        notificationDataProcessorProperties.getMaxRetries(),
+                        properties.getInternal().getMaxRetries(),
                         Duration.ofSeconds(
-                                notificationDataProcessorProperties.getInitialRetryDelay()))
+                                properties.getInternal().getInitialRetryDelay()))
                 .maxBackoff(
                         Duration.ofSeconds(
-                                notificationDataProcessorProperties.getMaxBackoff()))
+                                properties.getInternal().getMaxBackoff()))
                 .jitter(
-                        notificationDataProcessorProperties.getJitterFactor())
+                        properties.getInternal().getJitterFactor())
                 .filter(this::isRetryable)
-                .doBeforeRetry(this::logRetry)
-                .onRetryExhaustedThrow((retryBackoffSpec, retrySignal) -> {
-                    logRetryExhausted(retrySignal);
-
-                    return new RuntimeException(
-                            "Retries exhausted for the request",
-                            retrySignal.failure());
-                });
+                .doBeforeRetry(this::logRetry);
     }
 
     /**
@@ -68,30 +51,32 @@ public class RetryConfig {
         if (throwable instanceof WebClientResponseException ex) {
             int statusCode = ex.getStatusCode().value();
 
-            return statusCode >= 500 && statusCode < 600;
+            return statusCode >= WebhookOutboundDataProcessorConstants.API_HTTP_STATUS_CODE_500
+                    && statusCode < WebhookOutboundDataProcessorConstants.API_HTTP_STATUS_CODE_600;
         }
 
         return true;
     }
 
     /**
-     * Logs exception details for every retry attempt.
+     * Logs details for every retry attempt.
      */
     private void logRetry(RetrySignal retrySignal) {
 
         Throwable failure = retrySignal.failure();
 
         LogBuilder logBuilder = new LogBuilder()
-                .withMessage("Retrying Notification Resource API request")
+                .withMessage("Retrying internal API request")
                 .withField(
                         "retryAttempt",
                         retrySignal.totalRetries() + 1)
                 .withField(
-                        "exceptionType",
-                        failure.getClass().getSimpleName())
+                        "exceptionClass",
+                        failure.getClass().getName())
                 .withField(
-                        "exceptionMessage",
-                        failure.getMessage());
+                        "message",
+                        failure.getMessage())
+                .withCause(failure);
 
         if (failure instanceof WebClientResponseException ex) {
             logBuilder.withField(
@@ -99,158 +84,47 @@ public class RetryConfig {
                     ex.getStatusCode().value());
         }
 
-        log.error(
-                logBuilder.toString(),
-                failure);
-    }
-
-    /**
-     * Logs the final exception when all retry attempts are exhausted.
-     */
-    private void logRetryExhausted(RetrySignal retrySignal) {
-
-        Throwable failure = retrySignal.failure();
-
-        LogBuilder logBuilder = new LogBuilder()
-                .withMessage(
-                        "Retries exhausted for Notification Resource API request")
-                .withField(
-                        "totalRetries",
-                        retrySignal.totalRetries())
-                .withField(
-                        "exceptionType",
-                        failure.getClass().getSimpleName())
-                .withField(
-                        "exceptionMessage",
-                        failure.getMessage());
-
-        if (failure instanceof WebClientResponseException ex) {
-            logBuilder.withField(
-                    "statusCode",
-                    ex.getStatusCode().value());
-        }
-
-        log.error(
-                logBuilder.toString(),
-                failure);
-    }
-
-    /**
-     * Handles errors that occur during the WebClient request.
-     *
-     * @param throwable the error that occurred
-     * @return an Exception representing the error
-     */
-    public Exception handleErrorMap(Throwable throwable) {
-
-        if (throwable instanceof WebClientResponseException ex) {
-
-            log.error(
-                    new LogBuilder()
-                            .withReason(ex.getMessage())
-                            .withStackTrace(ex.getStackTrace())
-                            .withMessage(
-                                    "Notification resource API request failed with error")
-                            .toString());
-
-            List<String> errorMessages =
-                    extractErrorMessages(ex.getResponseBodyAsString());
-
-            return switch (ex.getStatusCode().value()) {
-
-                case NotificationDataProcessorConstants.BAD_REQUEST ->
-                        new ValidationException(
-                                "Data is not valid: " + errorMessages);
-
-                case NotificationDataProcessorConstants.UNAUTHORIZED ->
-                        new UnAuthorizedException(
-                                "Not authorized request" + errorMessages);
-
-                case NotificationDataProcessorConstants.NOT_FOUND ->
-                        new ResourceNotFoundException(
-                                "Resource is not found: " + errorMessages);
-
-                default ->
-                        new RuntimeException(
-                                "Unknown HTTP error occurred: "
-                                        + ex.getStatusCode()
-                                        + " - "
-                                        + errorMessages);
-            };
-
-        } else {
-            return new RuntimeException(
-                    "Unexpected error occurred: " + throwable.getMessage());
-        }
-    }
-
-    @SneakyThrows
-    private List<String> extractErrorMessages(String responseBody) {
-
-        LinkedHashSet<String> errorMessages = new LinkedHashSet<>();
-
-        ObjectMapper mapper = new ObjectMapper();
-        JsonNode root = mapper.readTree(responseBody);
-
-        findErrors(root, errorMessages);
-
-        return new ArrayList<>(errorMessages);
-    }
-
-    public void findErrors(JsonNode root, Set<String> errors) {
-
-        if (root.isArray()) {
-            root.elements()
-                    .forEachRemaining(element ->
-                            findErrors(element, errors));
-
-        } else if (root.isObject()) {
-
-            root.fields().forEachRemaining(field -> {
-
-                if (NotificationDataProcessorConstants.ERROR_MESSAGE
-                        .equalsIgnoreCase(field.getKey())) {
-                    errors.add(field.getValue().asText());
-                }
-
-                findErrors(field.getValue(), errors);
-            });
-        }
+        log.warn(logBuilder.toString());
     }
 }
 
-What changed from your original
+What this gives you
 
-The main changes are only these:
+For a 500/503:
+
+Retrying internal API request
+retryAttempt=1
+exceptionClass=WebClientResponseException
+message=503 Service Unavailable
+statusCode=503
+
+Then:
+
+Retrying internal API request
+retryAttempt=2
+...
+
+And so on for every actual retry.
+
+The existing:
+
+maxRetries
+
+initialRetryDelay
+
+maxBackoff
+
+jitter
+
+5xx retry behavior
+
+network/unknown exception retry behavior
+
+
+are all preserved.
+
+The only functional addition is:
 
 .doBeforeRetry(this::logRetry)
 
-and:
-
-logRetryExhausted(retrySignal);
-
-Then isRetryable() is now only responsible for deciding whether to retry.
-
-So the behavior is:
-
-Exception
-   ↓
-isRetryable()
-   ↓
-Retryable?
-   ↓ YES
-doBeforeRetry()
-   ↓
-Log exception + retry count + status
-   ↓
-Retry
-
-And finally:
-
-Retry attempts exhausted
-        ↓
-logRetryExhausted()
-        ↓
-Log final exception + total retries
-
-One thing to verify in this application is that the createRetry() method is actually being used by all the relevant WebClient calls. If some classes have their own Retry.backoff(...), those will need to be refactored separately to use this centralized config.
+So this is safe to use as a direct replacement for the current class.
