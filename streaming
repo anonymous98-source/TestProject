@@ -1,27 +1,14 @@
-Yes, this is another Reactor-based retry, so I would handle it the same way as the other WebClient classes.
+Yes, this cms-edge class is also using Reactor retry, so you can apply the same centralized approach.
 
-Here, the retry logic is currently inside TrackingResourceWebClientService:
+Since you already have the pattern from P2P Edge, I recommend creating a RetryConfig in this service and moving the retry logic there.
 
-.retryWhen(createExponentialRetry(3, Duration.ofSeconds(2)))
+1. Create RetryConfig
 
-and these methods are also local:
+Put it under:
 
-createExponentialRetry()
-isRetryable()
+com.cardinalhealth.advship.tracking.cms.edge.service.config
 
-Recommended approach
-
-Since this application has a dedicated config package, create:
-
-service
- └── config
-      └── RetryConfig.java
-
-Then move the common retry logic there.
-
-RetryConfig
-
-package com.cardinalhealth.advship.tracking.usps.edge.service.config;
+package com.cardinalhealth.advship.tracking.cms.edge.service.config;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Configuration;
@@ -99,85 +86,104 @@ public class RetryConfig {
     }
 }
 
-Then modify your WebClient service
+2. Inject RetryConfig
 
-Add:
+Your class already has:
+
+@RequiredArgsConstructor
+
+so just add:
 
 private final RetryConfig retryConfig;
 
-Your constructor with @RequiredArgsConstructor will automatically inject it.
+to the fields:
 
-Then change:
+private final WebClient webClient;
+private final AdvshipTrackingCmsEdgeProperties advshipTrackingCmsEdgeProperties;
+private final RetryConfig retryConfig;
+
+Lombok will handle the constructor injection.
+
+3. Change retryWhen()
+
+Replace:
 
 .retryWhen(createExponentialRetry(3, Duration.ofSeconds(2)))
 
-to:
+with:
 
 .retryWhen(
-    retryConfig.createRetry(
-        3,
-        Duration.ofSeconds(2)
-    )
-)
-
-So:
-
-return webClient.post()
-        .uri(getURI(endpoint, aspectName))
-        .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-        .header(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
-        .bodyValue(jsonBody)
-        .retrieve()
-        .bodyToMono(WebhookRecordResponse.class)
-        .retryWhen(
-            retryConfig.createRetry(
+        retryConfig.createRetry(
                 3,
                 Duration.ofSeconds(2)
-            )
         )
-        .onErrorMap(this::handleErrorMap)
-        .block();
+)
 
-Then remove these from the WebClient service
+4. Remove the local retry methods
 
-You no longer need:
+After that, you can remove:
 
-private Retry createExponentialRetry(...)
+public Retry createExponentialRetry(...)
 
-or:
+and:
 
 public boolean isRetryable(...)
 
-That leaves the service focused on making the API call and the config responsible for retry behavior/logging.
+from TrackingResourceWebClientService.
 
-Resulting flow
+You can also remove these imports from the service if they're no longer used:
+
+import com.cardinalhealth.ofl.next.logging.library.LogBuilder;
+import reactor.util.retry.Retry;
+
+Result
+
+The service becomes:
 
 TrackingResourceWebClientService
-              ↓
-       retryWhen()
-              ↓
-          RetryConfig
-              ↓
-       isRetryable()
-              ↓
-       Retryable?
-        ↙       ↘
-      YES        NO
-       ↓          ↓
-doBeforeRetry    Error
-       ↓
+          ↓
+     retryWhen()
+          ↓
+      RetryConfig
+          ↓
+     isRetryable()
+          ↓
+      retryable?
+       ↙       ↘
+     YES        NO
+      ↓          ↓
+doBeforeRetry   Error
+      ↓
 log exception
-+ retry counter
-+ status code
-       ↓
-     Retry
-       ↓
-  failure again
-       ↓
-     log again
-       ↓
++ attempt
++ status
+      ↓
+    Retry
+      ↓
+failure again
+      ↓
+log attempt 2
+      ↓
+...
+      ↓
 Retries exhausted
-       ↓
-final exception logged
+      ↓
+log final exception
 
-One thing to note: this class's existing handleErrorMap() already logs the final error. So after implementing logRetryExhausted(), you may see the final exception logged twice—once by RetryConfig and once by handleErrorMap(). I'd run a local test first; if they're duplicates, keep the retry-attempt logs in RetryConfig and decide whether the exhaustion log needs to remain there or can rely on the existing handleErrorMap() logging.
+One thing to check
+
+This class already has handleErrorMap() logging the final exception. So after adding:
+
+logRetryExhausted()
+
+you may get a duplicate final-error log.
+
+I'd first test the actual flow locally. If you see:
+
+Retry attempt 1
+Retry attempt 2
+Retry attempt 3
+Retries exhausted
+API request failed
+
+and the last two are effectively the same information, we can optimize it so that retry attempts are logged centrally and the existing handleErrorMap() remains responsible for the final API error.
