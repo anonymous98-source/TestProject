@@ -1,19 +1,131 @@
-Yes. Add this as the final part of the Backend flow:
+This one is not a Reactor retry, so I would handle it differently.
 
-Final Data Persistence
+Here the retry is a manual while loop, so a RetryConfig or Reactor doBeforeRetry() won't help. You already have a retry counter, so the simplest approach is to add proper exception logging inside the catch and log the final failure when retries are exhausted.
 
-After the FedEx data is consumed and processed by the Tracking Data Processor, the application internally calls the Tracking Resource Application through its POST API. The processed shipment information is then persisted in the shipment table.
+Recommended change
 
-Complete flow:
+Current:
 
-FedEx
-→ Surround Edge Service
-→ GCP Pub/Sub – ADVSHIP_TRACKING_FEDEX_SURROUND
-→ TrackingWebhookFedexListener.receiveMessage()
-→ TrackingFedexDTO
-→ RetryableMessageProcessor / TrackingWebhookFedexPublisher
-→ POST API call to Tracking Resource Application
-→ Shipment data persisted in shipment table
-→ Available for Beacon tracking/history
+} catch (PersistenceException ex) {
+    if (ex.getCause() instanceof ConstraintViolationException
+            || ex.getMessage().contains(NotificationResourceCommonConstant.SUBSCRIPTION_EVENT_CONSTRAINT_NAME)) {
 
-This is the final persistence point for the FedEx shipment data in the flow being discussed.
+        // ...
+        retryAttempts++;
+
+        log.warn(new LogBuilder().withMessage("Attempt: " + retryAttempts
+                + " to save Subscription Events failed due to constraint violation. Retrying...").toString());
+    } else {
+        throw ex;
+    }
+}
+
+Change it to log the actual exception details:
+
+} catch (PersistenceException ex) {
+    if (ex.getCause() instanceof ConstraintViolationException
+            || (ex.getMessage() != null
+            && ex.getMessage().contains(
+                NotificationResourceCommonConstant.SUBSCRIPTION_EVENT_CONSTRAINT_NAME))) {
+
+        retryAttempts++;
+
+        log.warn(
+                new LogBuilder()
+                        .withMessage("Retrying save of Subscription Events after failure")
+                        .withField("retryAttempt", retryAttempts)
+                        .withField("maxRetries", MAX_RETRIES)
+                        .withField("exceptionClass", ex.getClass().getName())
+                        .withField("message", ex.getMessage())
+                        .withStackTrace(ex.getStackTrace())
+                        .toString(),
+                ex
+        );
+
+        // Re-fetch latest events and filter out already existing ones
+        subscriptionEvents.clear();
+        newSubscriptionEvents.clear();
+
+        newSubscriptionEvents = fetchExistingAndCreateNewSubscriptionEvents(
+                notificationInfoRequestDto.getNotifyingStatusList(),
+                subscriptionEvents
+        );
+
+    } else {
+        log.error(
+                new LogBuilder()
+                        .withMessage("Failed to save Subscription Events")
+                        .withField("exceptionClass", ex.getClass().getName())
+                        .withField("message", ex.getMessage())
+                        .withStackTrace(ex.getStackTrace())
+                        .toString(),
+                ex
+        );
+        throw ex;
+    }
+}
+
+Then improve the exhausted case:
+
+if (retryAttempts == MAX_RETRIES) {
+    log.error(
+            new LogBuilder()
+                    .withMessage("Retries exhausted while saving Subscription Events")
+                    .withField("totalRetries", retryAttempts)
+                    .toString()
+    );
+
+    throw new NotificationGenericException(
+            "Failed to save Subscription Events after "
+                    + MAX_RETRIES
+                    + " attempts."
+    );
+}
+
+The resulting flow
+
+DB save
+  ↓
+PersistenceException
+  ↓
+Is it a retryable constraint violation?
+  ↓ YES
+retryAttempts++
+  ↓
+LOG exception + attempt number
+  ↓
+retry
+  ↓
+Exception again
+  ↓
+LOG attempt 2
+  ↓
+...
+  ↓
+MAX_RETRIES reached
+  ↓
+LOG retries exhausted
+  ↓
+throw NotificationGenericException
+
+One important point
+
+This retry is not the same category as your Reactor-based WebClient retries:
+
+WebClient retry
+    → Reactor RetryConfig
+    → doBeforeRetry()
+
+DB retry
+    → manual while loop
+    → log inside catch
+
+So I would not create a common retry configuration just for this method. The retry logic is tightly coupled to the database constraint handling, and the existing retryAttempts already provides the information needed for logging.
+
+Also, notice the small defensive fix:
+
+ex.getMessage() != null
+
+before calling .contains(...); otherwise a null exception message could cause another NullPointerException while handling the original failure.
+
+For this card, I would describe this as adding retry-attempt and final-failure logging to the existing manual retry mechanism, rather than converting it to a listener.
