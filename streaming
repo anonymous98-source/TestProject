@@ -1,130 +1,274 @@
-Absolutely. You can replace the existing RetryConfig completely with this version. It keeps the existing retry behavior/configuration and adds logging for every actual retry attempt.
-
-package com.cardinalhealth.advship.webhook.outbound.data.processor.config;
-
-import com.cardinalhealth.advship.webhook.outbound.data.processor.constant.WebhookOutboundDataProcessorConstants;
-import com.cardinalhealth.ofl.next.logging.library.LogBuilder;
-import java.time.Duration;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
-import reactor.util.retry.Retry;
-import reactor.util.retry.Retry.RetrySignal;
-
-@Slf4j
-@Configuration
-@RequiredArgsConstructor
-public class RetryConfig {
-
-    private final WebhookOutboundDataProcessorProperties properties;
-
-    /**
-     * Creates a Retry object with config driven maximum number of attempts
-     * and an initial delay for internal API calls.
-     *
-     * @return a Retry object configured with the specified parameters
-     */
-    public Retry createRetry() {
-        return Retry.backoff(
-                        properties.getInternal().getMaxRetries(),
-                        Duration.ofSeconds(
-                                properties.getInternal().getInitialRetryDelay()))
-                .maxBackoff(
-                        Duration.ofSeconds(
-                                properties.getInternal().getMaxBackoff()))
-                .jitter(
-                        properties.getInternal().getJitterFactor())
-                .filter(this::isRetryable)
-                .doBeforeRetry(this::logRetry);
-    }
-
-    /**
-     * Determines if a request is retryable based on the exception type and status code.
-     * Retry will happen for 5XX errors and also for network issues and unknown exceptions.
-     *
-     * @param throwable the exception thrown during the request
-     * @return true if the request is retryable, false otherwise
-     */
-    public boolean isRetryable(Throwable throwable) {
-
-        if (throwable instanceof WebClientResponseException ex) {
-            int statusCode = ex.getStatusCode().value();
-
-            return statusCode >= WebhookOutboundDataProcessorConstants.API_HTTP_STATUS_CODE_500
-                    && statusCode < WebhookOutboundDataProcessorConstants.API_HTTP_STATUS_CODE_600;
-        }
-
-        return true;
-    }
-
-    /**
-     * Logs details for every retry attempt.
-     */
-    private void logRetry(RetrySignal retrySignal) {
-
-        Throwable failure = retrySignal.failure();
-
-        LogBuilder logBuilder = new LogBuilder()
-                .withMessage("Retrying internal API request")
-                .withField(
-                        "retryAttempt",
-                        retrySignal.totalRetries() + 1)
-                .withField(
-                        "exceptionClass",
-                        failure.getClass().getName())
-                .withField(
-                        "message",
-                        failure.getMessage())
-                .withCause(failure);
-
-        if (failure instanceof WebClientResponseException ex) {
-            logBuilder.withField(
-                    "statusCode",
-                    ex.getStatusCode().value());
-        }
-
-        log.warn(logBuilder.toString());
-    }
-}
-
-What this gives you
-
-For a 500/503:
-
-Retrying internal API request
-retryAttempt=1
-exceptionClass=WebClientResponseException
-message=503 Service Unavailable
-statusCode=503
-
-Then:
-
-Retrying internal API request
-retryAttempt=2
-...
-
-And so on for every actual retry.
-
-The existing:
-
-maxRetries
-
-initialRetryDelay
-
-maxBackoff
-
-jitter
-
-5xx retry behavior
-
-network/unknown exception retry behavior
+Absolutely. I would continue your existing Confluence in the same style, adding the API details and shipment-fetching flow, then leave a clear placeholder for the Frontend section. I’ve also kept Key Points under each relevant topic, rather than creating one large Key Points section.
 
 
-are all preserved.
+---
 
-The only functional addition is:
+Introduction
 
-.doBeforeRetry(this::logRetry)
+Beacon provides tracking and visibility for shipments created through Navigator as well as shipments originating from external systems. These externally created shipments are referred to as Non-Navigator Shipments or Unverified Data.
 
-So this is safe to use as a direct replacement for the current class.
+Non-Navigator shipments are primarily identified by matching the Bill-to Third-Party Account Number with the Billing Group account number associated with the user's location. This allows Beacon to provide a consolidated view of shipments even when they were not created directly through Navigator.
+
+Key Points
+
+Shipment Identification
+Non-Navigator shipments are identified using the Bill-to Third-Party Account Number and the corresponding Billing Group account.
+
+Shipment Visibility
+These shipments are displayed along with Navigator-originating shipments in Shipment Tracking and Shipping History.
+
+Include Unverified Data
+Users with both Navigator and Beacon access can select Include Unverified Data from the Location dropdown to view these shipments.
+
+Beacon-Only Users
+Users who only have Beacon access will not see the Location dropdown and will automatically see the relevant shipment data available to them.
+
+Data Availability
+Since these shipments originate outside Navigator, some Navigator-specific fields may be unavailable and can appear as blank or N/A.
+
+External Shipment Data
+External data, including Surround data, can provide additional shipment and operational information, especially for Beacon+ customers.
+
+Broader Beacon Capabilities
+Non-Navigator shipments can also support features such as POD, notifications, exports, reporting, and data streaming, depending on the shipment type and customer configuration.
+
+
+---
+
+Backend
+
+FedEx Surround Data Flow
+
+The v1/api/surround-tracking-events API is exposed by the Surround Edge Service to receive shipment/tracking details directly from FedEx.
+
+Flow:
+
+FedEx Tracking Event
+→ SurroundTrackingEventController.handleTrackingEvent()
+→ Validate FDX_SIGNATURE and FDX_SUBSCRIPTION_ID headers
+→ Generate expected signature using FedexTrackingEventHashCalculator.encode(requestBody)
+→ Compare FedEx signature with expected signature
+→ If valid, call publish(requestBody)
+→ Parse payload using ObjectMapper
+→ Create SurroundDataDTO and TrackingWebhookDTO
+→ Call TrackingWebhookService.webhookPublisher()
+→ TrackingWebhookServiceImpl.publish()
+→ Serialize TrackingWebhookDTO using ObjectMapper
+→ MessagingPublisher.publish()
+→ Publish message to GCP topic advship-tracking-fedex-surround
+→ Tracking Data Processor consumes and processes the message
+
+Key Points
+
+The Surround Edge Service acts as the entry point for shipment/tracking details received from FedEx.
+
+The v1/api/surround-tracking-events API is specifically exposed for FedEx to send the shipment details.
+
+Requests are validated for the required FedEx headers and signature before publishing.
+
+The incoming FedEx payload is transformed into the application's TrackingWebhookDTO.
+
+The validated event is published to GCP Pub/Sub for further processing.
+
+Unknown fields in the FedEx payload are ignored using FAIL_ON_UNKNOWN_PROPERTIES = false.
+
+
+
+---
+
+Tracking Data Processor Listener
+
+Once the message is published to the GCP topic, the Tracking Data Processor consumes the message using TrackingWebhookFedexListener.
+
+Flow:
+
+TrackingWebhookFedexListener.configure()
+→ Subscribe using MessagingSubscriber
+→ receiveMessage(PubsubMessage)
+→ Read Pub/Sub message payload
+→ Deserialize payload into FedexWrapper
+→ Extract TrackingFedexDTO using wrapper.getJsonPayload()
+→ Generate GCS file path using Billing Account Number + Tracking Number + Timestamp
+→ If Cold Storage is enabled → Upload complete FedEx payload to GCS bucket
+→ Check Global Subscription configuration
+→ If enabled → RetryableMessageProcessor.processMessage()
+→ If disabled → TrackingWebhookFedexPublisher.trackingFedexPublisher()
+→ Continue with shipment processing
+
+Key Points
+
+TrackingWebhookFedexListener is the Pub/Sub consumer for FedEx Surround tracking events.
+
+The listener converts the incoming message into FedexWrapper and extracts the actual TrackingFedexDTO.
+
+The Billing Account Number and Tracking Number are used to construct the GCS cold-storage path.
+
+When Cold Storage is enabled, the original FedEx payload is stored in GCS for archival/reprocessing purposes.
+
+Processing behavior is controlled by the Global Subscription Enabled configuration:
+
+Enabled: Uses the newer RetryableMessageProcessor flow.
+
+Disabled: Uses the existing TrackingWebhookFedexPublisher flow.
+
+
+
+
+---
+
+Final Data Persistence
+
+After the FedEx data is consumed and processed by the Tracking Data Processor, the application internally calls the Tracking Resource Application through its POST API.
+
+The processed shipment information is ultimately persisted in the shipment table.
+
+Flow:
+
+FedEx
+→ Surround Edge Service
+→ GCP Pub/Sub – advship-tracking-fedex-surround
+→ TrackingWebhookFedexListener.receiveMessage()
+→ TrackingFedexDTO
+→ RetryableMessageProcessor / TrackingWebhookFedexPublisher
+→ POST API to Tracking Resource Application
+→ Shipment processing
+→ shipment table
+→ Available for Beacon tracking/history
+
+Key Points
+
+The Tracking Resource Application is responsible for the final shipment persistence.
+
+The Tracking Data Processor internally invokes the Tracking Resource Application through its POST API.
+
+The processed FedEx shipment information is stored in the shipment table.
+
+This persisted data is subsequently available to Beacon for tracking and history views.
+
+
+
+---
+
+Shipment Creation / Storage
+
+The Tracking Resource Application uses shipmentBook as the aspect name for saving new shipment information.
+
+The overall persistence flow can therefore be represented as:
+
+Tracking Data Processor
+→ POST API to Tracking Resource Application
+→ shipmentBook aspect
+→ Save/Process Shipment
+→ shipment table
+
+Key Points
+
+shipmentBook is the aspect used for saving new shipment information.
+
+FedEx Non-Navigator shipment data eventually reaches the shipment persistence layer through this flow.
+
+The shipment table acts as the persistence layer for the shipment information.
+
+
+
+---
+
+Shipment Fetching / Tracking Details
+
+Once the shipment data is stored, Beacon retrieves shipment information through the Tracking API.
+
+API
+
+POST
+v1/api/tracking
+
+The API is exposed through the advship-tracking-api application.
+
+Flow
+
+v1/api/tracking
+→ TrackingDetailsController
+→ TrackingDetailsServiceImpl
+→ Internal call to /tracking/entities
+→ advship-tracking-resource
+→ trackingDetails aspect
+→ Fetch shipment information
+→ Return shipment data to Tracking API
+→ Beacon
+
+Key Points
+
+v1/api/tracking is the API used for fetching shipment/tracking information.
+
+TrackingDetailsController acts as the API entry point.
+
+TrackingDetailsServiceImpl handles the service-level processing.
+
+The Tracking API internally calls /tracking/entities in advship-tracking-resource.
+
+trackingDetails is the aspect used for fetching shipment information.
+
+The response contains the shipment data required by Beacon's Tracking/History views.
+
+
+
+---
+
+Non-Navigator Shipment Filtering
+
+The shipment-fetching flow also supports filtering based on the isNonNavigator() flag.
+
+When isNonNavigator() = false:
+
+→ Fetches all applicable shipments, including both Navigator and Non-Navigator shipments.
+
+When isNonNavigator() = true:
+
+→ Fetches only Non-Navigator shipments.
+
+Flow:
+
+v1/api/tracking
+→ TrackingDetailsController
+→ TrackingDetailsServiceImpl
+→ /tracking/entities
+→ trackingDetails aspect
+→ Check isNonNavigator()
+→ false → Navigator + Non-Navigator shipments
+→ true → Non-Navigator shipments only
+
+Key Points
+
+isNonNavigator() determines whether the query should return only Non-Navigator shipments or all applicable shipments.
+
+False allows both Navigator and Non-Navigator shipment data to be returned.
+
+True restricts the result to Non-Navigator shipment data.
+
+This filtering is important for supporting the Include Unverified Data functionality in Beacon.
+
+
+
+---
+
+Frontend
+
+> Frontend implementation details to be added here.
+
+
+
+Key Points
+
+Location dropdown and Include Unverified Data behavior
+
+API integration with v1/api/tracking
+
+Handling of Navigator vs. Non-Navigator shipment results
+
+Shipment Tracking and Shipping History UI
+
+Display of missing/N/A fields
+
+Beacon+ fields and additional shipment information
+
+POD and other shipment-level actions
