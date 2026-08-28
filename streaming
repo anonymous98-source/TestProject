@@ -1,131 +1,183 @@
-This one is not a Reactor retry, so I would handle it differently.
+Yes, this is another Reactor-based retry, so I would handle it the same way as the other WebClient classes.
 
-Here the retry is a manual while loop, so a RetryConfig or Reactor doBeforeRetry() won't help. You already have a retry counter, so the simplest approach is to add proper exception logging inside the catch and log the final failure when retries are exhausted.
+Here, the retry logic is currently inside TrackingResourceWebClientService:
 
-Recommended change
+.retryWhen(createExponentialRetry(3, Duration.ofSeconds(2)))
 
-Current:
+and these methods are also local:
 
-} catch (PersistenceException ex) {
-    if (ex.getCause() instanceof ConstraintViolationException
-            || ex.getMessage().contains(NotificationResourceCommonConstant.SUBSCRIPTION_EVENT_CONSTRAINT_NAME)) {
+createExponentialRetry()
+isRetryable()
 
-        // ...
-        retryAttempts++;
+Recommended approach
 
-        log.warn(new LogBuilder().withMessage("Attempt: " + retryAttempts
-                + " to save Subscription Events failed due to constraint violation. Retrying...").toString());
-    } else {
-        throw ex;
+Since this application has a dedicated config package, create:
+
+service
+ └── config
+      └── RetryConfig.java
+
+Then move the common retry logic there.
+
+RetryConfig
+
+package com.cardinalhealth.advship.tracking.usps.edge.service.config;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.util.retry.Retry;
+import reactor.util.retry.Retry.RetrySignal;
+
+import java.time.Duration;
+
+@Slf4j
+@Configuration
+public class RetryConfig {
+
+    public Retry createRetry(int maxAttempts, Duration initialDelay) {
+        return Retry.backoff(maxAttempts, initialDelay)
+                .maxBackoff(Duration.ofSeconds(5))
+                .jitter(0.5)
+                .filter(this::isRetryable)
+                .doBeforeRetry(this::logRetry)
+                .onRetryExhaustedThrow((spec, signal) -> {
+                    logRetryExhausted(signal);
+
+                    return new RuntimeException(
+                            "Retries exhausted for the request",
+                            signal.failure());
+                });
     }
-}
 
-Change it to log the actual exception details:
+    public boolean isRetryable(Throwable throwable) {
 
-} catch (PersistenceException ex) {
-    if (ex.getCause() instanceof ConstraintViolationException
-            || (ex.getMessage() != null
-            && ex.getMessage().contains(
-                NotificationResourceCommonConstant.SUBSCRIPTION_EVENT_CONSTRAINT_NAME))) {
+        if (throwable instanceof WebClientResponseException ex) {
+            int statusCode = ex.getStatusCode().value();
 
-        retryAttempts++;
+            return statusCode >= 500 && statusCode < 600;
+        }
 
-        log.warn(
-                new LogBuilder()
-                        .withMessage("Retrying save of Subscription Events after failure")
-                        .withField("retryAttempt", retryAttempts)
-                        .withField("maxRetries", MAX_RETRIES)
-                        .withField("exceptionClass", ex.getClass().getName())
-                        .withField("message", ex.getMessage())
-                        .withStackTrace(ex.getStackTrace())
-                        .toString(),
-                ex
-        );
+        return true;
+    }
 
-        // Re-fetch latest events and filter out already existing ones
-        subscriptionEvents.clear();
-        newSubscriptionEvents.clear();
+    private void logRetry(RetrySignal signal) {
 
-        newSubscriptionEvents = fetchExistingAndCreateNewSubscriptionEvents(
-                notificationInfoRequestDto.getNotifyingStatusList(),
-                subscriptionEvents
-        );
+        Throwable failure = signal.failure();
 
-    } else {
         log.error(
-                new LogBuilder()
-                        .withMessage("Failed to save Subscription Events")
-                        .withField("exceptionClass", ex.getClass().getName())
-                        .withField("message", ex.getMessage())
-                        .withStackTrace(ex.getStackTrace())
-                        .toString(),
-                ex
-        );
-        throw ex;
+                "Retrying Tracking Resource API request. " +
+                "retryAttempt={}, exceptionType={}, message={}, statusCode={}",
+                signal.totalRetries() + 1,
+                failure.getClass().getSimpleName(),
+                failure.getMessage(),
+                getStatusCode(failure),
+                failure);
+    }
+
+    private void logRetryExhausted(RetrySignal signal) {
+
+        Throwable failure = signal.failure();
+
+        log.error(
+                "Retries exhausted for Tracking Resource API request. " +
+                "totalRetries={}, exceptionType={}, message={}, statusCode={}",
+                signal.totalRetries(),
+                failure.getClass().getSimpleName(),
+                failure.getMessage(),
+                getStatusCode(failure),
+                failure);
+    }
+
+    private Integer getStatusCode(Throwable throwable) {
+
+        if (throwable instanceof WebClientResponseException ex) {
+            return ex.getStatusCode().value();
+        }
+
+        return null;
     }
 }
 
-Then improve the exhausted case:
+Then modify your WebClient service
 
-if (retryAttempts == MAX_RETRIES) {
-    log.error(
-            new LogBuilder()
-                    .withMessage("Retries exhausted while saving Subscription Events")
-                    .withField("totalRetries", retryAttempts)
-                    .toString()
-    );
+Add:
 
-    throw new NotificationGenericException(
-            "Failed to save Subscription Events after "
-                    + MAX_RETRIES
-                    + " attempts."
-    );
-}
+private final RetryConfig retryConfig;
 
-The resulting flow
+Your constructor with @RequiredArgsConstructor will automatically inject it.
 
-DB save
-  ↓
-PersistenceException
-  ↓
-Is it a retryable constraint violation?
-  ↓ YES
-retryAttempts++
-  ↓
-LOG exception + attempt number
-  ↓
-retry
-  ↓
-Exception again
-  ↓
-LOG attempt 2
-  ↓
-...
-  ↓
-MAX_RETRIES reached
-  ↓
-LOG retries exhausted
-  ↓
-throw NotificationGenericException
+Then change:
 
-One important point
+.retryWhen(createExponentialRetry(3, Duration.ofSeconds(2)))
 
-This retry is not the same category as your Reactor-based WebClient retries:
+to:
 
-WebClient retry
-    → Reactor RetryConfig
-    → doBeforeRetry()
+.retryWhen(
+    retryConfig.createRetry(
+        3,
+        Duration.ofSeconds(2)
+    )
+)
 
-DB retry
-    → manual while loop
-    → log inside catch
+So:
 
-So I would not create a common retry configuration just for this method. The retry logic is tightly coupled to the database constraint handling, and the existing retryAttempts already provides the information needed for logging.
+return webClient.post()
+        .uri(getURI(endpoint, aspectName))
+        .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+        .header(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+        .bodyValue(jsonBody)
+        .retrieve()
+        .bodyToMono(WebhookRecordResponse.class)
+        .retryWhen(
+            retryConfig.createRetry(
+                3,
+                Duration.ofSeconds(2)
+            )
+        )
+        .onErrorMap(this::handleErrorMap)
+        .block();
 
-Also, notice the small defensive fix:
+Then remove these from the WebClient service
 
-ex.getMessage() != null
+You no longer need:
 
-before calling .contains(...); otherwise a null exception message could cause another NullPointerException while handling the original failure.
+private Retry createExponentialRetry(...)
 
-For this card, I would describe this as adding retry-attempt and final-failure logging to the existing manual retry mechanism, rather than converting it to a listener.
+or:
+
+public boolean isRetryable(...)
+
+That leaves the service focused on making the API call and the config responsible for retry behavior/logging.
+
+Resulting flow
+
+TrackingResourceWebClientService
+              ↓
+       retryWhen()
+              ↓
+          RetryConfig
+              ↓
+       isRetryable()
+              ↓
+       Retryable?
+        ↙       ↘
+      YES        NO
+       ↓          ↓
+doBeforeRetry    Error
+       ↓
+log exception
++ retry counter
++ status code
+       ↓
+     Retry
+       ↓
+  failure again
+       ↓
+     log again
+       ↓
+Retries exhausted
+       ↓
+final exception logged
+
+One thing to note: this class's existing handleErrorMap() already logs the final error. So after implementing logRetryExhausted(), you may see the final exception logged twice—once by RetryConfig and once by handleErrorMap(). I'd run a local test first; if they're duplicates, keep the retry-attempt logs in RetryConfig and decide whether the exhaustion log needs to remain there or can rely on the existing handleErrorMap() logging.
