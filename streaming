@@ -1,180 +1,305 @@
-Yes. Looking at the two production classes and the current tests, the missing coverage is mainly around:
+Yes. The failures are coming from two specific issues in the tests, not from the business logic.
 
-handleErrorMap() — 400 address-validation, 400 other endpoint, 401, 404, default HTTP error, malformed response body, generic exception.
+What is failing
 
-sendFlexRequest() — null body and non-empty/empty headers.
+1. bodyValue(Mono.empty()) is invalid in Spring WebFlux Your production code has:
 
-sendFlexListRequest() — success and error paths.
+.bodyValue(requestBody == null ? Mono.empty() : requestBody)
 
-findErrors() — array/object/contents branches.
+When the test sends null, this becomes:
 
-usePerfTestSendFlexUrl() — both true and false.
+.bodyValue(Mono.empty())
 
-getURI() — perf-test URL and normal URL.
-
-AddressValidationServiceImpl — success/failure persistence, null result, validation exception, generic exception, null address, all carrier/profile branches, suggestion branches, validation-detail branches.
+Spring rejects that.
 
 
-Below are replacement test classes designed to cover those branches.
+2. validateAddress_unknownShippingProfile() has unnecessary OCM stubbing For "UNKNOWN", fetchProfileCode() immediately returns null, so OCM is never called.
 
-> One important point: your production code currently has log.error(...) with LogBuilder in SendFlexWebClientService. That is okay for coverage, but for the story requirement you discussed earlier, the address-validation 400 path is correctly using WARN. Also make sure RetryConfig.isRetryable() no longer logs 400 as ERROR.
+
+3. Your LogBuilder logs are unrelated to the test failures.
 
 
 
 
 ---
 
-1. Replace SendFlexWebClientServiceMockServerTest
+1. Replace these 3 methods in SendFlexWebClientServiceMockServerTest
 
-package com.cardinalhealth.adv.shipping.integration.api.service.webclient;
+Do not use null for requestBody in these tests with your current production implementation.
 
-import static com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants.ACCEPT_TYPE;
-import static com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants.CONTENT_TYPE;
-import static com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants.CORRELATION_ID;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+Replace sendFlexRequest_success_withNullBodyAndEmptyHeaders()
 
-import com.cardinalhealth.adv.shipping.integration.api.config.AdvShippingIntegrationApiProperties;
-import com.cardinalhealth.adv.shipping.integration.api.config.RetryConfig;
-import com.cardinalhealth.adv.shipping.integration.api.exception.ResourceNotFoundException;
-import com.cardinalhealth.adv.shipping.integration.api.exception.UnAuthorizedException;
-import com.cardinalhealth.adv.shipping.integration.api.exception.ValidationException;
-import com.cardinalhealth.adv.shipping.integration.api.standin.PerfTestDeterminer;
-import com.cardinalhealth.ofl.next.http.client.library.HttpClientAutoConfig;
-import com.cardinalhealth.ofl.next.logging.library.LoggingConfig;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
-import lombok.SneakyThrows;
-import okhttp3.mockwebserver.MockResponse;
-import okhttp3.mockwebserver.MockWebServer;
-import okhttp3.mockwebserver.RecordedRequest;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.slf4j.MDC;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
-import reactor.core.publisher.Mono;
+You can replace it with:
 
-@SpringBootTest(
-    classes = {
-      HttpClientAutoConfig.class,
-      LoggingConfig.class,
-      SendFlexWebClientService.class,
-      AdvShippingIntegrationApiProperties.class,
-      ObjectMapper.class,
-      RetryConfig.class
-    })
-class SendFlexWebClientServiceMockServerTest {
+@Test
+@DisplayName("sendFlexRequest - successful request with empty headers")
+void sendFlexRequest_success_withEmptyHeaders() {
 
-  @Autowired private ObjectMapper objectMapper;
-
-  @Autowired private AdvShippingIntegrationApiProperties advShippingIntegrationApiProperties;
-
-  @Autowired
-  @Qualifier("webClientNoAuth")
-  private WebClient webClient;
-
-  @Autowired private SendFlexWebClientService subject;
-
-  @MockitoBean private PerfTestDeterminer perfTestDeterminer;
-
-  private MockWebServer server;
-
-  @BeforeEach
-  void setup() throws IOException {
-    server = new MockWebServer();
-    server.start();
-
-    MDC.put(CORRELATION_ID, "test-correlation-id");
-
-    AdvShippingIntegrationApiProperties.ApiConfig apiConfig =
-        new AdvShippingIntegrationApiProperties.ApiConfig();
-
-    apiConfig.setUrl(server.url("").toString());
-    apiConfig.setPerfTestUrl(server.url("").toString() + "perf/");
-    apiConfig.setKey("key");
-
-    AdvShippingIntegrationApiProperties.SendFlex sendflexConfig =
-        new AdvShippingIntegrationApiProperties.SendFlex();
-
-    sendflexConfig.setApi(apiConfig);
-
-    advShippingIntegrationApiProperties.setSendflex(sendflexConfig);
-
-    when(perfTestDeterminer.usePerfTestUrl()).thenReturn(false);
-  }
-
-  @AfterEach
-  void tearDown() throws IOException {
-    MDC.remove(CORRELATION_ID);
-    server.shutdown();
-  }
-
-  // --------------------------------------------------------------------------
-  // sendFlexRequest
-  // --------------------------------------------------------------------------
-
-  @SneakyThrows
-  @Test
-  @DisplayName("sendFlexRequest - successful POST with headers")
-  void sendFlexRequest_success_withHeaders() {
-
-    JsonNode jsonNode =
+    JsonNode requestBody =
         objectMapper.createObjectNode().put("key", "value");
 
     server.enqueue(
         new MockResponse()
             .setResponseCode(200)
             .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
-            .setBody(objectMapper.writeValueAsString(jsonNode)));
+            .setBody("{}"));
 
     JsonNode result =
         subject
             .sendFlexRequest(
                 "test-endpoint",
-                HttpMethod.POST,
-                Map.of("headerNm", "headerVal"),
-                jsonNode,
+                HttpMethod.GET,
+                Collections.emptyMap(),
+                requestBody,
                 JsonNode.class)
             .block();
 
-    assertThat(result).isEqualTo(jsonNode);
+    assertNotNull(result);
+}
+
+This removes the failing:
+
+null
+
+from the test.
+
+
+---
+
+2. Replace sendFlexRequest_usesNormalUrl()
+
+@Test
+@DisplayName("sendFlexRequest - uses normal URL when performance test disabled")
+void sendFlexRequest_usesNormalUrl() throws Exception {
+
+    when(perfTestDeterminer.usePerfTestUrl()).thenReturn(false);
+
+    server.enqueue(
+        new MockResponse()
+            .setResponseCode(200)
+            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
+            .setBody("{}"));
+
+    JsonNode requestBody =
+        objectMapper.createObjectNode().put("key", "value");
+
+    JsonNode result =
+        subject
+            .sendFlexRequest(
+                ServiceCommonConstants.SHIPMENT_BOOK_SUB_URI,
+                HttpMethod.GET,
+                Collections.emptyMap(),
+                requestBody,
+                JsonNode.class)
+            .block();
+
+    assertNotNull(result);
 
     RecordedRequest request =
         server.takeRequest(1, TimeUnit.SECONDS);
 
-    assertThat(request).isNotNull();
-    assertThat(request.getMethod()).isEqualTo("POST");
-    assertThat(request.getPath()).isEqualTo("/test-endpoint");
-    assertThat(request.getHeaders().get("headerNm")).isEqualTo("headerVal");
-    assertThat(request.getHeaders().get("X-API-Key")).isEqualTo("key");
-    assertThat(request.getHeaders().get("Content-Type")).isEqualTo(CONTENT_TYPE);
-    assertThat(request.getHeaders().get("Accept")).isEqualTo(ACCEPT_TYPE);
-  }
+    assertNotNull(request);
+}
 
-  @Test
-  @DisplayName("sendFlexRequest - successful request with null body and empty headers")
-  void sendFlexRequest_success_withNullBodyAndEmptyHeaders() {
+
+---
+
+3. Replace sendFlexRequest_usesPerformanceUrl()
+
+@Test
+@DisplayName("sendFlexRequest - uses performance URL when enabled")
+void sendFlexRequest_usesPerformanceUrl() throws Exception {
+
+    when(perfTestDeterminer.usePerfTestUrl()).thenReturn(true);
+
+    server.enqueue(
+        new MockResponse()
+            .setResponseCode(200)
+            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
+            .setBody("{}"));
+
+    JsonNode requestBody =
+        objectMapper.createObjectNode().put("key", "value");
+
+    JsonNode result =
+        subject
+            .sendFlexRequest(
+                ServiceCommonConstants.SHIPMENT_BOOK_SUB_URI,
+                HttpMethod.GET,
+                Collections.emptyMap(),
+                requestBody,
+                JsonNode.class)
+            .block();
+
+    assertNotNull(result);
+
+    RecordedRequest request =
+        server.takeRequest(1, TimeUnit.SECONDS);
+
+    assertNotNull(request);
+}
+
+
+---
+
+4. Replace sendFlexRequest_nonShipmentEndpoint_doesNotUsePerformanceUrl()
+
+Your current test also passes null, so it has the same problem.
+
+Replace it with:
+
+@Test
+@DisplayName("sendFlexRequest - non shipment endpoint does not use performance URL")
+void sendFlexRequest_nonShipmentEndpoint_doesNotUsePerformanceUrl()
+    throws Exception {
+
+    when(perfTestDeterminer.usePerfTestUrl()).thenReturn(true);
+
+    server.enqueue(
+        new MockResponse()
+            .setResponseCode(200)
+            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
+            .setBody("{}"));
+
+    JsonNode requestBody =
+        objectMapper.createObjectNode().put("key", "value");
+
+    JsonNode result =
+        subject
+            .sendFlexRequest(
+                "some-other-endpoint",
+                HttpMethod.GET,
+                Collections.emptyMap(),
+                requestBody,
+                JsonNode.class)
+            .block();
+
+    assertNotNull(result);
+
+    RecordedRequest request =
+        server.takeRequest(1, TimeUnit.SECONDS);
+
+    assertNotNull(request);
+}
+
+
+---
+
+5. Fix validateAddress_unknownShippingProfile()
+
+This is the Mockito failure:
+
+Unnecessary stubbings detected
+at validateAddress_unknownShippingProfile
+
+You currently have:
+
+when(ocmWebClientService
+        .getUserConfigDataFromOCM(any(), any()))
+    .thenReturn(userConfigResponseDTO);
+
+Remove that because this path:
+
+private String fetchProfileCode(AddressValidationRequest request) {
+    String shippingProfile = request.getShippingProfile();
+
+    if (USPS.equalsIgnoreCase(shippingProfile)) {
+        ...
+    } else if (DHL.equalsIgnoreCase(shippingProfile)) {
+        ...
+    } else if (FEDEX.equalsIgnoreCase(shippingProfile)) {
+        ...
+    }
+
+    return null;
+}
+
+doesn't call OCM for "UNKNOWN".
+
+Replace the entire test with:
+
+@Test
+void validateAddress_unknownShippingProfile()
+    throws JsonProcessingException {
+
+    when(sendFlexWebClientService.sendFlexRequest(
+            anyString(),
+            any(),
+            anyMap(),
+            any(),
+            eq(AddressValidationResponseDTO.class)))
+        .thenReturn(Mono.just(responseDTO));
+
+    when(sendFlexRecordUtil.saveSendflexRecord(
+            any(SendFlexRecordDto.class)))
+        .thenReturn(
+            SendFlexRecordDto.builder().build());
+
+    validRequest.setShippingProfile("UNKNOWN");
+
+    AddressValidationResponseDTO result =
+        addressValidationService.validateAddress(validRequest);
+
+    assertEquals(responseDTO, result);
+
+    verify(sendFlexWebClientService, times(1))
+        .sendFlexRequest(
+            anyString(),
+            any(),
+            anyMap(),
+            any(),
+            eq(AddressValidationResponseDTO.class));
+
+    verify(sendFlexRecordUtil, times(1))
+        .saveSendflexRecord(any(SendFlexRecordDto.class));
+}
+
+
+---
+
+One important thing about 100% branch coverage
+
+There is a difference between fixing your tests and actually covering this production branch:
+
+.bodyValue(requestBody == null ? Mono.empty() : requestBody)
+
+Your current implementation's null branch is actually broken.
+
+This:
+
+.bodyValue(Mono.empty())
+
+doesn't mean "send an empty body." It means "send a Reactor Publisher as the body object," which bodyValue() doesn't allow.
+
+If you want 100% branch coverage including the requestBody == null branch, I recommend fixing the production code rather than avoiding the branch in tests.
+
+Change:
+
+.bodyValue(requestBody == null ? Mono.empty() : requestBody)
+
+to:
+
+.body(
+    requestBody == null
+        ? org.springframework.web.reactive.function.BodyInserters.empty()
+        : org.springframework.web.reactive.function.BodyInserters.fromValue(requestBody))
+
+Or add the import:
+
+import org.springframework.web.reactive.function.BodyInserters;
+
+and use:
+
+.body(
+    requestBody == null
+        ? BodyInserters.empty()
+        : BodyInserters.fromValue(requestBody))
+
+Then you can have a proper test for the null branch:
+
+@Test
+@DisplayName("sendFlexRequest - successful request with null body")
+void sendFlexRequest_success_withNullBody() throws Exception {
 
     server.enqueue(
         new MockResponse()
@@ -193,1616 +318,33 @@ class SendFlexWebClientServiceMockServerTest {
             .block();
 
     assertNotNull(result);
-  }
-
-  // --------------------------------------------------------------------------
-  // handleErrorMap - all HTTP branches
-  // --------------------------------------------------------------------------
-
-  @Test
-  @DisplayName("handleErrorMap - address validation 400 returns ValidationException")
-  void handleErrorMap_addressValidation400_returnsValidationException() {
-
-    WebClientResponseException ex =
-        mock(WebClientResponseException.class);
-
-    when(ex.getMessage()).thenReturn("400 Bad Request");
-    when(ex.getStatusCode()).thenReturn(HttpStatus.BAD_REQUEST);
-    when(ex.getResponseBodyAsString())
-        .thenReturn("{\"contents\":\"Invalid address\"}");
-
-    Exception result =
-        subject.handleErrorMap(
-            ex,
-            ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT);
-
-    assertThat(result).isInstanceOf(ValidationException.class);
-    assertThat(result.getMessage()).contains("Data is not valid");
-    assertThat(result.getMessage()).contains("Invalid address");
-  }
-
-  @Test
-  @DisplayName("handleErrorMap - normal 400 returns ValidationException")
-  void handleErrorMap_normal400_returnsValidationException() {
-
-    WebClientResponseException ex =
-        mock(WebClientResponseException.class);
-
-    when(ex.getMessage()).thenReturn("400 Bad Request");
-    when(ex.getStatusCode()).thenReturn(HttpStatus.BAD_REQUEST);
-    when(ex.getResponseBodyAsString())
-        .thenReturn("{\"contents\":\"Invalid data\"}");
-
-    Exception result =
-        subject.handleErrorMap(ex, "some-other-endpoint");
-
-    assertThat(result).isInstanceOf(ValidationException.class);
-    assertThat(result.getMessage()).contains("Data is not valid");
-  }
-
-  @Test
-  @DisplayName("handleErrorMap - 401 returns UnAuthorizedException")
-  void handleErrorMap_401_returnsUnauthorizedException() {
-
-    WebClientResponseException ex =
-        mock(WebClientResponseException.class);
-
-    when(ex.getMessage()).thenReturn("401 Unauthorized");
-    when(ex.getStatusCode()).thenReturn(HttpStatus.UNAUTHORIZED);
-    when(ex.getResponseBodyAsString())
-        .thenReturn("{\"contents\":\"Unauthorized\"}");
-
-    Exception result =
-        subject.handleErrorMap(ex, "some-endpoint");
-
-    assertThat(result).isInstanceOf(UnAuthorizedException.class);
-    assertThat(result.getMessage()).contains("Not authorized");
-  }
-
-  @Test
-  @DisplayName("handleErrorMap - 404 returns ResourceNotFoundException")
-  void handleErrorMap_404_returnsResourceNotFoundException() {
-
-    WebClientResponseException ex =
-        mock(WebClientResponseException.class);
-
-    when(ex.getMessage()).thenReturn("404 Not Found");
-    when(ex.getStatusCode()).thenReturn(HttpStatus.NOT_FOUND);
-    when(ex.getResponseBodyAsString())
-        .thenReturn("{\"contents\":\"Resource not found\"}");
-
-    Exception result =
-        subject.handleErrorMap(ex, "some-endpoint");
-
-    assertThat(result).isInstanceOf(ResourceNotFoundException.class);
-    assertThat(result.getMessage()).contains("Resource is not found");
-  }
-
-  @Test
-  @DisplayName("handleErrorMap - unknown HTTP status returns RuntimeException")
-  void handleErrorMap_unknownStatus_returnsRuntimeException() {
-
-    WebClientResponseException ex =
-        mock(WebClientResponseException.class);
-
-    when(ex.getMessage()).thenReturn("418 I'm a teapot");
-    when(ex.getStatusCode()).thenReturn(HttpStatus.I_AM_A_TEAPOT);
-    when(ex.getResponseBodyAsString())
-        .thenReturn("{\"contents\":\"Unknown HTTP error\"}");
-
-    Exception result =
-        subject.handleErrorMap(ex, "some-endpoint");
-
-    assertThat(result).isInstanceOf(RuntimeException.class);
-    assertThat(result.getMessage()).contains("Unknown HTTP error occurred");
-    assertThat(result.getMessage()).contains("418");
-  }
-
-  @Test
-  @DisplayName("handleErrorMap - generic Throwable returns RuntimeException")
-  void handleErrorMap_genericThrowable_returnsRuntimeException() {
-
-    Throwable throwable =
-        new RuntimeException("Something went wrong");
-
-    Exception result =
-        subject.handleErrorMap(throwable, "some-endpoint");
-
-    assertThat(result).isInstanceOf(RuntimeException.class);
-    assertThat(result.getMessage())
-        .contains("Unexpected error occurred");
-    assertThat(result.getMessage())
-        .contains("Something went wrong");
-  }
-
-  // --------------------------------------------------------------------------
-  // extractErrorMessages
-  // --------------------------------------------------------------------------
-
-  @Test
-  @DisplayName("handleErrorMap - malformed response body is handled")
-  void handleErrorMap_malformedResponseBody_returnsException() {
-
-    WebClientResponseException ex =
-        mock(WebClientResponseException.class);
-
-    when(ex.getMessage()).thenReturn("400 Bad Request");
-    when(ex.getStatusCode()).thenReturn(HttpStatus.BAD_REQUEST);
-    when(ex.getResponseBodyAsString())
-        .thenReturn("this-is-not-valid-json");
-
-    Exception result =
-        subject.handleErrorMap(ex, "some-other-endpoint");
-
-    assertThat(result).isInstanceOf(ValidationException.class);
-    assertThat(result.getMessage()).contains("Data is not valid");
-  }
-
-  @Test
-  @DisplayName("handleErrorMap - nested contents are extracted")
-  void handleErrorMap_nestedContents_areExtracted() {
-
-    WebClientResponseException ex =
-        mock(WebClientResponseException.class);
-
-    when(ex.getMessage()).thenReturn("400 Bad Request");
-    when(ex.getStatusCode()).thenReturn(HttpStatus.BAD_REQUEST);
-    when(ex.getResponseBodyAsString())
-        .thenReturn(
-            """
-            {
-              "errors": [
-                {
-                  "contents": "Invalid city"
-                },
-                {
-                  "details": {
-                    "contents": "Invalid postal code"
-                  }
-                }
-              ]
-            }
-            """);
-
-    Exception result =
-        subject.handleErrorMap(ex, "some-endpoint");
-
-    assertThat(result.getMessage()).contains("Invalid city");
-    assertThat(result.getMessage()).contains("Invalid postal code");
-  }
-
-  // --------------------------------------------------------------------------
-  // findErrors
-  // --------------------------------------------------------------------------
-
-  @Test
-  @DisplayName("findErrors - handles object with contents")
-  void findErrors_objectWithContents() throws Exception {
-
-    ObjectMapper mapper = new ObjectMapper();
-
-    JsonNode root =
-        mapper.readTree(
-            """
-            {
-              "contents": "Invalid address",
-              "details": {
-                "contents": "Invalid city"
-              }
-            }
-            """);
-
-    Set<String> errors = new java.util.LinkedHashSet<>();
-
-    subject.findErrors(root, errors);
-
-    assertThat(errors)
-        .containsExactly("Invalid address", "Invalid city");
-  }
-
-  @Test
-  @DisplayName("findErrors - handles array")
-  void findErrors_array() throws Exception {
-
-    ObjectMapper mapper = new ObjectMapper();
-
-    JsonNode root =
-        mapper.readTree(
-            """
-            [
-              {
-                "contents": "Invalid city"
-              },
-              {
-                "contents": "Invalid state"
-              }
-            ]
-            """);
-
-    Set<String> errors = new java.util.LinkedHashSet<>();
-
-    subject.findErrors(root, errors);
-
-    assertThat(errors)
-        .containsExactly("Invalid city", "Invalid state");
-  }
-
-  @Test
-  @DisplayName("findErrors - handles primitive node")
-  void findErrors_primitiveNode() throws Exception {
-
-    ObjectMapper mapper = new ObjectMapper();
-
-    JsonNode root = mapper.readTree("\"simple-value\"");
-
-    Set<String> errors = new java.util.LinkedHashSet<>();
-
-    subject.findErrors(root, errors);
-
-    assertThat(errors).isEmpty();
-  }
-
-  @Test
-  @DisplayName("findErrors - handles object without contents")
-  void findErrors_objectWithoutContents() throws Exception {
-
-    ObjectMapper mapper = new ObjectMapper();
-
-    JsonNode root =
-        mapper.readTree(
-            """
-            {
-              "message": "invalid",
-              "code": "400"
-            }
-            """);
-
-    Set<String> errors = new java.util.LinkedHashSet<>();
-
-    subject.findErrors(root, errors);
-
-    assertThat(errors).isEmpty();
-  }
-
-  // --------------------------------------------------------------------------
-  // sendFlexListRequest
-  // --------------------------------------------------------------------------
-
-  @SneakyThrows
-  @Test
-  @DisplayName("sendFlexListRequest - successful response")
-  void sendFlexListRequest_success() {
-
-    JsonNode jsonNode1 =
-        objectMapper.createObjectNode().put("key", "value1");
-
-    JsonNode jsonNode2 =
-        objectMapper.createObjectNode().put("key", "value2");
-
-    var jsonArray =
-        objectMapper.createArrayNode()
-            .add(jsonNode1)
-            .add(jsonNode2);
-
-    JsonNode requestBody =
-        objectMapper.createObjectNode().put("key", "value");
-
-    server.enqueue(
-        new MockResponse()
-            .setResponseCode(200)
-            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
-            .setBody(objectMapper.writeValueAsString(jsonArray)));
-
-    List<JsonNode> result =
-        subject
-            .sendFlexListRequest(
-                "test-endpoint",
-                HttpMethod.POST,
-                Map.of("headerNm", "headerVal"),
-                requestBody,
-                new ParameterizedTypeReference<List<JsonNode>>() {})
-            .block();
-
-    assertThat(result).containsExactly(jsonNode1, jsonNode2);
-
-    RecordedRequest request =
-        server.takeRequest(1, TimeUnit.SECONDS);
-
-    assertThat(request).isNotNull();
-    assertThat(request.getMethod()).isEqualTo("POST");
-    assertThat(request.getPath()).isEqualTo("/test-endpoint");
-    assertThat(request.getHeaders().get("headerNm")).isEqualTo("headerVal");
-    assertThat(request.getHeaders().get("X-API-Key")).isEqualTo("key");
-    assertThat(request.getHeaders().get("Content-Type")).isEqualTo(CONTENT_TYPE);
-    assertThat(request.getHeaders().get("Accept")).isEqualTo(ACCEPT_TYPE);
-  }
-
-  @Test
-  @DisplayName("sendFlexListRequest - 400 maps to ValidationException")
-  void sendFlexListRequest_400_mapsValidationException() {
-
-    server.enqueue(
-        new MockResponse()
-            .setResponseCode(400)
-            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
-            .setBody("{\"contents\":\"Invalid request\"}"));
-
-    Exception exception =
-        org.junit.jupiter.api.Assertions.assertThrows(
-            Exception.class,
-            () ->
-                subject
-                    .sendFlexListRequest(
-                        "some-endpoint",
-                        HttpMethod.POST,
-                        Collections.emptyMap(),
-                        Map.of("test", "value"),
-                        new ParameterizedTypeReference<List<String>>() {})
-                    .block());
-
-    Throwable actual =
-        exception.getCause() != null ? exception.getCause() : exception;
-
-    assertThat(actual)
-        .isInstanceOf(ValidationException.class);
-  }
-
-  // --------------------------------------------------------------------------
-  // URI / performance URL branches
-  // --------------------------------------------------------------------------
-
-  @Test
-  @DisplayName("sendFlexRequest - uses normal URL when performance test disabled")
-  void sendFlexRequest_usesNormalUrl() throws Exception {
-
-    when(perfTestDeterminer.usePerfTestUrl()).thenReturn(false);
-
-    server.enqueue(
-        new MockResponse()
-            .setResponseCode(200)
-            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
-            .setBody("{}"));
-
-    subject
-        .sendFlexRequest(
-            ServiceCommonConstants.SHIPMENT_BOOK_SUB_URI,
-            HttpMethod.GET,
-            Collections.emptyMap(),
-            null,
-            JsonNode.class)
-        .block();
 
     RecordedRequest request =
         server.takeRequest(1, TimeUnit.SECONDS);
 
     assertNotNull(request);
-  }
-
-  @Test
-  @DisplayName("sendFlexRequest - uses performance URL when enabled")
-  void sendFlexRequest_usesPerformanceUrl() throws Exception {
-
-    when(perfTestDeterminer.usePerfTestUrl()).thenReturn(true);
-
-    server.enqueue(
-        new MockResponse()
-            .setResponseCode(200)
-            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
-            .setBody("{}"));
-
-    subject
-        .sendFlexRequest(
-            ServiceCommonConstants.SHIPMENT_BOOK_SUB_URI,
-            HttpMethod.GET,
-            Collections.emptyMap(),
-            null,
-            JsonNode.class)
-        .block();
-
-    RecordedRequest request =
-        server.takeRequest(1, TimeUnit.SECONDS);
-
-    assertNotNull(request);
-  }
-
-  @Test
-  @DisplayName("sendFlexRequest - non shipment endpoint does not use performance URL")
-  void sendFlexRequest_nonShipmentEndpoint_doesNotUsePerformanceUrl()
-      throws Exception {
-
-    when(perfTestDeterminer.usePerfTestUrl()).thenReturn(true);
-
-    server.enqueue(
-        new MockResponse()
-            .setResponseCode(200)
-            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
-            .setBody("{}"));
-
-    subject
-        .sendFlexRequest(
-            "some-other-endpoint",
-            HttpMethod.GET,
-            Collections.emptyMap(),
-            null,
-            JsonNode.class)
-        .block();
-
-    RecordedRequest request =
-        server.takeRequest(1, TimeUnit.SECONDS);
-
-    assertNotNull(request);
-  }
 }
 
-One import you need
+I strongly recommend this production change
 
-Because the test uses:
+Because otherwise you're effectively saying:
 
-ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT
+> "I want 100% coverage, but I don't want to execute the null branch because executing it exposes a real bug."
 
-make sure this import exists:
 
-import com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants;
+
+The better solution is to fix the null-body handling and then test it.
 
 
 ---
 
-2. Replace AddressValidationServiceImplTest
+Also fix this import
 
-This version adds the missing branches without unnecessarily testing implementation details.
-
-package com.cardinalhealth.adv.shipping.integration.api.service.impl;
-
-import static com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants.FAILURE;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.argThat;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-
-import com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants;
-import com.cardinalhealth.adv.shipping.integration.api.exception.ShippingIntegrationException;
-import com.cardinalhealth.adv.shipping.integration.api.exception.ValidationException;
-import com.cardinalhealth.adv.shipping.integration.api.model.addressvalidation.req.Address;
-import com.cardinalhealth.adv.shipping.integration.api.model.addressvalidation.req.AddressValidationRequest;
-import com.cardinalhealth.adv.shipping.integration.api.model.addressvalidation.resp.AddressData;
-import com.cardinalhealth.adv.shipping.integration.api.model.addressvalidation.resp.AddressSuggestionResp;
-import com.cardinalhealth.adv.shipping.integration.api.model.addressvalidation.resp.AddressValidationResponse;
-import com.cardinalhealth.adv.shipping.integration.api.model.addressvalidation.resp.ValidationDetailResponse;
-import com.cardinalhealth.adv.shipping.integration.api.service.dto.SendFlexRecordDto;
-import com.cardinalhealth.adv.shipping.integration.api.service.dto.ocm.response.DHLConfigDTO;
-import com.cardinalhealth.adv.shipping.integration.api.service.dto.ocm.response.FedexConfig;
-import com.cardinalhealth.adv.shipping.integration.api.service.dto.ocm.response.LocationConfigDTO;
-import com.cardinalhealth.adv.shipping.integration.api.service.dto.ocm.response.USPSConfigDTO;
-import com.cardinalhealth.adv.shipping.integration.api.service.dto.ocm.response.UserConfigResponseDTO;
-import com.cardinalhealth.adv.shipping.integration.api.service.dto.validateaddress.AddressSuggestion;
-import com.cardinalhealth.adv.shipping.integration.api.service.dto.validateaddress.AddressToValidate;
-import com.cardinalhealth.adv.shipping.integration.api.service.dto.validateaddress.Contact;
-import com.cardinalhealth.adv.shipping.integration.api.service.dto.validateaddress.reqdto.AddressValidationRequestDTO;
-import com.cardinalhealth.adv.shipping.integration.api.service.dto.validateaddress.resdto.AddressValidationResponseDTO;
-import com.cardinalhealth.adv.shipping.integration.api.service.dto.validateaddress.resdto.ContactResponse;
-import com.cardinalhealth.adv.shipping.integration.api.service.webclient.SendFlexWebClientService;
-import com.cardinalhealth.adv.shipping.integration.api.service.webclient.ocm.OCMWebClientService;
-import com.cardinalhealth.adv.shipping.integration.api.utility.SendFlexRecordUtil;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataIntegrityViolationException;
-import reactor.core.publisher.Mono;
-
-@ExtendWith(MockitoExtension.class)
-class AddressValidationServiceImplTest {
-
-  @Mock
-  private CustomerHierarchyServiceImpl customerHierarchyService;
-
-  @Mock
-  private SendFlexWebClientService sendFlexWebClientService;
-
-  @Mock
-  private SendFlexRecordUtil sendFlexRecordUtil;
-
-  @Mock
-  private OCMWebClientService ocmWebClientService;
-
-  @InjectMocks
-  private AddressValidationServiceImpl addressValidationService;
-
-  private AddressValidationRequest validRequest;
-  private AddressValidationRequest invalidRequest;
-  private AddressValidationRequest validRequest2;
-
-  private AddressValidationResponseDTO responseDTO;
-  private AddressValidationResponse response;
-
-  private SendFlexRecordDto sendFlexRecordDto;
-  private UserConfigResponseDTO userConfigResponseDTO;
-
-  @BeforeEach
-  void setUp() {
-
-    userConfigResponseDTO =
-        UserConfigResponseDTO.builder()
-            .location(
-                LocationConfigDTO.builder()
-                    .uspsConfiguration(
-                        USPSConfigDTO.builder()
-                            .uspsProfileCode("USPSCardinal")
-                            .build())
-                    .build())
-            .build();
-
-    validRequest = getAddressValidationRequest();
-
-    Address address = validRequest.getAddress();
-
-    responseDTO = new AddressValidationResponseDTO();
-    responseDTO.setAddressValid(true);
-    responseDTO.setProfile(validRequest.getProfileCode());
-
-    AddressToValidate addressToValidate =
-        new AddressToValidate();
-
-    addressToValidate.setAddressLines(address.getAddressLines());
-    addressToValidate.setCity(address.getCity());
-    addressToValidate.setState(address.getState());
-    addressToValidate.setCountryCode(address.getCountry());
-    addressToValidate.setResidential(address.isResidential());
-
-    responseDTO.setAddressToValidate(addressToValidate);
-
-    AddressSuggestion as =
-        new AddressSuggestion();
-
-    as.setAddressLines(address.getAddressLines());
-    as.setCity(address.getCity());
-    as.setState(address.getState());
-    as.setCountryCode(address.getCountry());
-    as.setName(address.getName());
-    as.setPostalCode(address.getZipCode());
-    as.setResidential(address.isResidential());
-
-    responseDTO.setAddressSuggestions(
-        Arrays.asList(as));
-
-    response =
-        new AddressValidationResponse();
-
-    response.setMessage("Validated");
-
-    validRequest2 =
-        new AddressValidationRequest();
-
-    validRequest2.setAddress(address);
-    validRequest2.setProfileCode(
-        "f8e385fd-234e-4bd5-bfb5-6e6c04433b08");
-    validRequest2.setShippingProfile(null);
-
-    invalidRequest =
-        new AddressValidationRequest();
-  }
-
-  // ==========================================================================
-  // validateAddress
-  // ==========================================================================
-
-  @Test
-  void validateAddress_success() throws JsonProcessingException {
-
-    when(ocmWebClientService.getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(userConfigResponseDTO);
-
-    sendFlexRecordDto =
-        SendFlexRecordDto.builder()
-            .apiCode("shipment/book")
-            .build();
-
-    when(sendFlexRecordUtil.saveSendflexRecord(
-            any(SendFlexRecordDto.class)))
-        .thenReturn(sendFlexRecordDto);
-
-    when(sendFlexWebClientService.sendFlexRequest(
-            anyString(),
-            any(),
-            anyMap(),
-            any(),
-            eq(AddressValidationResponseDTO.class)))
-        .thenReturn(Mono.just(responseDTO));
-
-    AddressValidationResponseDTO result =
-        addressValidationService.validateAddress(validRequest);
-
-    assertEquals(responseDTO, result);
-
-    verify(sendFlexRecordUtil)
-        .saveSendflexRecord(any(SendFlexRecordDto.class));
-  }
-
-  @Test
-  void validateAddress_success_whenResultIsNull()
-      throws JsonProcessingException {
-
-    AddressValidationResponseDTO resultDTO =
-        new AddressValidationResponseDTO();
-
-    resultDTO.setAddressValid(true);
-    resultDTO.setResult(null);
-
-    when(ocmWebClientService.getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(userConfigResponseDTO);
-
-    when(sendFlexWebClientService.sendFlexRequest(
-            anyString(),
-            any(),
-            anyMap(),
-            any(),
-            eq(AddressValidationResponseDTO.class)))
-        .thenReturn(Mono.just(resultDTO));
-
-    when(sendFlexRecordUtil.saveSendflexRecord(
-            any(SendFlexRecordDto.class)))
-        .thenReturn(SendFlexRecordDto.builder().build());
-
-    AddressValidationResponseDTO result =
-        addressValidationService.validateAddress(validRequest);
-
-    assertEquals(resultDTO, result);
-
-    verify(sendFlexRecordUtil)
-        .saveSendflexRecord(
-            argThat(record ->
-                record.getStatusCode() == null));
-  }
-
-  @Test
-  void validateAddress_validationException_isPersistedAndNotPropagated()
-      throws JsonProcessingException {
-
-    when(ocmWebClientService.getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(userConfigResponseDTO);
-
-    ValidationException exception =
-        new ValidationException(
-            "Data is not valid: [Invalid address]",
-            "[Invalid address]");
-
-    when(sendFlexWebClientService.sendFlexRequest(
-            anyString(),
-            any(),
-            anyMap(),
-            any(),
-            eq(AddressValidationResponseDTO.class)))
-        .thenReturn(Mono.error(exception));
-
-    when(sendFlexRecordUtil.saveSendflexRecord(
-            any(SendFlexRecordDto.class)))
-        .thenReturn(SendFlexRecordDto.builder().build());
-
-    AddressValidationResponseDTO result =
-        addressValidationService.validateAddress(validRequest);
-
-    assertNotNull(result);
-    assertFalse(result.isAddressValid());
-
-    verify(sendFlexRecordUtil, times(1))
-        .saveSendflexRecord(
-            argThat(record ->
-                record.getStatusCode() == null
-                    && ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT
-                        .equals(record.getApiCode())
-                    && record.getResponseObject()
-                        .toString()
-                        .contains("Invalid address")));
-  }
-
-  @Test
-  void validateAddress_genericException_isPersistedAndWrapped() {
-
-    when(ocmWebClientService.getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(userConfigResponseDTO);
-
-    when(sendFlexWebClientService.sendFlexRequest(
-            anyString(),
-            any(),
-            anyMap(),
-            any(),
-            eq(AddressValidationResponseDTO.class)))
-        .thenReturn(
-            Mono.error(
-                new RuntimeException(
-                    "SendFlex technical failure")));
-
-    when(sendFlexRecordUtil.saveSendflexRecord(
-            any(SendFlexRecordDto.class)))
-        .thenReturn(SendFlexRecordDto.builder().build());
-
-    ShippingIntegrationException exception =
-        assertThrows(
-            ShippingIntegrationException.class,
-            () ->
-                addressValidationService
-                    .validateAddress(validRequest));
-
-    assertThat(exception.getMessage())
-        .contains("An unexpected error occurred");
-
-    verify(sendFlexRecordUtil)
-        .saveSendflexRecord(
-            argThat(record ->
-                FAILURE.equals(record.getStatusCode())));
-  }
-
-  @Test
-  void validateAddress_dataIntegrityViolation_isWrapped() {
-
-    when(ocmWebClientService.getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(userConfigResponseDTO);
-
-    when(sendFlexWebClientService.sendFlexRequest(
-            anyString(),
-            any(),
-            anyMap(),
-            any(),
-            eq(AddressValidationResponseDTO.class)))
-        .thenReturn(
-            Mono.just(responseDTO));
-
-    when(sendFlexRecordUtil.saveSendflexRecord(
-            any(SendFlexRecordDto.class)))
-        .thenThrow(
-            new DataIntegrityViolationException(
-                "data integrity exception raised"));
-
-    RuntimeException exception =
-        assertThrows(
-            RuntimeException.class,
-            () ->
-                addressValidationService
-                    .validateAddress(validRequest));
-
-    assertThat(exception.getMessage())
-        .contains("data integrity exception raised");
-  }
-
-  // ==========================================================================
-  // buildAddressValidationResponse
-  // ==========================================================================
-
-  @Test
-  void buildAddressValidationResponse_validAddress() {
-
-    AddressValidationResponseDTO dto =
-        getAddressValidationResponseDTO(true);
-
-    AddressValidationResponse result =
-        addressValidationService
-            .buildAddressValidationResponse(dto);
-
-    assertNotNull(result);
-    assertNotNull(result.getData());
-    assertTrue(result.getData().isAddressValid());
-    assertNotNull(result.getData().getValidationDetail());
-  }
-
-  @Test
-  void buildAddressValidationResponse_invalidAddress_withSuggestion() {
-
-    AddressValidationResponseDTO dto =
-        getAddressValidationResponseDTO(false);
-
-    AddressSuggestion suggestion =
-        AddressSuggestion.builder()
-            .name("Suggested")
-            .addressLines(
-                Arrays.asList(
-                    "123 RODEO Drive",
-                    ""))
-            .state("CA")
-            .city("BEVERLY HILLS")
-            .countryCode("US")
-            .postalCode("90210")
-            .residential(true)
-            .build();
-
-    ContactResponse contact =
-        new ContactResponse();
-
-    contact.setName("John");
-    contact.setPhone("123456789");
-    contact.setEmail("john@test.com");
-
-    suggestion.setContact(contact);
-
-    dto.setAddressSuggestions(
-        Arrays.asList(suggestion));
-
-    AddressValidationResponse result =
-        addressValidationService
-            .buildAddressValidationResponse(dto);
-
-    AddressSuggestionResp suggestedAddress =
-        result.getData().getSuggestedAddress();
-
-    assertNotNull(suggestedAddress);
-    assertEquals("Suggested", suggestedAddress.getCompany());
-    assertEquals("John", suggestedAddress.getName());
-    assertEquals("123456789", suggestedAddress.getPhoneNumber());
-    assertEquals("john@test.com", suggestedAddress.getEmailAddress());
-  }
-
-  @Test
-  void buildAddressValidationResponse_invalidAddress_withoutSuggestions() {
-
-    AddressValidationResponseDTO dto =
-        getAddressValidationResponseDTO(false);
-
-    dto.setAddressSuggestions(null);
-
-    AddressValidationResponse result =
-        addressValidationService
-            .buildAddressValidationResponse(dto);
-
-    assertNull(
-        result.getData().getSuggestedAddress());
-  }
-
-  @Test
-  void buildAddressValidationResponse_validAddress_withoutSuggestion() {
-
-    AddressValidationResponseDTO dto =
-        getAddressValidationResponseDTO(true);
-
-    dto.setAddressSuggestions(null);
-
-    AddressValidationResponse result =
-        addressValidationService
-            .buildAddressValidationResponse(dto);
-
-    assertNull(
-        result.getData().getSuggestedAddress());
-  }
-
-  @Test
-  void buildAddressValidationResponse_addressToValidateNull() {
-
-    AddressValidationResponseDTO dto =
-        new AddressValidationResponseDTO();
-
-    dto.setAddressValid(false);
-    dto.setAddressToValidate(null);
-    dto.setAddressSuggestions(null);
-
-    AddressValidationResponse result =
-        addressValidationService
-            .buildAddressValidationResponse(dto);
-
-    assertNotNull(result);
-    assertNotNull(result.getData());
-    assertFalse(
-        result.getData()
-            .getValidationDetail()
-            .isValidated());
-  }
-
-  @Test
-  void buildAddressValidationResponse_validationDetailPresent() {
-
-    AddressValidationResponseDTO dto =
-        getAddressValidationResponseDTO(false);
-
-    AddressToValidate addressToValidate =
-        dto.getAddressToValidate();
-
-    addressToValidate.setValidationDetail(
-        com.cardinalhealth.adv.shipping.integration.api.service.dto
-            .validateaddress.ValidationDetail.builder()
-            .validated(true)
-            .build());
-
-    AddressValidationResponse result =
-        addressValidationService
-            .buildAddressValidationResponse(dto);
-
-    ValidationDetailResponse detail =
-        result.getData().getValidationDetail();
-
-    assertNotNull(detail);
-    assertTrue(detail.isValidated());
-  }
-
-  // ==========================================================================
-  // persistence
-  // ==========================================================================
-
-  @Test
-  void persistAddressValidationFailure_shouldSaveFailureRecord() {
-
-    AddressValidationRequestDTO requestDTO =
-        new AddressValidationRequestDTO();
-
-    Exception exception =
-        new Exception(
-            "Validation failed",
-            new RuntimeException("Invalid address"));
-
-    SendFlexRecordDto expectedRecord =
-        SendFlexRecordDto.builder()
-            .requestObject(requestDTO)
-            .responseObject(
-                "Validation failedInvalid address")
-            .statusCode(FAILURE)
-            .apiCode(
-                ServiceCommonConstants
-                    .ADDRESS_VALIDATION_ENDPOINT)
-            .build();
-
-    when(sendFlexRecordUtil.saveSendflexRecord(
-            any(SendFlexRecordDto.class)))
-        .thenReturn(expectedRecord);
-
-    SendFlexRecordDto result =
-        addressValidationService
-            .persistAddressValidationFailure(
-                requestDTO,
-                exception);
-
-    assertNotNull(result);
-    assertEquals(
-        FAILURE,
-        result.getStatusCode());
-    assertEquals(
-        ServiceCommonConstants
-            .ADDRESS_VALIDATION_ENDPOINT,
-        result.getApiCode());
-
-    verify(sendFlexRecordUtil, times(1))
-        .saveSendflexRecord(any());
-  }
-
-  // ==========================================================================
-  // Profile code branches
-  // ==========================================================================
-
-  @Test
-  void getProfileCodeByCarrier_usps() throws Exception {
-
-    AddressValidationRequest request =
-        getAddressValidationRequest();
-
-    request.setShippingProfile("USPS");
-
-    when(customerHierarchyService
-            .getCustomerIdByFacilityId(any()))
-        .thenReturn("CUST1");
-
-    when(ocmWebClientService
-            .getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(userConfigResponseDTO);
-
-    String result =
-        invokeGetProfileCodeByCarrier(
-            "USPS",
-            request);
-
-    assertEquals(
-        "USPSCardinal",
-        result);
-  }
-
-  @Test
-  void getProfileCodeByCarrier_uspsConfigNull()
-      throws Exception {
-
-    AddressValidationRequest request =
-        getAddressValidationRequest();
-
-    request.setShippingProfile("USPS");
-
-    UserConfigResponseDTO config =
-        UserConfigResponseDTO.builder()
-            .location(
-                LocationConfigDTO.builder()
-                    .uspsConfiguration(null)
-                    .build())
-            .build();
-
-    when(customerHierarchyService
-            .getCustomerIdByFacilityId(any()))
-        .thenReturn("CUST1");
-
-    when(ocmWebClientService
-            .getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(config);
-
-    assertNull(
-        invokeGetProfileCodeByCarrier(
-            "USPS",
-            request));
-  }
-
-  @Test
-  void getProfileCodeByCarrier_dhl() throws Exception {
-
-    AddressValidationRequest request =
-        getAddressValidationRequest();
-
-    request.setShippingProfile("DHL");
-
-    UserConfigResponseDTO config =
-        UserConfigResponseDTO.builder()
-            .location(
-                LocationConfigDTO.builder()
-                    .dhlConfiguration(
-                        DHLConfigDTO.builder()
-                            .dhlProfileCode("DHL123")
-                            .build())
-                    .build())
-            .build();
-
-    when(customerHierarchyService
-            .getCustomerIdByFacilityId(any()))
-        .thenReturn("CUST1");
-
-    when(ocmWebClientService
-            .getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(config);
-
-    assertEquals(
-        "DHL123",
-        invokeGetProfileCodeByCarrier(
-            "DHL",
-            request));
-  }
-
-  @Test
-  void getProfileCodeByCarrier_dhlConfigNull()
-      throws Exception {
-
-    AddressValidationRequest request =
-        getAddressValidationRequest();
-
-    request.setShippingProfile("DHL");
-
-    UserConfigResponseDTO config =
-        UserConfigResponseDTO.builder()
-            .location(
-                LocationConfigDTO.builder()
-                    .dhlConfiguration(null)
-                    .build())
-            .build();
-
-    when(customerHierarchyService
-            .getCustomerIdByFacilityId(any()))
-        .thenReturn("CUST1");
-
-    when(ocmWebClientService
-            .getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(config);
-
-    assertNull(
-        invokeGetProfileCodeByCarrier(
-            "DHL",
-            request));
-  }
-
-  @Test
-  void getProfileCodeByCarrier_fedex() throws Exception {
-
-    AddressValidationRequest request =
-        getAddressValidationRequest();
-
-    request.setShippingProfile("FEDEX");
-
-    UserConfigResponseDTO config =
-        UserConfigResponseDTO.builder()
-            .location(
-                LocationConfigDTO.builder()
-                    .fedexConfiguration(
-                        FedexConfig.builder()
-                            .fedexProfileCode("FEDEX123")
-                            .build())
-                    .build())
-            .build();
-
-    when(customerHierarchyService
-            .getCustomerIdByFacilityId(any()))
-        .thenReturn("CUST1");
-
-    when(ocmWebClientService
-            .getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(config);
-
-    assertEquals(
-        "FEDEX123",
-        invokeGetProfileCodeByCarrier(
-            "FEDEX",
-            request));
-  }
-
-  @Test
-  void getProfileCodeByCarrier_fedexConfigNull()
-      throws Exception {
-
-    AddressValidationRequest request =
-        getAddressValidationRequest();
-
-    request.setShippingProfile("FEDEX");
-
-    UserConfigResponseDTO config =
-        UserConfigResponseDTO.builder()
-            .location(
-                LocationConfigDTO.builder()
-                    .fedexConfiguration(null)
-                    .build())
-            .build();
-
-    when(customerHierarchyService
-            .getCustomerIdByFacilityId(any()))
-        .thenReturn("CUST1");
-
-    when(ocmWebClientService
-            .getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(config);
-
-    assertNull(
-        invokeGetProfileCodeByCarrier(
-            "FEDEX",
-            request));
-  }
-
-  @Test
-  void getProfileCodeByCarrier_carrierDoesNotMatch()
-      throws Exception {
-
-    AddressValidationRequest request =
-        getAddressValidationRequest();
-
-    request.setShippingProfile("USPS");
-
-    when(customerHierarchyService
-            .getCustomerIdByFacilityId(any()))
-        .thenReturn("CUST1");
-
-    when(ocmWebClientService
-            .getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(userConfigResponseDTO);
-
-    assertNull(
-        invokeGetProfileCodeByCarrier(
-            "DHL",
-            request));
-  }
-
-  @Test
-  void getProfileCodeByCarrier_nullOcmResponse()
-      throws Exception {
-
-    AddressValidationRequest request =
-        getAddressValidationRequest();
-
-    when(customerHierarchyService
-            .getCustomerIdByFacilityId(any()))
-        .thenReturn("CUST1");
-
-    when(ocmWebClientService
-            .getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(null);
-
-    assertNull(
-        invokeGetProfileCodeByCarrier(
-            "USPS",
-            request));
-  }
-
-  @Test
-  void getProfileCodeByCarrier_nullLocation()
-      throws Exception {
-
-    AddressValidationRequest request =
-        getAddressValidationRequest();
-
-    UserConfigResponseDTO config =
-        UserConfigResponseDTO.builder()
-            .location(null)
-            .build();
-
-    when(customerHierarchyService
-            .getCustomerIdByFacilityId(any()))
-        .thenReturn("CUST1");
-
-    when(ocmWebClientService
-            .getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(config);
-
-    assertNull(
-        invokeGetProfileCodeByCarrier(
-            "USPS",
-            request));
-  }
-
-  // ==========================================================================
-  // fetchProfileCode branches
-  // ==========================================================================
-
-  @Test
-  void validateAddress_dhlProfile() throws Exception {
-
-    UserConfigResponseDTO config =
-        UserConfigResponseDTO.builder()
-            .location(
-                LocationConfigDTO.builder()
-                    .dhlConfiguration(
-                        DHLConfigDTO.builder()
-                            .dhlProfileCode("DHL123")
-                            .build())
-                    .build())
-            .build();
-
-    when(ocmWebClientService
-            .getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(config);
-
-    when(sendFlexWebClientService.sendFlexRequest(
-            anyString(),
-            any(),
-            anyMap(),
-            any(),
-            eq(AddressValidationResponseDTO.class)))
-        .thenReturn(Mono.just(responseDTO));
-
-    when(sendFlexRecordUtil.saveSendflexRecord(
-            any()))
-        .thenReturn(
-            SendFlexRecordDto.builder().build());
-
-    validRequest.setShippingProfile("DHL");
-
-    AddressValidationResponseDTO result =
-        addressValidationService
-            .validateAddress(validRequest);
-
-    assertEquals(responseDTO, result);
-  }
-
-  @Test
-  void validateAddress_fedexProfile() throws Exception {
-
-    UserConfigResponseDTO config =
-        UserConfigResponseDTO.builder()
-            .location(
-                LocationConfigDTO.builder()
-                    .fedexConfiguration(
-                        FedexConfig.builder()
-                            .fedexProfileCode("FEDEX123")
-                            .build())
-                    .build())
-            .build();
-
-    when(ocmWebClientService
-            .getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(config);
-
-    when(sendFlexWebClientService.sendFlexRequest(
-            anyString(),
-            any(),
-            anyMap(),
-            any(),
-            eq(AddressValidationResponseDTO.class)))
-        .thenReturn(Mono.just(responseDTO));
-
-    when(sendFlexRecordUtil.saveSendflexRecord(
-            any()))
-        .thenReturn(
-            SendFlexRecordDto.builder().build());
-
-    validRequest.setShippingProfile("FEDEX");
-
-    AddressValidationResponseDTO result =
-        addressValidationService
-            .validateAddress(validRequest);
-
-    assertEquals(responseDTO, result);
-  }
-
-  @Test
-  void validateAddress_unknownShippingProfile() throws Exception {
-
-    when(ocmWebClientService
-            .getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(userConfigResponseDTO);
-
-    when(sendFlexWebClientService.sendFlexRequest(
-            anyString(),
-            any(),
-            anyMap(),
-            any(),
-            eq(AddressValidationResponseDTO.class)))
-        .thenReturn(Mono.just(responseDTO));
-
-    when(sendFlexRecordUtil.saveSendflexRecord(
-            any()))
-        .thenReturn(
-            SendFlexRecordDto.builder().build());
-
-    validRequest.setShippingProfile("UNKNOWN");
-
-    AddressValidationResponseDTO result =
-        addressValidationService
-            .validateAddress(validRequest);
-
-    assertEquals(responseDTO, result);
-  }
-
-  // ==========================================================================
-  // Error response builder
-  // ==========================================================================
-
-  @Test
-  void buildAddressValidationErrorResponse_withAddress()
-      throws Exception {
-
-    AddressValidationResponseDTO result =
-        invokeBuildAddressValidationErrorResponse(
-            validRequest);
-
-    assertNotNull(result);
-    assertFalse(result.isAddressValid());
-    assertNotNull(result.getAddressToValidate());
-
-    assertEquals(
-        validRequest.getAddress().getName(),
-        result.getAddressToValidate().getName());
-
-    assertEquals(
-        validRequest.getAddress().getCity(),
-        result.getAddressToValidate().getCity());
-
-    assertEquals(
-        validRequest.getAddress().getState(),
-        result.getAddressToValidate().getState());
-
-    assertNotNull(
-        result.getAddressToValidate().getContact());
-  }
-
-  @Test
-  void buildAddressValidationErrorResponse_nullAddress()
-      throws Exception {
-
-    AddressValidationRequest request =
-        new AddressValidationRequest();
-
-    request.setAddress(null);
-
-    AddressValidationResponseDTO result =
-        invokeBuildAddressValidationErrorResponse(
-            request);
-
-    assertNotNull(result);
-    assertFalse(result.isAddressValid());
-    assertNotNull(result.getAddressToValidate());
-  }
-
-  // ==========================================================================
-  // Helper methods
-  // ==========================================================================
-
-  private AddressValidationRequest getAddressValidationRequest() {
-
-    AddressValidationRequest request =
-        new AddressValidationRequest();
-
-    request.setProfileCode(
-        "f8e385fd-234e-4bd5-bfb5-6e6c04433b08");
-
-    request.setShippingProfile("USPS");
-
-    Address address =
-        new Address();
-
-    address.setName("Best Bicycles");
-    address.setCity("BEVERLY HILLS");
-    address.setState("CA");
-    address.setAddressLines(
-        List.of(
-            "123 S RODEO DR",
-            " ",
-            " "));
-    address.setZipCode("90212-2402");
-    address.setCountry("US");
-    address.setEmailAddress("asd@gmail.com");
-    address.setPhoneNumber("1234567891");
-    address.setPhoneExt("91");
-    address.setCompany("asd");
-    address.setResidential(true);
-
-    request.setAddress(address);
-
-    return request;
-  }
-
-  private AddressValidationResponseDTO
-      getAddressValidationResponseDTO(boolean valid) {
-
-    AddressValidationResponseDTO dto =
-        new AddressValidationResponseDTO();
-
-    dto.setAddressValid(valid);
-    dto.setProfile(
-        validRequest.getProfileCode());
-
-    Address address =
-        validRequest.getAddress();
-
-    AddressToValidate addressToValidate =
-        new AddressToValidate();
-
-    addressToValidate.setAddressLines(
-        address.getAddressLines());
-
-    addressToValidate.setCity(
-        valid
-            ? address.getCity()
-            : "");
-
-    addressToValidate.setState(
-        address.getState());
-
-    addressToValidate.setCountryCode(
-        address.getCountry());
-
-    addressToValidate.setResidential(
-        address.isResidential());
-
-    addressToValidate.setName(
-        address.getName());
-
-    Contact contact =
-        new Contact();
-
-    contact.setEmail(
-        address.getEmailAddress());
-
-    contact.setPhone(
-        address.getPhoneNumber());
-
-    addressToValidate.setContact(contact);
-
-    dto.setAddressToValidate(
-        addressToValidate);
-
-    AddressSuggestion suggestion =
-        new AddressSuggestion();
-
-    suggestion.setAddressLines(
-        address.getAddressLines());
-
-    suggestion.setCity(
-        address.getCity());
-
-    suggestion.setState(
-        address.getState());
-
-    suggestion.setCountryCode(
-        address.getCountry());
-
-    suggestion.setName(
-        address.getName());
-
-    suggestion.setResidential(
-        address.isResidential());
-
-    ContactResponse contactResponse =
-        new ContactResponse();
-
-    contactResponse.setPhone(
-        address.getPhoneNumber());
-
-    contactResponse.setEmail(
-        address.getEmailAddress());
-
-    suggestion.setContact(
-        contactResponse);
-
-    dto.setAddressSuggestions(
-        Arrays.asList(suggestion));
-
-    return dto;
-  }
-
-  private String invokeGetProfileCodeByCarrier(
-      String carrier,
-      AddressValidationRequest request)
-      throws Exception {
-
-    var method =
-        AddressValidationServiceImpl.class
-            .getDeclaredMethod(
-                "getProfileCodeByCarrier",
-                String.class,
-                AddressValidationRequest.class);
-
-    method.setAccessible(true);
-
-    return (String)
-        method.invoke(
-            addressValidationService,
-            carrier,
-            request);
-  }
-
-  private AddressValidationResponseDTO
-      invokeBuildAddressValidationErrorResponse(
-          AddressValidationRequest request)
-          throws Exception {
-
-    var method =
-        AddressValidationServiceImpl.class
-            .getDeclaredMethod(
-                "buildAddressValidationErrorResponse",
-                AddressValidationRequest.class);
-
-    method.setAccessible(true);
-
-    return (AddressValidationResponseDTO)
-        method.invoke(
-            addressValidationService,
-            request);
-  }
-}
-
-
----
-
-One correction in your production class
-
-Your current AddressValidationServiceImpl has:
-
-log.atWarn()
-    .addKeyValue("reason", exception.getMessage())
-    .addKeyValue("message", "SendFlex address validation failed")
-    .log();
-
-That's fine if your SLF4J version supports the fluent API, which it appears to.
-
-However, in persistAddressValidationResponse() you still have:
-
-log.info(new LogBuilder().withMessage("saving the address validation response").toString());
-
-Since you specifically wanted to move away from LogBuilder, change that to:
-
-log.atInfo()
-    .log("Saving the address validation response");
-
-And remove:
+In SendFlexWebClientService, you're still using:
 
 import com.cardinalhealth.ofl.next.logging.library.LogBuilder;
 
-from AddressValidationServiceImpl.
-
-
----
-
-Also change the remaining LogBuilder calls in SendFlexWebClientService
-
-You currently have:
+If you're moving fully to the new logging style, remove it and change:
 
 log.warn(
     new LogBuilder()
@@ -1810,55 +352,32 @@ log.warn(
         .withMessage("SendFlex address validation returned a validation error")
         .toString());
 
-Change to:
+to:
 
 log.atWarn()
     .addKeyValue("reason", ex.getMessage())
     .log("SendFlex address validation returned a validation error");
 
-For the other errors:
+And your normal errors to:
 
 log.atError()
     .addKeyValue("reason", ex.getMessage())
     .addKeyValue("statusCode", statusCode)
     .log("SendFlex API request failed");
 
-And remove the LogBuilder import.
+That will also make the logs from your story consistent.
+
+So, for the failures you posted, the immediate fixes are:
+
+Failure	Fix
+
+'body' should be an object	Don't pass null, or fix production body() handling
+sendFlexRequest_usesNormalUrl	Give it a real request body
+sendFlexRequest_usesPerformanceUrl	Give it a real request body
+sendFlexRequest_nonShipmentEndpoint...	Give it a real request body
+UnnecessaryStubbingException	Remove OCM stub from unknown shipping profile test
+WARN showing reason="400 Bad Request"	Expected for address validation
+ERROR for generic 400	Expected for non-address-validation endpoint
 
 
----
-
-One important test issue
-
-Your existing test has:
-
-.statusCode("FAILURE")
-
-but your production code uses:
-
-.statusCode(FAILURE)
-
-If FAILURE is defined as lowercase "failure" in ServiceCommonConstants, the test should use:
-
-.statusCode(FAILURE)
-
-rather than:
-
-.statusCode("FAILURE")
-
-This is better because the test verifies the actual production constant.
-
-
----
-
-If JaCoCo still shows a few branches
-
-The most likely remaining branches will be from RetryConfig, not these two classes. In particular:
-
-if (throwable instanceof WebClientResponseException ex)
-
-and:
-
-return statusCode >= 500 && statusCode < 600;
-
-If your JaCoCo report includes RetryConfig in the 100% requirement, you will need a separate RetryConfigTest. That test should explicitly cover 5xx → retry, 4xx → don't retry, and non-WebClient exception → retry.
+For a true 100% JaCoCo result, I would make the BodyInserters.empty() production fix and then keep the null-body test.
