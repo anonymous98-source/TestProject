@@ -1,217 +1,370 @@
-Worked for 8s
+Yes. Let's simplify this completely.
 
-Now we have enough to define the implementation much more precisely.
+Based on all the code you provided, I recommend changes in exactly 3 production files.
 
-There is one important correction to my earlier recommendation: do not simply return null from validateAddress(). Your controller immediately does:
+You do not need to change the controller, DTO, SendFlexRecordUtil, SendFlexRecordDto, or GlobalExceptionHandler.
 
-addressValidationService.buildAddressValidationResponse(responseDTO);
-
-and buildAddressValidationResponse() dereferences the DTO. Returning null would create a new NullPointerException.
-
-Also, your RetryConfig already correctly prevents retries for 4xx. The only issue there is that isRetryable() itself logs "Is this request retryable?" at ERROR for a 400. So there is actually another ERROR log that needs fixing.
-
-Spring's WebClient.retrieve() produces WebClientResponseException for 4xx/5xx by default, which matches the flow in your code. 
-
-Final change plan
-
-I would make changes in 3 classes:
-
-1. SendFlexWebClientService
-
-
-2. RetryConfig
-
-
-3. AddressValidationServiceImpl
-
-
-
-And add/update tests.
-
-I would not change:
-
-SendFlexRecordDto
-
-SendFlexRecordUtil
-
-GlobalExceptionHandler
-
-AddressValidationController
-
+The implementation below keeps the change scoped to SendFlex Address Validation 400 errors.
 
 
 ---
 
-1. SendFlexWebClientService — change handleErrorMap()
+Overall final flow
 
-Current problem
+After the change:
+
+SendFlex Address Validation
+        |
+        |-- 200 --> existing flow
+        |
+        |-- 400 --> ValidationException
+                    |
+                    |-- log WARN
+                    |-- save SendFlex record with statusCode = null
+                    |-- DO NOT throw ShippingIntegrationException
+                    |-- return AddressValidationResponseDTO(addressValid=false)
+                    |
+                    `--> Controller returns normal response
+                         
+        |-- 401/404/5xx/timeout
+                    |
+                    |-- existing error behavior
+                    |-- save statusCode = failure
+                    `-- propagate exception
+
+
+---
+
+FILE 1
+
+SendFlexWebClientService.java
+
+Change 1: Modify sendFlexRequest()
+
+Current
 
 You have:
 
-if (throwable instanceof WebClientResponseException ex) {
-    log.error(...);
+return webClient
+    .method(method)
+    .uri(getURI(endpoint))
+    ...
+    .retryWhen(retryConfig.createRetry(MAX_ATTEMPTS, INITIAL_DELAY_SECONDS))
+    .onErrorMap(this::handleErrorMap);
 
-    List<String> errorMessages = ...
+Replace the entire method with:
 
-This means 400 is logged as ERROR before it even reaches your address validation service.
+@SneakyThrows
+public <T> Mono<T> sendFlexRequest(
+    String endpoint,
+    HttpMethod method,
+    Map<String, String> additionalHeaders,
+    Object requestBody,
+    Class<T> responseType) {
 
-Change it to
+  log.info(
+      new LogBuilder()
+          .withField("endpoint", endpoint)
+          .withField("method", method.toString())
+          .withField("additional headers", additionalHeaders.toString())
+          .withMessage("sendflex API request call")
+          .toString());
 
-public Exception handleErrorMap(Throwable throwable) {
-    if (throwable instanceof WebClientResponseException ex) {
-
-        List<String> errorMessages =
-                extractErrorMessages(ex.getResponseBodyAsString());
-
-        switch (ex.getStatusCode().value()) {
-
-            case SendFlexErrorConstants.BAD_REQUEST:
-                log.warn(
-                        new LogBuilder()
-                                .withReason(ex.getMessage())
-                                .withMessage("SendFlex address validation failed")
-                                .toString());
-
-                return new ValidationException(
-                        "Data is not valid: " + errorMessages,
-                        errorMessages.toString());
-
-            case SendFlexErrorConstants.UNAUTHORIZED:
-                log.error(
-                        new LogBuilder()
-                                .withReason(ex.getMessage())
-                                .withStackTrace(ex.getStackTrace())
-                                .withMessage("SendFlex API request failed")
-                                .toString());
-
-                return new UnAuthorizedException(
-                        "Not authorized request" + errorMessages);
-
-            case SendFlexErrorConstants.NOT_FOUND:
-                log.error(
-                        new LogBuilder()
-                                .withReason(ex.getMessage())
-                                .withStackTrace(ex.getStackTrace())
-                                .withMessage("SendFlex API request failed")
-                                .toString());
-
-                return new ResourceNotFoundException(
-                        "Resource is not found: " + errorMessages);
-
-            default:
-                log.error(
-                        new LogBuilder()
-                                .withReason(ex.getMessage())
-                                .withStackTrace(ex.getStackTrace())
-                                .withMessage("SendFlex API request failed")
-                                .toString());
-
-                return new RuntimeException(
-                        "Unknown HTTP error occurred: "
-                                + ex.getStatusCode()
-                                + " - "
-                                + errorMessages);
-        }
-
-    } else {
-        log.error(
-                new LogBuilder()
-                        .withReason(throwable.getMessage())
-                        .withStackTrace(throwable.getStackTrace())
-                        .withMessage("Unexpected SendFlex API error")
-                        .toString());
-
-        return new RuntimeException(
-                "Unexpected error occurred: "
-                        + "sendflex API request failed and it's not WebClientResponseException"
-                        + throwable.getMessage()
-                        + Arrays.toString(throwable.getStackTrace()));
-    }
+  return webClient
+      .method(method)
+      .uri(getURI(endpoint))
+      .headers(
+          httpHeaders -> {
+            getDefaultHeaders().forEach(httpHeaders::add);
+            if (!additionalHeaders.isEmpty()) {
+              additionalHeaders.forEach(httpHeaders::add);
+            }
+          })
+      .bodyValue(requestBody == null ? Mono.empty() : requestBody)
+      .retrieve()
+      .bodyToMono(responseType)
+      .retryWhen(
+          retryConfig.createRetry(
+              MAX_ATTEMPTS,
+              INITIAL_DELAY_SECONDS))
+      .onErrorMap(throwable -> handleErrorMap(throwable, endpoint));
 }
 
-Result
+Why?
 
-Now:
+We are changing:
 
-SendFlex response	Log
+.onErrorMap(this::handleErrorMap)
 
-400	WARN
-401	ERROR
-404	ERROR
-5xx	ERROR
-Timeout	ERROR
-Connection failure	ERROR
+to:
 
+.onErrorMap(throwable -> handleErrorMap(throwable, endpoint))
 
-That's aligned with the story.
+This allows handleErrorMap() to know that the request is:
+
+/AddressValidation
+
+and therefore only apply the special WARN behavior to this API.
 
 
 ---
 
-2. RetryConfig — change the 4xx logging
+Change 2: Modify handleErrorMap()
 
-You already have the correct retry behavior:
+Remove your current method:
+
+public Exception handleErrorMap(Throwable throwable) {
+    ...
+}
+
+Replace it with:
+
+public Exception handleErrorMap(Throwable throwable, String endpoint) {
+
+  if (throwable instanceof WebClientResponseException ex) {
+
+    List<String> errorMessages =
+        extractErrorMessages(ex.getResponseBodyAsString());
+
+    int statusCode = ex.getStatusCode().value();
+
+    if (statusCode == SendFlexErrorConstants.BAD_REQUEST
+        && ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT.equals(endpoint)) {
+
+      log.warn(
+          new LogBuilder()
+              .withReason(ex.getMessage())
+              .withMessage("SendFlex address validation returned a validation error")
+              .toString());
+
+      return new ValidationException(
+          "Data is not valid: " + errorMessages,
+          errorMessages.toString());
+    }
+
+    switch (statusCode) {
+
+      case SendFlexErrorConstants.BAD_REQUEST:
+        log.error(
+            new LogBuilder()
+                .withReason(ex.getMessage())
+                .withStackTrace(ex.getStackTrace())
+                .withMessage("SendFlex API request failed")
+                .toString());
+
+        return new ValidationException(
+            "Data is not valid: " + errorMessages,
+            errorMessages.toString());
+
+      case SendFlexErrorConstants.UNAUTHORIZED:
+        log.error(
+            new LogBuilder()
+                .withReason(ex.getMessage())
+                .withStackTrace(ex.getStackTrace())
+                .withMessage("SendFlex API request failed")
+                .toString());
+
+        return new UnAuthorizedException(
+            "Not authorized request" + errorMessages);
+
+      case SendFlexErrorConstants.NOT_FOUND:
+        log.error(
+            new LogBuilder()
+                .withReason(ex.getMessage())
+                .withStackTrace(ex.getStackTrace())
+                .withMessage("SendFlex API request failed")
+                .toString());
+
+        return new ResourceNotFoundException(
+            "Resource is not found: " + errorMessages);
+
+      default:
+        log.error(
+            new LogBuilder()
+                .withReason(ex.getMessage())
+                .withStackTrace(ex.getStackTrace())
+                .withMessage("SendFlex API request failed")
+                .toString());
+
+        return new RuntimeException(
+            "Unknown HTTP error occurred: "
+                + ex.getStatusCode()
+                + " - "
+                + errorMessages);
+    }
+
+  } else {
+
+    log.error(
+        new LogBuilder()
+            .withReason(throwable.getMessage())
+            .withStackTrace(throwable.getStackTrace())
+            .withMessage("Unexpected SendFlex API error")
+            .toString());
+
+    return new RuntimeException(
+        "Unexpected error occurred: "
+            + "sendflex API request failed and it's not WebClientResponseException"
+            + throwable.getMessage()
+            + Arrays.toString(throwable.getStackTrace()));
+  }
+}
+
+Add this import if it isn't already there:
+
+import com.cardinalhealth.adv.shipping.integration.api.exception.ValidationException;
+
+Why this implementation?
+
+We are not changing all SendFlex 400 errors to WARN.
+
+Only:
+
+endpoint = /AddressValidation
+AND
+status = 400
+
+gets special handling.
+
+That's safer because SendFlexWebClientService is used by many other APIs.
+
+
+---
+
+FILE 2
+
+RetryConfig.java
+
+Your retry logic itself is already correct.
+
+This:
 
 return statusCode >= 500 && statusCode < 600;
 
-So 400 is not retried. Good.
+means:
 
-But this code is still wrong for the story:
+400 → don't retry
+401 → don't retry
+404 → don't retry
+500 → retry
+502 → retry
+503 → retry
 
-log.error(new LogBuilder()
-        .withMessage("Is this request retryable?")
-        .withField("statusCode", statusCode)
-        .toString());
+So do not change the retry condition.
 
-For a 400, you're still generating an ERROR log.
+But change isRetryable().
 
-Change it to
+Current:
 
 public boolean isRetryable(Throwable throwable) {
     if (throwable instanceof WebClientResponseException ex) {
         int statusCode = ex.getStatusCode().value();
-
-        log.debug(
-                new LogBuilder()
-                        .withMessage("Evaluating SendFlex request retry")
+        log.error(new LogBuilder()
+                        .withMessage("Is this request retryable?")
                         .withField("statusCode", statusCode)
                         .toString());
-
         return statusCode >= 500 && statusCode < 600;
     }
-
     return true;
 }
 
-You could also remove the log entirely. I actually prefer removing it unless it is useful operationally.
-
-For example:
+Replace with:
 
 public boolean isRetryable(Throwable throwable) {
-    if (throwable instanceof WebClientResponseException ex) {
-        int statusCode = ex.getStatusCode().value();
-        return statusCode >= 500 && statusCode < 600;
-    }
+  if (throwable instanceof WebClientResponseException ex) {
+    int statusCode = ex.getStatusCode().value();
+    return statusCode >= 500 && statusCode < 600;
+  }
 
-    return true;
+  return true;
 }
 
-I recommend the second version.
+That's it.
+
+Why?
+
+This existing code:
+
+log.error(...)
+
+is another source of ERROR logging for a 400.
+
+We don't need this log because the actual error logging is handled by SendFlexWebClientService.
 
 
 ---
 
-3. AddressValidationServiceImpl — main functional change
+FILE 3
 
-Currently:
+AddressValidationServiceImpl.java
 
-try {
-    addressValidationResponseDTO = monoAddressValidationResponse.block();
+This is where the actual exception propagation needs to stop.
+
+
+---
+
+Change 1: Add import
+
+Add:
+
+import com.cardinalhealth.adv.shipping.integration.api.exception.ValidationException;
+
+
+---
+
+Change 2: Replace validateAddress()
+
+Remove your current entire method:
+
+@Override
+public AddressValidationResponseDTO validateAddress(
+    AddressValidationRequest addressValidationRequest) throws JsonProcessingException {
+    ...
+}
+
+Replace it with:
+
+@Override
+public AddressValidationResponseDTO validateAddress(
+    AddressValidationRequest addressValidationRequest) throws JsonProcessingException {
+
+  AddressValidationRequestDTO addressValidationRequestDTO =
+      buildAddressValidationRequestDTO(addressValidationRequest);
+
+  Mono<AddressValidationResponseDTO> monoAddressValidationResponse =
+      sendFlexWebClientService.sendFlexRequest(
+          ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT,
+          HttpMethod.POST,
+          Map.of(),
+          addressValidationRequestDTO,
+          AddressValidationResponseDTO.class);
+
+  try {
+
+    AddressValidationResponseDTO addressValidationResponseDTO =
+        monoAddressValidationResponse.block();
+
     persistAddressValidationResponse(
         addressValidationRequestDTO,
         addressValidationResponseDTO);
 
-} catch (Exception exception) {
+    return addressValidationResponseDTO;
+
+  } catch (ValidationException exception) {
+
+    log.warn(
+        new LogBuilder()
+            .withReason(exception.getMessage())
+            .withMessage("SendFlex address validation failed")
+            .toString());
+
+    persistAddressValidationValidationFailure(
+        addressValidationRequestDTO,
+        exception);
+
+    return buildAddressValidationErrorResponse(addressValidationRequest);
+    
+  } catch (Exception exception) {
 
     persistAddressValidationFailure(
         addressValidationRequestDTO,
@@ -221,153 +374,51 @@ try {
         "An unexpected error occurred while saving address validation response "
             + exception.getMessage(),
         exception);
+  }
 }
-
-This treats:
-
-ValidationException
-
-the same as:
-
-Database failure
-Timeout
-Connection failure
-5xx
-
-That's the main problem.
 
 
 ---
 
-4. Add a specific ValidationException catch
+Change 3: Add a new method
 
-Import:
-
-import com.cardinalhealth.adv.shipping.integration.api.exception.ValidationException;
-
-Then change the method to:
-
-@Override
-public AddressValidationResponseDTO validateAddress(
-    AddressValidationRequest addressValidationRequest) throws JsonProcessingException {
-
-    AddressValidationRequestDTO addressValidationRequestDTO =
-        buildAddressValidationRequestDTO(addressValidationRequest);
-
-    Mono<AddressValidationResponseDTO> monoAddressValidationResponse =
-        sendFlexWebClientService.sendFlexRequest(
-            ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT,
-            HttpMethod.POST,
-            Map.of(),
-            addressValidationRequestDTO,
-            AddressValidationResponseDTO.class);
-
-    try {
-
-        AddressValidationResponseDTO addressValidationResponseDTO =
-            monoAddressValidationResponse.block();
-
-        persistAddressValidationResponse(
-            addressValidationRequestDTO,
-            addressValidationResponseDTO);
-
-        return addressValidationResponseDTO;
-
-    } catch (ValidationException exception) {
-
-        log.warn(
-            new LogBuilder()
-                .withReason(exception.getMessage())
-                .withMessage("SendFlex address validation returned a validation error")
-                .toString());
-
-        persistAddressValidationValidationFailure(
-            addressValidationRequestDTO,
-            exception);
-
-        return buildValidationErrorResponse(
-            addressValidationRequestDTO,
-            addressValidationRequest);
-
-    } catch (Exception exception) {
-
-        persistAddressValidationFailure(
-            addressValidationRequestDTO,
-            exception);
-
-        throw new ShippingIntegrationException(
-            "An unexpected error occurred while saving address validation response "
-                + exception.getMessage(),
-            exception);
-    }
-}
-
-The important thing is:
-
-catch (ValidationException exception)
-
-comes before:
-
-catch (Exception exception)
-
-
----
-
-5. Add a separate persistence method
-
-Do not modify your existing:
-
-persistAddressValidationFailure()
-
-because that method correctly marks genuine failures as:
-
-.statusCode(FAILURE)
-
-Instead add:
+Add this method to AddressValidationServiceImpl:
 
 private SendFlexRecordDto persistAddressValidationValidationFailure(
     AddressValidationRequestDTO addressValidationRequestDTO,
     ValidationException exception) {
 
-    SendFlexRecordDto sendFlexRecordDto =
-        SendFlexRecordDto.builder()
-            .requestObject(addressValidationRequestDTO)
-            .responseObject(exception.getMessage())
-            .statusCode(null)
-            .apiCode(ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT)
-            .build();
+  SendFlexRecordDto sendFlexRecordDto =
+      SendFlexRecordDto.builder()
+          .requestObject(addressValidationRequestDTO)
+          .responseObject(exception.getMessage())
+          .statusCode(null)
+          .apiCode(ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT)
+          .build();
 
-    return sendFlexRecordUtil.saveSendflexRecord(sendFlexRecordDto);
+  return sendFlexRecordUtil.saveSendflexRecord(sendFlexRecordDto);
 }
 
-This is the part that satisfies:
+Notice the important difference
 
-> If we mark the errors as NULL, then the errors will not appear in the alert dashboard.
+Your existing method has:
 
+.statusCode(FAILURE)
 
+This new method has:
 
-So your records become:
+.statusCode(null)
 
-Expected address validation error
+Do not change the existing persistAddressValidationFailure() method.
 
-statusCode = null
-
-Actual technical failure
-
-statusCode = failure
-
-That's the separation we want.
+It is still needed for real/unexpected errors.
 
 
 ---
 
-6. What should buildValidationErrorResponse() return?
+Change 4: Add another new method
 
-This is the one part where I don't want to fabricate your exact ValidationException structure because you haven't shown that class.
-
-But you cannot return null because of your controller.
-
-Your API currently expects:
+Because your controller does this:
 
 AddressValidationResponseDTO responseDTO =
     addressValidationService.validateAddress(addressValidationRequest);
@@ -375,353 +426,476 @@ AddressValidationResponseDTO responseDTO =
 AddressValidationResponse addressValidationResponse =
     addressValidationService.buildAddressValidationResponse(responseDTO);
 
-So the 400 needs to result in a valid AddressValidationResponseDTO.
+we cannot return null.
 
-Conceptually:
+So add:
 
-private AddressValidationResponseDTO buildValidationErrorResponse(
-    AddressValidationRequestDTO requestDTO,
-    AddressValidationRequest request) {
+private AddressValidationResponseDTO buildAddressValidationErrorResponse(
+    AddressValidationRequest addressValidationRequest) {
 
-    AddressValidationResponseDTO responseDTO =
-        new AddressValidationResponseDTO();
+  AddressValidationResponseDTO responseDTO =
+      new AddressValidationResponseDTO();
 
-    responseDTO.setAddressValid(false);
+  responseDTO.setAddressValid(false);
 
-    // Populate the address fields if appropriate.
+  AddressToValidate addressToValidate =
+      new AddressToValidate();
 
-    return responseDTO;
+  Address address = addressValidationRequest.getAddress();
+
+  if (address != null) {
+    addressToValidate.setName(address.getName());
+    addressToValidate.setAddressLines(address.getAddressLines());
+    addressToValidate.setCity(address.getCity());
+    addressToValidate.setState(address.getState());
+    addressToValidate.setCountryCode(address.getCountry());
+    addressToValidate.setResidential(address.isResidential());
+    addressToValidate.setContact(
+        Contact.builder()
+            .name(address.getName())
+            .phone(address.getPhoneNumber())
+            .email(address.getEmailAddress())
+            .build());
+  }
+
+  responseDTO.setAddressToValidate(addressToValidate);
+
+  return responseDTO;
 }
 
-But I would not give you the exact implementation of this method yet because I need to see your ValidationException class and preferably AddressValidationResponseDTO.
+You already have:
 
-The response behavior is an API-contract decision, whereas the logging/persistence changes are already clear.
+AddressToValidate
+Contact
+Address
+
+imports in your class, so you shouldn't need new imports for these.
 
 
 ---
 
-7. Why not handle it in the controller?
+Why do we need this method?
 
-I would not do this:
+Because otherwise you might do:
 
-try {
-    responseDTO = addressValidationService.validateAddress(...);
-} catch (ValidationException e) {
-    ...
-}
+return null;
 
-The controller shouldn't know that SendFlex returns a ValidationException.
+and then your controller does:
 
-That's a downstream integration detail.
+buildAddressValidationResponse(null);
 
-The service should translate:
+which would eventually hit:
 
-SendFlex 400
+responseDTO.isAddressValid()
 
-into your application's normal address-validation result.
+and produce a NullPointerException.
+
+So we return a proper DTO:
+
+addressValid = false
+
+The controller can then continue normally.
 
 
 ---
 
-8. Your GlobalExceptionHandler stays unchanged
+IMPORTANT: Do NOT modify this existing method
 
-This is important.
+Keep:
 
-Don't change:
+SendFlexRecordDto persistAddressValidationFailure(
+    AddressValidationRequestDTO addressValidationRequestDTO,
+    Exception e) {
+
+exactly for unexpected errors.
+
+So you have two persistence methods:
+
+Expected address validation error
+
+persistAddressValidationValidationFailure()
+
+stores:
+
+statusCode = null
+
+Unexpected technical error
+
+persistAddressValidationFailure()
+
+stores:
+
+statusCode = FAILURE
+
+
+---
+
+FILE 4 — No change
+
+AddressValidationController
+
+Do nothing.
+
+Your current code can remain:
+
+AddressValidationResponseDTO responseDTO =
+    addressValidationService.validateAddress(addressValidationRequest);
+
+AddressValidationResponse addressValidationResponse =
+    addressValidationService.buildAddressValidationResponse(responseDTO);
+
+return ResponseEntity.ok(addressValidationResponse);
+
+This will now work because the service returns a non-null DTO for a validation failure.
+
+
+---
+
+FILE 5 — No change
+
+SendFlexRecordUtil
+
+Do nothing.
+
+This already accepts the DTO:
+
+public SendFlexRecordDto saveSendflexRecord(
+    SendFlexRecordDto sendFlexRecordDto) {
+  return sendFlexRecordService.saveSendflexRecord(sendFlexRecordDto);
+}
+
+No need to modify the generic failure handling.
+
+
+---
+
+FILE 6 — No change
+
+SendFlexRecordDto
+
+Do nothing.
+
+This is already correct:
+
+private String statusCode;
+
+It can contain:
+
+null
+
+and your entity mapping already passes it through:
+
+.statusCode(statusCode)
+
+
+---
+
+FILE 7 — No change
+
+GlobalExceptionHandler
+
+Do nothing.
+
+We don't want the SendFlex ValidationException to reach:
 
 @ExceptionHandler(ValidationException.class)
 
-because we actually don't want this particular SendFlex validation exception reaching the global handler.
+because that would propagate the error to the REST exception-handling layer.
 
-The desired flow is:
-
-SendFlex 400
-      ↓
-ValidationException
-      ↓
-AddressValidationServiceImpl catches it
-      ↓
-WARN
-      ↓
-save record with statusCode = null
-      ↓
-return normal AddressValidationResponseDTO
-      ↓
-Controller returns 200
-
-rather than:
-
-SendFlex 400
-      ↓
-ValidationException
-      ↓
-ShippingIntegrationException
-      ↓
-Global exception handling
-      ↓
-ERROR
+We handle it inside AddressValidationServiceImpl.
 
 
 ---
 
-9. What happens to genuine errors?
+Your final AddressValidationServiceImpl relevant section
 
-They continue through your existing path:
+After the change, these methods should look like this:
 
-SendFlex 500
-     ↓
-retry
-     ↓
-retry exhausted
-     ↓
-handleErrorMap()
-     ↓
-RuntimeException
-     ↓
-AddressValidationServiceImpl catch(Exception)
-     ↓
-persist statusCode = failure
-     ↓
+@Override
+public AddressValidationResponseDTO validateAddress(
+    AddressValidationRequest addressValidationRequest) throws JsonProcessingException {
+
+  AddressValidationRequestDTO addressValidationRequestDTO =
+      buildAddressValidationRequestDTO(addressValidationRequest);
+
+  Mono<AddressValidationResponseDTO> monoAddressValidationResponse =
+      sendFlexWebClientService.sendFlexRequest(
+          ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT,
+          HttpMethod.POST,
+          Map.of(),
+          addressValidationRequestDTO,
+          AddressValidationResponseDTO.class);
+
+  try {
+
+    AddressValidationResponseDTO addressValidationResponseDTO =
+        monoAddressValidationResponse.block();
+
+    persistAddressValidationResponse(
+        addressValidationRequestDTO,
+        addressValidationResponseDTO);
+
+    return addressValidationResponseDTO;
+
+  } catch (ValidationException exception) {
+
+    log.warn(
+        new LogBuilder()
+            .withReason(exception.getMessage())
+            .withMessage("SendFlex address validation failed")
+            .toString());
+
+    persistAddressValidationValidationFailure(
+        addressValidationRequestDTO,
+        exception);
+
+    return buildAddressValidationErrorResponse(addressValidationRequest);
+
+  } catch (Exception exception) {
+
+    persistAddressValidationFailure(
+        addressValidationRequestDTO,
+        exception);
+
+    throw new ShippingIntegrationException(
+        "An unexpected error occurred while saving address validation response "
+            + exception.getMessage(),
+        exception);
+  }
+}
+
+private SendFlexRecordDto persistAddressValidationValidationFailure(
+    AddressValidationRequestDTO addressValidationRequestDTO,
+    ValidationException exception) {
+
+  SendFlexRecordDto sendFlexRecordDto =
+      SendFlexRecordDto.builder()
+          .requestObject(addressValidationRequestDTO)
+          .responseObject(exception.getMessage())
+          .statusCode(null)
+          .apiCode(ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT)
+          .build();
+
+  return sendFlexRecordUtil.saveSendflexRecord(sendFlexRecordDto);
+}
+
+private AddressValidationResponseDTO buildAddressValidationErrorResponse(
+    AddressValidationRequest addressValidationRequest) {
+
+  AddressValidationResponseDTO responseDTO =
+      new AddressValidationResponseDTO();
+
+  responseDTO.setAddressValid(false);
+
+  AddressToValidate addressToValidate =
+      new AddressToValidate();
+
+  Address address = addressValidationRequest.getAddress();
+
+  if (address != null) {
+    addressToValidate.setName(address.getName());
+    addressToValidate.setAddressLines(address.getAddressLines());
+    addressToValidate.setCity(address.getCity());
+    addressToValidate.setState(address.getState());
+    addressToValidate.setCountryCode(address.getCountry());
+    addressToValidate.setResidential(address.isResidential());
+    addressToValidate.setContact(
+        Contact.builder()
+            .name(address.getName())
+            .phone(address.getPhoneNumber())
+            .email(address.getEmailAddress())
+            .build());
+  }
+
+  responseDTO.setAddressToValidate(addressToValidate);
+
+  return responseDTO;
+}
+
+
+---
+
+Tests — what to change
+
+Your existing tests can mostly stay.
+
+Add these tests to AddressValidationServiceImplTest
+
+Test 1 — 400/ValidationException should NOT propagate
+
+@Test
+void validateAddress_shouldNotPropagateValidationException() throws JsonProcessingException {
+
+  when(ocmWebClientService.getUserConfigDataFromOCM(any(), any()))
+      .thenReturn(userConfigResponseDTO);
+
+  ValidationException validationException =
+      new ValidationException(
+          "Data is not valid: [Invalid address]",
+          "[Invalid address]");
+
+  when(sendFlexWebClientService.sendFlexRequest(
+          anyString(),
+          any(),
+          anyMap(),
+          any(),
+          eq(AddressValidationResponseDTO.class)))
+      .thenReturn(Mono.error(validationException));
+
+  when(sendFlexRecordUtil.saveSendflexRecord(any(SendFlexRecordDto.class)))
+      .thenReturn(SendFlexRecordDto.builder().build());
+
+  AddressValidationResponseDTO result =
+      addressValidationService.validateAddress(validRequest);
+
+  assertNotNull(result);
+  assertFalse(result.isAddressValid());
+
+  verify(sendFlexRecordUtil, times(1))
+      .saveSendflexRecord(
+          argThat(record -> record.getStatusCode() == null));
+}
+
+You'll need:
+
+import com.cardinalhealth.adv.shipping.integration.api.exception.ValidationException;
+import static org.mockito.ArgumentMatchers.argThat;
+
+
+---
+
+Test 2 — existing unexpected exception behavior
+
+Keep your existing:
+
+validateAddress_shouldThrowShippingIntegrationException_whenDataIntegrityViolationExceptionFromSendFlexRequest()
+
+That verifies:
+
+unexpected error
+       ↓
 ShippingIntegrationException
-     ↓
+
+which should still happen.
+
+
+---
+
+Test 3 — persistence status is null
+
+Add:
+
+@Test
+void persistAddressValidationValidationFailure_shouldSaveNullStatus() {
+
+  AddressValidationRequestDTO requestDTO =
+      new AddressValidationRequestDTO();
+
+  ValidationException exception =
+      new ValidationException(
+          "Data is not valid: [Invalid address]",
+          "[Invalid address]");
+
+  when(sendFlexRecordUtil.saveSendflexRecord(
+      any(SendFlexRecordDto.class)))
+      .thenReturn(SendFlexRecordDto.builder().build());
+
+  SendFlexRecordDto result =
+      addressValidationService
+          .persistAddressValidationValidationFailure(
+              requestDTO,
+              exception);
+
+  assertNotNull(result);
+}
+
+However, because the method is private, you shouldn't test it directly. So actually skip this test and verify the DTO through the validateAddress_shouldNotPropagateValidationException() test above.
+
+
+---
+
+One small correction to your existing test
+
+Your existing test expects:
+
+.statusCode("FAILURE")
+
+but your production constant is:
+
+public static final String FAILURE = "failure";
+
+So this test:
+
+.statusCode("FAILURE")
+
+is potentially inconsistent with production.
+
+Prefer:
+
+.statusCode(ServiceCommonConstants.FAILURE)
+
+or:
+
+.statusCode(FAILURE)
+
+depending on your imports.
+
+
+---
+
+Final file-by-file checklist
+
+File	Method	Action
+
+SendFlexWebClientService	sendFlexRequest()	MODIFY
+SendFlexWebClientService	handleErrorMap()	MODIFY
+RetryConfig	isRetryable()	MODIFY — remove ERROR log
+AddressValidationServiceImpl	validateAddress()	MODIFY
+AddressValidationServiceImpl	persistAddressValidationValidationFailure()	ADD
+AddressValidationServiceImpl	buildAddressValidationErrorResponse()	ADD
+AddressValidationServiceImpl	persistAddressValidationFailure()	NO CHANGE
+AddressValidationController	—	NO CHANGE
+SendFlexRecordUtil	—	NO CHANGE
+SendFlexRecordDto	—	NO CHANGE
+GlobalExceptionHandler	—	NO CHANGE
+
+
+Most important behavior
+
+After implementation, when SendFlex returns 400 from /AddressValidation:
+
+400
+ ↓
+RetryConfig says NOT retryable
+ ↓
+handleErrorMap()
+ ↓
+WARN
+ ↓
+ValidationException
+ ↓
+validateAddress() catches ValidationException
+ ↓
+persist statusCode = null
+ ↓
+NO ShippingIntegrationException
+ ↓
+return AddressValidationResponseDTO(addressValid=false)
+ ↓
+Controller returns response
+
+And for a 500/timeout/connection issue:
+
+500 / timeout / connection
+ ↓
+retry where applicable
+ ↓
 ERROR
-
-That's good.
-
-For timeout/network issues:
-
-timeout
  ↓
-retry
- ↓
-retry
- ↓
-RuntimeException
+existing failure persistence
  ↓
 statusCode = failure
  ↓
 ShippingIntegrationException
 
-Also good.
-
-
----
-
-10. One thing I would NOT change
-
-Don't change this:
-
-.retryWhen(
-    retryConfig.createRetry(
-        MAX_ATTEMPTS,
-        INITIAL_DELAY_SECONDS))
-
-Your RetryConfig already does:
-
-return statusCode >= 500 && statusCode < 600;
-
-Therefore a 400 is not retried.
-
-That's exactly what we want.
-
-
----
-
-11. Unit tests you should add
-
-Test 1 — 400 should not propagate
-
-You should add a test along these lines:
-
-@Test
-void validateAddress_shouldHandleValidationExceptionWithoutPropagating()
-    throws JsonProcessingException {
-
-    when(ocmWebClientService.getUserConfigDataFromOCM(any(), any()))
-        .thenReturn(userConfigResponseDTO);
-
-    ValidationException validationException =
-        new ValidationException(
-            "Data is not valid: [Invalid address]",
-            "[Invalid address]");
-
-    when(sendFlexWebClientService.sendFlexRequest(
-        anyString(),
-        any(),
-        anyMap(),
-        any(),
-        eq(AddressValidationResponseDTO.class)))
-        .thenReturn(Mono.error(validationException));
-
-    when(sendFlexRecordUtil.saveSendflexRecord(any()))
-        .thenReturn(SendFlexRecordDto.builder().build());
-
-    AddressValidationResponseDTO result =
-        addressValidationService.validateAddress(validRequest);
-
-    assertNotNull(result);
-    assertFalse(result.isAddressValid());
-
-    verify(sendFlexRecordUtil, times(1))
-        .saveSendflexRecord(argThat(record ->
-            record.getStatusCode() == null));
-}
-
-The exact assertion on result depends on how we construct the validation-error response.
-
-
----
-
-Test 2 — unexpected exception still propagates
-
-Your existing test:
-
-validateAddress_shouldThrowShippingIntegrationException_whenDataIntegrityViolationExceptionFromSendFlexRequest()
-
-is good and should remain.
-
-It verifies that:
-
-unexpected exception
-→ ShippingIntegrationException
-
-still happens.
-
-
----
-
-12. Test handleErrorMap() separately
-
-In SendFlexWebClientServiceTest, add tests for:
-
-400
-
-WebClientResponseException 400
-        ↓
-ValidationException
-
-401
-
-401
-↓
-UnAuthorizedException
-
-404
-
-404
-↓
-ResourceNotFoundException
-
-500
-
-500
-↓
-RuntimeException
-
-The important behavioral test for the story is that the 400 follows the ValidationException path and isn't logged at ERROR.
-
-
----
-
-Final list of changes
-
-SendFlexWebClientService
-
-Modify:
-
-handleErrorMap()
-
-Change 400 logging from:
-
-log.error()
-
-to:
-
-log.warn()
-
-Don't globally change all errors to WARN.
-
-
----
-
-RetryConfig
-
-Modify:
-
-isRetryable()
-
-Remove/change the log.error() there.
-
-The retry condition itself is already correct.
-
-
----
-
-AddressValidationServiceImpl
-
-Modify:
-
-validateAddress()
-
-Add:
-
-catch (ValidationException exception)
-
-before the generic catch.
-
-For this exception:
-
-WARN
-↓
-persist statusCode = null
-↓
-don't throw ShippingIntegrationException
-↓
-return valid AddressValidationResponseDTO
-
-Add:
-
-persistAddressValidationValidationFailure()
-
-with:
-
-.statusCode(null)
-
-Keep unchanged:
-
-persistAddressValidationFailure()
-
-for real failures.
-
-
----
-
-SendFlexRecordUtil
-
-No change.
-
-SendFlexRecordDto
-
-No change.
-
-GlobalExceptionHandler
-
-No change.
-
-AddressValidationController
-
-No change.
-
-
----
-
-One remaining piece
-
-To give you the exact copy-paste-ready final AddressValidationServiceImpl, I need only these two classes now:
-
-ValidationException
-AddressValidationResponseDTO
-
-I specifically need to see the constructors/getters/setters of ValidationException and the fields of AddressValidationResponseDTO, because the only unresolved piece is what normal response should be returned to the caller when SendFlex says the address is invalid.
-
-Everything else — **which classes change, which methods change, the exception flow, the retry behavior, and the statusCode = null handling — is now established.**
+That is the implementation I would use for this story because it fixes the alert noise without globally hiding genuine SendFlex failures.
