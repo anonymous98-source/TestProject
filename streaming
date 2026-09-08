@@ -1,1803 +1,1864 @@
-Yes. Since your requirement has changed from two directories → one parent directory containing multiple apps, I would simplify the earlier implementation and make the changes in a few files.
+Yes. Looking at the two production classes and the current tests, the missing coverage is mainly around:
 
-The final usage becomes:
+handleErrorMap() — 400 address-validation, 400 other endpoint, 401, 404, default HTTP error, malformed response body, generic exception.
 
-java -jar dto-comparator.jar /path/to/all-apps
+sendFlexRequest() — null body and non-empty/empty headers.
 
-For:
+sendFlexListRequest() — success and error paths.
 
-all-apps/
-├── app-a/
-├── app-b/
-├── app-c/
-└── app-d/
+findErrors() — array/object/contents branches.
 
-the tool automatically compares every unique pair and puts the App 1 / App 2 information first in the report.
+usePerfTestSendFlexUrl() — both true and false.
 
-Below are the exact changes.
+getURI() — perf-test URL and normal URL.
+
+AddressValidationServiceImpl — success/failure persistence, null result, validation exception, generic exception, null address, all carrier/profile branches, suggestion branches, validation-detail branches.
 
 
----
+Below are replacement test classes designed to cover those branches.
 
-1. DtoModel.java
+> One important point: your production code currently has log.error(...) with LogBuilder in SendFlexWebClientService. That is okay for coverage, but for the story requirement you discussed earlier, the address-validation 400 path is correctly using WARN. Also make sure RetryConfig.isRetryable() no longer logs 400 as ERROR.
 
-No change required.
 
-Keep the previous version:
-
-package com.dto.comparator.model;
-
-import java.nio.file.Path;
-import java.util.List;
-
-public record DtoModel(
-        String className,
-        String packageName,
-        Path sourceFile,
-        List<FieldModel> fields
-) {
-
-    public int fieldCount() {
-        return fields.size();
-    }
-
-    public String signature() {
-        return fields.stream()
-                .map(FieldModel::signature)
-                .sorted()
-                .reduce(
-                        "",
-                        (a, b) -> a + "|" + b
-                );
-    }
-}
 
 
 ---
 
-2. FieldModel.java
-
-No change.
-
-package com.dto.comparator.model;
-
-public record FieldModel(
-        String name,
-        String type
-) {
-
-    @Override
-    public String toString() {
-        return name + " : " + type;
-    }
-
-    public String signature() {
-        return name + ":" + type;
-    }
-}
-
-
----
-
-3. Change DtoMatch.java
-
-This is important because now we need to know which applications the DTOs came from.
-
-Replace the previous DtoMatch.java completely:
-
-package com.dto.comparator.model;
-
-import java.util.Set;
-
-public record DtoMatch(
-        String app1,
-        String app2,
-        DtoModel dto1,
-        DtoModel dto2,
-        double similarity,
-        MatchStatus status,
-        Set<FieldModel> commonFields,
-        Set<FieldModel> onlyInDto1,
-        Set<FieldModel> onlyInDto2,
-        Set<String> differentTypes
-) {
-}
-
-Now every match knows:
-
-app1
-app2
-dto1
-dto2
-
-
----
-
-4. Replace DtoMatcher.java
-
-This is the biggest change.
-
-The matcher now accepts:
-
-App 1 DTOs
-App 2 DTOs
-App 1 name
-App 2 name
-
-and performs the comparison in parallel.
-
-Replace the entire file with:
-
-package com.dto.comparator.matcher;
-
-import com.dto.comparator.model.DtoMatch;
-import com.dto.comparator.model.DtoModel;
-import com.dto.comparator.model.FieldModel;
-import com.dto.comparator.model.MatchStatus;
-
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.stream.Collectors;
-
-public class DtoMatcher {
-
-    private static final double HIGH_THRESHOLD = 0.90;
-
-    private static final double POSSIBLE_THRESHOLD = 0.80;
-
-    private final ExecutorService executor;
-
-    public DtoMatcher() {
-
-        int processors =
-                Runtime.getRuntime().availableProcessors();
-
-        int threadCount =
-                Math.max(2, processors);
-
-        executor =
-                Executors.newFixedThreadPool(
-                        threadCount
-                );
-    }
-
-    /**
-     * Compare DTOs belonging to two applications.
-     */
-    public List<DtoMatch> compare(
-            String app1,
-            List<DtoModel> dtos1,
-            String app2,
-            List<DtoModel> dtos2) {
-
-        /*
-         * Index application 2 DTOs by field count.
-         *
-         * This avoids comparing every DTO against
-         * completely unrelated DTOs.
-         */
-        Map<Integer, List<DtoModel>> index =
-                dtos2.stream()
-                        .collect(
-                                Collectors.groupingBy(
-                                        DtoModel::fieldCount
-                                )
-                        );
-
-        List<CompletableFuture<DtoMatch>> futures =
-                dtos1.stream()
-                        .map(dto ->
-                                CompletableFuture.supplyAsync(
-                                        () ->
-                                                findBestMatch(
-                                                        app1,
-                                                        dto,
-                                                        app2,
-                                                        index
-                                                ),
-                                        executor
-                                )
-                        )
-                        .toList();
-
-        return futures.stream()
-                .map(CompletableFuture::join)
-                .filter(Objects::nonNull)
-                .sorted(
-                        Comparator.comparing(
-                                DtoMatch::similarity
-                        ).reversed()
-                )
-                .toList();
-    }
-
-    private DtoMatch findBestMatch(
-            String app1,
-            DtoModel source,
-            String app2,
-            Map<Integer, List<DtoModel>> index) {
-
-        List<DtoModel> candidates =
-                new ArrayList<>();
-
-        /*
-         * If source has 5 fields, consider DTOs
-         * with 4, 5 or 6 fields.
-         *
-         * This significantly reduces comparisons.
-         */
-        int minFields =
-                Math.max(
-                        0,
-                        source.fieldCount() - 1
-                );
-
-        int maxFields =
-                source.fieldCount() + 1;
-
-        for (int count = minFields;
-             count <= maxFields;
-             count++) {
-
-            candidates.addAll(
-                    index.getOrDefault(
-                            count,
-                            List.of()
-                    )
-            );
-        }
-
-        if (candidates.isEmpty()) {
-            return null;
-        }
-
-        return candidates.stream()
-                .map(candidate ->
-                        calculateSimilarity(
-                                app1,
-                                source,
-                                app2,
-                                candidate
-                        )
-                )
-                .filter(match ->
-                        match.similarity()
-                                >= POSSIBLE_THRESHOLD
-                )
-                .max(
-                        Comparator.comparing(
-                                DtoMatch::similarity
-                        )
-                )
-                .orElse(null);
-    }
-
-    private DtoMatch calculateSimilarity(
-            String app1,
-            DtoModel dto1,
-            String app2,
-            DtoModel dto2) {
-
-        Map<String, String> fields1 =
-                toFieldMap(dto1);
-
-        Map<String, String> fields2 =
-                toFieldMap(dto2);
-
-        Set<String> names1 =
-                fields1.keySet();
-
-        Set<String> names2 =
-                fields2.keySet();
-
-        Set<String> commonNames =
-                new HashSet<>(names1);
-
-        commonNames.retainAll(names2);
-
-        Set<String> union =
-                new HashSet<>(names1);
-
-        union.addAll(names2);
-
-        double fieldScore =
-                union.isEmpty()
-                        ? 1.0
-                        : (double) commonNames.size()
-                        / union.size();
-
-        int matchingTypes = 0;
-
-        Set<String> differentTypes =
-                new TreeSet<>();
-
-        for (String fieldName :
-                commonNames) {
-
-            String type1 =
-                    fields1.get(fieldName);
-
-            String type2 =
-                    fields2.get(fieldName);
-
-            if (Objects.equals(type1, type2)) {
-
-                matchingTypes++;
-
-            } else {
-
-                differentTypes.add(
-                        fieldName
-                                + ": "
-                                + type1
-                                + " vs "
-                                + type2
-                );
-            }
-        }
-
-        double typeScore =
-                commonNames.isEmpty()
-                        ? 0
-                        : (double) matchingTypes
-                        / commonNames.size();
-
-        /*
-         * Class name has only 10% weight.
-         *
-         * Fields are much more important.
-         */
-        double nameScore =
-                calculateNameSimilarity(
-                        dto1.className(),
-                        dto2.className()
-                );
-
-        double finalScore =
-                (fieldScore * 0.60)
-                        +
-                        (typeScore * 0.30)
-                        +
-                        (nameScore * 0.10);
-
-        Set<FieldModel> commonFields =
-                new TreeSet<>(
-                        Comparator
-                                .comparing(FieldModel::name)
-                );
-
-        Set<FieldModel> onlyInDto1 =
-                new TreeSet<>(
-                        Comparator
-                                .comparing(FieldModel::name)
-                );
-
-        Set<FieldModel> onlyInDto2 =
-                new TreeSet<>(
-                        Comparator
-                                .comparing(FieldModel::name)
-                );
-
-        for (FieldModel field :
-                dto1.fields()) {
-
-            if (fields2.containsKey(field.name())
-                    && Objects.equals(
-                    field.type(),
-                    fields2.get(field.name()))) {
-
-                commonFields.add(field);
-
-            } else {
-
-                onlyInDto1.add(field);
-            }
-        }
-
-        for (FieldModel field :
-                dto2.fields()) {
-
-            if (!fields1.containsKey(field.name())
-                    || !Objects.equals(
-                    field.type(),
-                    fields1.get(field.name()))) {
-
-                onlyInDto2.add(field);
-            }
-        }
-
-        MatchStatus status =
-                determineStatus(finalScore);
-
-        return new DtoMatch(
-                app1,
-                app2,
-                dto1,
-                dto2,
-                finalScore,
-                status,
-                commonFields,
-                onlyInDto1,
-                onlyInDto2,
-                differentTypes
-        );
-    }
-
-    private MatchStatus determineStatus(
-            double score) {
-
-        if (score >= 0.999999) {
-            return MatchStatus.EXACT_MATCH;
-        }
-
-        if (score >= HIGH_THRESHOLD) {
-            return MatchStatus.HIGH_SIMILARITY;
-        }
-
-        return MatchStatus.POSSIBLE_MATCH;
-    }
-
-    private Map<String, String> toFieldMap(
-            DtoModel dto) {
-
-        return dto.fields()
-                .stream()
-                .collect(
-                        Collectors.toMap(
-                                FieldModel::name,
-                                FieldModel::type
-                        )
-                );
-    }
-
-    private double calculateNameSimilarity(
-            String name1,
-            String name2) {
-
-        String a =
-                normalizeClassName(name1);
-
-        String b =
-                normalizeClassName(name2);
-
-        if (a.equals(b)) {
-            return 1.0;
-        }
-
-        int distance =
-                levenshtein(a, b);
-
-        int max =
-                Math.max(
-                        a.length(),
-                        b.length()
-                );
-
-        if (max == 0) {
-            return 1.0;
-        }
-
-        return 1.0 -
-                ((double) distance / max);
-    }
-
-    private String normalizeClassName(
-            String name) {
-
-        return name
-                .toLowerCase()
-                .replace("dto", "")
-                .replace("request", "")
-                .replace("response", "")
-                .replace("model", "");
-    }
-
-    private int levenshtein(
-            String a,
-            String b) {
-
-        int[][] dp =
-                new int[a.length() + 1]
-                        [b.length() + 1];
-
-        for (int i = 0;
-             i <= a.length();
-             i++) {
-
-            dp[i][0] = i;
-        }
-
-        for (int j = 0;
-             j <= b.length();
-             j++) {
-
-            dp[0][j] = j;
-        }
-
-        for (int i = 1;
-             i <= a.length();
-             i++) {
-
-            for (int j = 1;
-                 j <= b.length();
-                 j++) {
-
-                int cost =
-                        a.charAt(i - 1)
-                                == b.charAt(j - 1)
-                                ? 0
-                                : 1;
-
-                dp[i][j] =
-                        Math.min(
-                                Math.min(
-                                        dp[i - 1][j] + 1,
-                                        dp[i][j - 1] + 1
-                                ),
-                                dp[i - 1][j - 1]
-                                        + cost
-                        );
-            }
-        }
-
-        return dp[a.length()][b.length()];
-    }
-
-    public void shutdown() {
-
-        executor.shutdown();
-
-        try {
-
-            if (!executor.awaitTermination(
-                    10,
-                    TimeUnit.SECONDS)) {
-
-                executor.shutdownNow();
-            }
-
-        } catch (InterruptedException e) {
-
-            executor.shutdownNow();
-
-            Thread.currentThread().interrupt();
-        }
-    }
-}
-
-
----
-
-5. Replace ExcelReportWriter.java
-
-This is where we'll make App 1 and App 2 the first columns.
-
-Replace the complete file:
-
-package com.dto.comparator.report;
-
-import com.dto.comparator.model.DtoMatch;
-import com.dto.comparator.model.DtoModel;
-import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-
-import java.io.FileOutputStream;
+1. Replace SendFlexWebClientServiceMockServerTest
+
+package com.cardinalhealth.adv.shipping.integration.api.service.webclient;
+
+import static com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants.ACCEPT_TYPE;
+import static com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants.CONTENT_TYPE;
+import static com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants.CORRELATION_ID;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import com.cardinalhealth.adv.shipping.integration.api.config.AdvShippingIntegrationApiProperties;
+import com.cardinalhealth.adv.shipping.integration.api.config.RetryConfig;
+import com.cardinalhealth.adv.shipping.integration.api.exception.ResourceNotFoundException;
+import com.cardinalhealth.adv.shipping.integration.api.exception.UnAuthorizedException;
+import com.cardinalhealth.adv.shipping.integration.api.exception.ValidationException;
+import com.cardinalhealth.adv.shipping.integration.api.standin.PerfTestDeterminer;
+import com.cardinalhealth.ofl.next.http.client.library.HttpClientAutoConfig;
+import com.cardinalhealth.ofl.next.logging.library.LoggingConfig;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
-import java.nio.file.Path;
-import java.util.*;
-import java.util.stream.Collectors;
-
-public class ExcelReportWriter {
-
-    public void write(
-            Path outputFile,
-            List<DtoMatch> matches,
-            List<DtoModel> allDtos)
-            throws IOException {
-
-        try (Workbook workbook =
-                     new XSSFWorkbook()) {
-
-            createSummarySheet(
-                    workbook,
-                    matches,
-                    allDtos
-            );
-
-            createMatchesSheet(
-                    workbook,
-                    matches
-            );
-
-            try (FileOutputStream output =
-                         new FileOutputStream(
-                                 outputFile.toFile()
-                         )) {
-
-                workbook.write(output);
-            }
-        }
-    }
-
-    private void createSummarySheet(
-            Workbook workbook,
-            List<DtoMatch> matches,
-            List<DtoModel> allDtos) {
-
-        Sheet sheet =
-                workbook.createSheet("Summary");
-
-        Row header =
-                sheet.createRow(0);
-
-        header.createCell(0)
-                .setCellValue("Metric");
-
-        header.createCell(1)
-                .setCellValue("Value");
-
-        int row = 1;
-
-        row(sheet, row++,
-                "Total DTOs",
-                allDtos.size());
-
-        row(sheet, row++,
-                "Total Matches",
-                matches.size());
-
-        long exact =
-                matches.stream()
-                        .filter(m ->
-                                m.status().name()
-                                        .equals(
-                                                "EXACT_MATCH"
-                                        ))
-                        .count();
-
-        long high =
-                matches.stream()
-                        .filter(m ->
-                                m.status().name()
-                                        .equals(
-                                                "HIGH_SIMILARITY"
-                                        ))
-                        .count();
-
-        long possible =
-                matches.stream()
-                        .filter(m ->
-                                m.status().name()
-                                        .equals(
-                                                "POSSIBLE_MATCH"
-                                        ))
-                        .count();
-
-        row(sheet, row++,
-                "Exact Matches",
-                exact);
-
-        row(sheet, row++,
-                "High Similarity",
-                high);
-
-        row(sheet, row++,
-                "Possible Matches",
-                possible);
-
-        autoSize(
-                sheet,
-                2
-        );
-    }
-
-    private void createMatchesSheet(
-            Workbook workbook,
-            List<DtoMatch> matches) {
-
-        Sheet sheet =
-                workbook.createSheet("DTO Matches");
-
-        String[] headers = {
-
-                "APP 1",
-                "APP 2",
-
-                "STATUS",
-
-                "DTO 1",
-                "DTO 2",
-
-                "SIMILARITY",
-
-                "DTO 1 FILE",
-                "DTO 2 FILE",
-
-                "COMMON FIELDS",
-
-                "ONLY IN APP 1",
-
-                "ONLY IN APP 2",
-
-                "DIFFERENT TYPES"
-        };
-
-        createHeader(
-                sheet,
-                headers
-        );
-
-        int rowIndex = 1;
-
-        for (DtoMatch match :
-                matches) {
-
-            Row row =
-                    sheet.createRow(
-                            rowIndex++
-                    );
-
-            /*
-             * IMPORTANT:
-             *
-             * App names are the FIRST columns.
-             */
-            row.createCell(0)
-                    .setCellValue(
-                            match.app1()
-                    );
-
-            row.createCell(1)
-                    .setCellValue(
-                            match.app2()
-                    );
-
-            row.createCell(2)
-                    .setCellValue(
-                            match.status().name()
-                    );
-
-            row.createCell(3)
-                    .setCellValue(
-                            match.dto1()
-                                    .className()
-                    );
-
-            row.createCell(4)
-                    .setCellValue(
-                            match.dto2()
-                                    .className()
-                    );
-
-            row.createCell(5)
-                    .setCellValue(
-                            match.similarity()
-                    );
-
-            row.createCell(6)
-                    .setCellValue(
-                            match.dto1()
-                                    .sourceFile()
-                                    .toString()
-                    );
-
-            row.createCell(7)
-                    .setCellValue(
-                            match.dto2()
-                                    .sourceFile()
-                                    .toString()
-                    );
-
-            row.createCell(8)
-                    .setCellValue(
-                            formatFields(
-                                    match.commonFields()
-                            )
-                    );
-
-            row.createCell(9)
-                    .setCellValue(
-                            formatFields(
-                                    match.onlyInDto1()
-                            )
-                    );
-
-            row.createCell(10)
-                    .setCellValue(
-                            formatFields(
-                                    match.onlyInDto2()
-                            )
-                    );
-
-            row.createCell(11)
-                    .setCellValue(
-                            String.join(
-                                    " | ",
-                                    match.differentTypes()
-                            )
-                    );
-
-            CellStyle percentageStyle =
-                    workbook.createCellStyle();
-
-            percentageStyle.setDataFormat(
-                    workbook
-                            .getCreationHelper()
-                            .createDataFormat()
-                            .getFormat(
-                                    "0.00%"
-                            )
-            );
-
-            row.getCell(5)
-                    .setCellStyle(
-                            percentageStyle
-                    );
-        }
-
-        sheet.createFreezePane(
-                0,
-                1
-        );
-
-        sheet.setAutoFilter(
-                new org.apache.poi.ss.util.CellRangeAddress(
-                        0,
-                        Math.max(
-                                0,
-                                matches.size()
-                        ),
-                        0,
-                        headers.length - 1
-                )
-        );
-
-        autoSize(
-                sheet,
-                headers.length
-        );
-    }
-
-    private void createHeader(
-            Sheet sheet,
-            String[] headers) {
-
-        Row row =
-                sheet.createRow(0);
-
-        for (int i = 0;
-             i < headers.length;
-             i++) {
-
-            row.createCell(i)
-                    .setCellValue(
-                            headers[i]
-                    );
-        }
-    }
-
-    private void row(
-            Sheet sheet,
-            int rowNumber,
-            String metric,
-            Object value) {
-
-        Row row =
-                sheet.createRow(
-                        rowNumber
-                );
-
-        row.createCell(0)
-                .setCellValue(
-                        metric
-                );
-
-        row.createCell(1)
-                .setCellValue(
-                        String.valueOf(value)
-                );
-    }
-
-    private String formatFields(
-            Set<?> fields) {
-
-        return fields.stream()
-                .map(Object::toString)
-                .sorted()
-                .collect(
-                        Collectors.joining(
-                                " | "
-                        )
-                );
-    }
-
-    private void autoSize(
-            Sheet sheet,
-            int columns) {
-
-        for (int i = 0;
-             i < columns;
-             i++) {
-
-            try {
-
-                sheet.autoSizeColumn(i);
-
-            } catch (Exception ignored) {
-                // Ignore column sizing issues
-            }
-        }
-    }
-}
-
-
----
-
-6. Replace CsvReportWriter.java
-
-The CSV will also start with the application names.
-
-package com.dto.comparator.report;
-
-import com.dto.comparator.model.DtoMatch;
-import com.dto.comparator.model.DtoModel;
-
-import java.io.BufferedWriter;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.concurrent.TimeUnit;
+import lombok.SneakyThrows;
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Mono;
 
-public class CsvReportWriter {
+@SpringBootTest(
+    classes = {
+      HttpClientAutoConfig.class,
+      LoggingConfig.class,
+      SendFlexWebClientService.class,
+      AdvShippingIntegrationApiProperties.class,
+      ObjectMapper.class,
+      RetryConfig.class
+    })
+class SendFlexWebClientServiceMockServerTest {
 
-    public void write(
-            Path outputFile,
-            List<DtoMatch> matches)
-            throws IOException {
+  @Autowired private ObjectMapper objectMapper;
 
-        try (BufferedWriter writer =
-                     Files.newBufferedWriter(
-                             outputFile
-                     )) {
+  @Autowired private AdvShippingIntegrationApiProperties advShippingIntegrationApiProperties;
 
-            writer.write(
-                    "APP 1,APP 2,STATUS,DTO 1,DTO 2,SIMILARITY,DTO 1 FILE,DTO 2 FILE,COMMON FIELDS,ONLY IN APP 1,ONLY IN APP 2,DIFFERENT TYPES"
-            );
+  @Autowired
+  @Qualifier("webClientNoAuth")
+  private WebClient webClient;
 
-            writer.newLine();
+  @Autowired private SendFlexWebClientService subject;
 
-            for (DtoMatch match :
-                    matches) {
+  @MockitoBean private PerfTestDeterminer perfTestDeterminer;
 
-                writer.write(
-                        csv(match.app1())
-                                + ","
-                                + csv(match.app2())
-                                + ","
-                                + csv(
-                                match.status()
-                                        .name()
-                        )
-                                + ","
-                                + csv(
-                                match.dto1()
-                                        .className()
-                        )
-                                + ","
-                                + csv(
-                                match.dto2()
-                                        .className()
-                        )
-                                + ","
-                                + csv(
-                                String.format(
-                                        "%.2f%%",
-                                        match.similarity()
-                                                * 100
-                                )
-                        )
-                                + ","
-                                + csv(
-                                match.dto1()
-                                        .sourceFile()
-                                        .toString()
-                        )
-                                + ","
-                                + csv(
-                                match.dto2()
-                                        .sourceFile()
-                                        .toString()
-                        )
-                                + ","
-                                + csv(
-                                formatFields(
-                                        match.commonFields()
-                                )
-                        )
-                                + ","
-                                + csv(
-                                formatFields(
-                                        match.onlyInDto1()
-                                )
-                        )
-                                + ","
-                                + csv(
-                                formatFields(
-                                        match.onlyInDto2()
-                                )
-                        )
-                                + ","
-                                + csv(
-                                String.join(
-                                        " | ",
-                                        match.differentTypes()
-                                )
-                        )
-                );
+  private MockWebServer server;
 
-                writer.newLine();
+  @BeforeEach
+  void setup() throws IOException {
+    server = new MockWebServer();
+    server.start();
+
+    MDC.put(CORRELATION_ID, "test-correlation-id");
+
+    AdvShippingIntegrationApiProperties.ApiConfig apiConfig =
+        new AdvShippingIntegrationApiProperties.ApiConfig();
+
+    apiConfig.setUrl(server.url("").toString());
+    apiConfig.setPerfTestUrl(server.url("").toString() + "perf/");
+    apiConfig.setKey("key");
+
+    AdvShippingIntegrationApiProperties.SendFlex sendflexConfig =
+        new AdvShippingIntegrationApiProperties.SendFlex();
+
+    sendflexConfig.setApi(apiConfig);
+
+    advShippingIntegrationApiProperties.setSendflex(sendflexConfig);
+
+    when(perfTestDeterminer.usePerfTestUrl()).thenReturn(false);
+  }
+
+  @AfterEach
+  void tearDown() throws IOException {
+    MDC.remove(CORRELATION_ID);
+    server.shutdown();
+  }
+
+  // --------------------------------------------------------------------------
+  // sendFlexRequest
+  // --------------------------------------------------------------------------
+
+  @SneakyThrows
+  @Test
+  @DisplayName("sendFlexRequest - successful POST with headers")
+  void sendFlexRequest_success_withHeaders() {
+
+    JsonNode jsonNode =
+        objectMapper.createObjectNode().put("key", "value");
+
+    server.enqueue(
+        new MockResponse()
+            .setResponseCode(200)
+            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
+            .setBody(objectMapper.writeValueAsString(jsonNode)));
+
+    JsonNode result =
+        subject
+            .sendFlexRequest(
+                "test-endpoint",
+                HttpMethod.POST,
+                Map.of("headerNm", "headerVal"),
+                jsonNode,
+                JsonNode.class)
+            .block();
+
+    assertThat(result).isEqualTo(jsonNode);
+
+    RecordedRequest request =
+        server.takeRequest(1, TimeUnit.SECONDS);
+
+    assertThat(request).isNotNull();
+    assertThat(request.getMethod()).isEqualTo("POST");
+    assertThat(request.getPath()).isEqualTo("/test-endpoint");
+    assertThat(request.getHeaders().get("headerNm")).isEqualTo("headerVal");
+    assertThat(request.getHeaders().get("X-API-Key")).isEqualTo("key");
+    assertThat(request.getHeaders().get("Content-Type")).isEqualTo(CONTENT_TYPE);
+    assertThat(request.getHeaders().get("Accept")).isEqualTo(ACCEPT_TYPE);
+  }
+
+  @Test
+  @DisplayName("sendFlexRequest - successful request with null body and empty headers")
+  void sendFlexRequest_success_withNullBodyAndEmptyHeaders() {
+
+    server.enqueue(
+        new MockResponse()
+            .setResponseCode(200)
+            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
+            .setBody("{}"));
+
+    JsonNode result =
+        subject
+            .sendFlexRequest(
+                "test-endpoint",
+                HttpMethod.GET,
+                Collections.emptyMap(),
+                null,
+                JsonNode.class)
+            .block();
+
+    assertNotNull(result);
+  }
+
+  // --------------------------------------------------------------------------
+  // handleErrorMap - all HTTP branches
+  // --------------------------------------------------------------------------
+
+  @Test
+  @DisplayName("handleErrorMap - address validation 400 returns ValidationException")
+  void handleErrorMap_addressValidation400_returnsValidationException() {
+
+    WebClientResponseException ex =
+        mock(WebClientResponseException.class);
+
+    when(ex.getMessage()).thenReturn("400 Bad Request");
+    when(ex.getStatusCode()).thenReturn(HttpStatus.BAD_REQUEST);
+    when(ex.getResponseBodyAsString())
+        .thenReturn("{\"contents\":\"Invalid address\"}");
+
+    Exception result =
+        subject.handleErrorMap(
+            ex,
+            ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT);
+
+    assertThat(result).isInstanceOf(ValidationException.class);
+    assertThat(result.getMessage()).contains("Data is not valid");
+    assertThat(result.getMessage()).contains("Invalid address");
+  }
+
+  @Test
+  @DisplayName("handleErrorMap - normal 400 returns ValidationException")
+  void handleErrorMap_normal400_returnsValidationException() {
+
+    WebClientResponseException ex =
+        mock(WebClientResponseException.class);
+
+    when(ex.getMessage()).thenReturn("400 Bad Request");
+    when(ex.getStatusCode()).thenReturn(HttpStatus.BAD_REQUEST);
+    when(ex.getResponseBodyAsString())
+        .thenReturn("{\"contents\":\"Invalid data\"}");
+
+    Exception result =
+        subject.handleErrorMap(ex, "some-other-endpoint");
+
+    assertThat(result).isInstanceOf(ValidationException.class);
+    assertThat(result.getMessage()).contains("Data is not valid");
+  }
+
+  @Test
+  @DisplayName("handleErrorMap - 401 returns UnAuthorizedException")
+  void handleErrorMap_401_returnsUnauthorizedException() {
+
+    WebClientResponseException ex =
+        mock(WebClientResponseException.class);
+
+    when(ex.getMessage()).thenReturn("401 Unauthorized");
+    when(ex.getStatusCode()).thenReturn(HttpStatus.UNAUTHORIZED);
+    when(ex.getResponseBodyAsString())
+        .thenReturn("{\"contents\":\"Unauthorized\"}");
+
+    Exception result =
+        subject.handleErrorMap(ex, "some-endpoint");
+
+    assertThat(result).isInstanceOf(UnAuthorizedException.class);
+    assertThat(result.getMessage()).contains("Not authorized");
+  }
+
+  @Test
+  @DisplayName("handleErrorMap - 404 returns ResourceNotFoundException")
+  void handleErrorMap_404_returnsResourceNotFoundException() {
+
+    WebClientResponseException ex =
+        mock(WebClientResponseException.class);
+
+    when(ex.getMessage()).thenReturn("404 Not Found");
+    when(ex.getStatusCode()).thenReturn(HttpStatus.NOT_FOUND);
+    when(ex.getResponseBodyAsString())
+        .thenReturn("{\"contents\":\"Resource not found\"}");
+
+    Exception result =
+        subject.handleErrorMap(ex, "some-endpoint");
+
+    assertThat(result).isInstanceOf(ResourceNotFoundException.class);
+    assertThat(result.getMessage()).contains("Resource is not found");
+  }
+
+  @Test
+  @DisplayName("handleErrorMap - unknown HTTP status returns RuntimeException")
+  void handleErrorMap_unknownStatus_returnsRuntimeException() {
+
+    WebClientResponseException ex =
+        mock(WebClientResponseException.class);
+
+    when(ex.getMessage()).thenReturn("418 I'm a teapot");
+    when(ex.getStatusCode()).thenReturn(HttpStatus.I_AM_A_TEAPOT);
+    when(ex.getResponseBodyAsString())
+        .thenReturn("{\"contents\":\"Unknown HTTP error\"}");
+
+    Exception result =
+        subject.handleErrorMap(ex, "some-endpoint");
+
+    assertThat(result).isInstanceOf(RuntimeException.class);
+    assertThat(result.getMessage()).contains("Unknown HTTP error occurred");
+    assertThat(result.getMessage()).contains("418");
+  }
+
+  @Test
+  @DisplayName("handleErrorMap - generic Throwable returns RuntimeException")
+  void handleErrorMap_genericThrowable_returnsRuntimeException() {
+
+    Throwable throwable =
+        new RuntimeException("Something went wrong");
+
+    Exception result =
+        subject.handleErrorMap(throwable, "some-endpoint");
+
+    assertThat(result).isInstanceOf(RuntimeException.class);
+    assertThat(result.getMessage())
+        .contains("Unexpected error occurred");
+    assertThat(result.getMessage())
+        .contains("Something went wrong");
+  }
+
+  // --------------------------------------------------------------------------
+  // extractErrorMessages
+  // --------------------------------------------------------------------------
+
+  @Test
+  @DisplayName("handleErrorMap - malformed response body is handled")
+  void handleErrorMap_malformedResponseBody_returnsException() {
+
+    WebClientResponseException ex =
+        mock(WebClientResponseException.class);
+
+    when(ex.getMessage()).thenReturn("400 Bad Request");
+    when(ex.getStatusCode()).thenReturn(HttpStatus.BAD_REQUEST);
+    when(ex.getResponseBodyAsString())
+        .thenReturn("this-is-not-valid-json");
+
+    Exception result =
+        subject.handleErrorMap(ex, "some-other-endpoint");
+
+    assertThat(result).isInstanceOf(ValidationException.class);
+    assertThat(result.getMessage()).contains("Data is not valid");
+  }
+
+  @Test
+  @DisplayName("handleErrorMap - nested contents are extracted")
+  void handleErrorMap_nestedContents_areExtracted() {
+
+    WebClientResponseException ex =
+        mock(WebClientResponseException.class);
+
+    when(ex.getMessage()).thenReturn("400 Bad Request");
+    when(ex.getStatusCode()).thenReturn(HttpStatus.BAD_REQUEST);
+    when(ex.getResponseBodyAsString())
+        .thenReturn(
+            """
+            {
+              "errors": [
+                {
+                  "contents": "Invalid city"
+                },
+                {
+                  "details": {
+                    "contents": "Invalid postal code"
+                  }
+                }
+              ]
             }
-        }
-    }
+            """);
 
-    private String formatFields(
-            Set<?> fields) {
+    Exception result =
+        subject.handleErrorMap(ex, "some-endpoint");
 
-        return fields.stream()
-                .map(Object::toString)
-                .sorted()
-                .collect(
-                        Collectors.joining(
-                                " | "
-                        )
-                );
-    }
+    assertThat(result.getMessage()).contains("Invalid city");
+    assertThat(result.getMessage()).contains("Invalid postal code");
+  }
 
-    private String csv(
-            String value) {
+  // --------------------------------------------------------------------------
+  // findErrors
+  // --------------------------------------------------------------------------
 
-        if (value == null) {
-            return "";
-        }
+  @Test
+  @DisplayName("findErrors - handles object with contents")
+  void findErrors_objectWithContents() throws Exception {
 
-        return "\""
-                + value.replace(
-                "\"",
-                "\"\""
-        )
-                + "\"";
-    }
+    ObjectMapper mapper = new ObjectMapper();
+
+    JsonNode root =
+        mapper.readTree(
+            """
+            {
+              "contents": "Invalid address",
+              "details": {
+                "contents": "Invalid city"
+              }
+            }
+            """);
+
+    Set<String> errors = new java.util.LinkedHashSet<>();
+
+    subject.findErrors(root, errors);
+
+    assertThat(errors)
+        .containsExactly("Invalid address", "Invalid city");
+  }
+
+  @Test
+  @DisplayName("findErrors - handles array")
+  void findErrors_array() throws Exception {
+
+    ObjectMapper mapper = new ObjectMapper();
+
+    JsonNode root =
+        mapper.readTree(
+            """
+            [
+              {
+                "contents": "Invalid city"
+              },
+              {
+                "contents": "Invalid state"
+              }
+            ]
+            """);
+
+    Set<String> errors = new java.util.LinkedHashSet<>();
+
+    subject.findErrors(root, errors);
+
+    assertThat(errors)
+        .containsExactly("Invalid city", "Invalid state");
+  }
+
+  @Test
+  @DisplayName("findErrors - handles primitive node")
+  void findErrors_primitiveNode() throws Exception {
+
+    ObjectMapper mapper = new ObjectMapper();
+
+    JsonNode root = mapper.readTree("\"simple-value\"");
+
+    Set<String> errors = new java.util.LinkedHashSet<>();
+
+    subject.findErrors(root, errors);
+
+    assertThat(errors).isEmpty();
+  }
+
+  @Test
+  @DisplayName("findErrors - handles object without contents")
+  void findErrors_objectWithoutContents() throws Exception {
+
+    ObjectMapper mapper = new ObjectMapper();
+
+    JsonNode root =
+        mapper.readTree(
+            """
+            {
+              "message": "invalid",
+              "code": "400"
+            }
+            """);
+
+    Set<String> errors = new java.util.LinkedHashSet<>();
+
+    subject.findErrors(root, errors);
+
+    assertThat(errors).isEmpty();
+  }
+
+  // --------------------------------------------------------------------------
+  // sendFlexListRequest
+  // --------------------------------------------------------------------------
+
+  @SneakyThrows
+  @Test
+  @DisplayName("sendFlexListRequest - successful response")
+  void sendFlexListRequest_success() {
+
+    JsonNode jsonNode1 =
+        objectMapper.createObjectNode().put("key", "value1");
+
+    JsonNode jsonNode2 =
+        objectMapper.createObjectNode().put("key", "value2");
+
+    var jsonArray =
+        objectMapper.createArrayNode()
+            .add(jsonNode1)
+            .add(jsonNode2);
+
+    JsonNode requestBody =
+        objectMapper.createObjectNode().put("key", "value");
+
+    server.enqueue(
+        new MockResponse()
+            .setResponseCode(200)
+            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
+            .setBody(objectMapper.writeValueAsString(jsonArray)));
+
+    List<JsonNode> result =
+        subject
+            .sendFlexListRequest(
+                "test-endpoint",
+                HttpMethod.POST,
+                Map.of("headerNm", "headerVal"),
+                requestBody,
+                new ParameterizedTypeReference<List<JsonNode>>() {})
+            .block();
+
+    assertThat(result).containsExactly(jsonNode1, jsonNode2);
+
+    RecordedRequest request =
+        server.takeRequest(1, TimeUnit.SECONDS);
+
+    assertThat(request).isNotNull();
+    assertThat(request.getMethod()).isEqualTo("POST");
+    assertThat(request.getPath()).isEqualTo("/test-endpoint");
+    assertThat(request.getHeaders().get("headerNm")).isEqualTo("headerVal");
+    assertThat(request.getHeaders().get("X-API-Key")).isEqualTo("key");
+    assertThat(request.getHeaders().get("Content-Type")).isEqualTo(CONTENT_TYPE);
+    assertThat(request.getHeaders().get("Accept")).isEqualTo(ACCEPT_TYPE);
+  }
+
+  @Test
+  @DisplayName("sendFlexListRequest - 400 maps to ValidationException")
+  void sendFlexListRequest_400_mapsValidationException() {
+
+    server.enqueue(
+        new MockResponse()
+            .setResponseCode(400)
+            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
+            .setBody("{\"contents\":\"Invalid request\"}"));
+
+    Exception exception =
+        org.junit.jupiter.api.Assertions.assertThrows(
+            Exception.class,
+            () ->
+                subject
+                    .sendFlexListRequest(
+                        "some-endpoint",
+                        HttpMethod.POST,
+                        Collections.emptyMap(),
+                        Map.of("test", "value"),
+                        new ParameterizedTypeReference<List<String>>() {})
+                    .block());
+
+    Throwable actual =
+        exception.getCause() != null ? exception.getCause() : exception;
+
+    assertThat(actual)
+        .isInstanceOf(ValidationException.class);
+  }
+
+  // --------------------------------------------------------------------------
+  // URI / performance URL branches
+  // --------------------------------------------------------------------------
+
+  @Test
+  @DisplayName("sendFlexRequest - uses normal URL when performance test disabled")
+  void sendFlexRequest_usesNormalUrl() throws Exception {
+
+    when(perfTestDeterminer.usePerfTestUrl()).thenReturn(false);
+
+    server.enqueue(
+        new MockResponse()
+            .setResponseCode(200)
+            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
+            .setBody("{}"));
+
+    subject
+        .sendFlexRequest(
+            ServiceCommonConstants.SHIPMENT_BOOK_SUB_URI,
+            HttpMethod.GET,
+            Collections.emptyMap(),
+            null,
+            JsonNode.class)
+        .block();
+
+    RecordedRequest request =
+        server.takeRequest(1, TimeUnit.SECONDS);
+
+    assertNotNull(request);
+  }
+
+  @Test
+  @DisplayName("sendFlexRequest - uses performance URL when enabled")
+  void sendFlexRequest_usesPerformanceUrl() throws Exception {
+
+    when(perfTestDeterminer.usePerfTestUrl()).thenReturn(true);
+
+    server.enqueue(
+        new MockResponse()
+            .setResponseCode(200)
+            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
+            .setBody("{}"));
+
+    subject
+        .sendFlexRequest(
+            ServiceCommonConstants.SHIPMENT_BOOK_SUB_URI,
+            HttpMethod.GET,
+            Collections.emptyMap(),
+            null,
+            JsonNode.class)
+        .block();
+
+    RecordedRequest request =
+        server.takeRequest(1, TimeUnit.SECONDS);
+
+    assertNotNull(request);
+  }
+
+  @Test
+  @DisplayName("sendFlexRequest - non shipment endpoint does not use performance URL")
+  void sendFlexRequest_nonShipmentEndpoint_doesNotUsePerformanceUrl()
+      throws Exception {
+
+    when(perfTestDeterminer.usePerfTestUrl()).thenReturn(true);
+
+    server.enqueue(
+        new MockResponse()
+            .setResponseCode(200)
+            .setHeader(HttpHeaders.CONTENT_TYPE, "application/json")
+            .setBody("{}"));
+
+    subject
+        .sendFlexRequest(
+            "some-other-endpoint",
+            HttpMethod.GET,
+            Collections.emptyMap(),
+            null,
+            JsonNode.class)
+        .block();
+
+    RecordedRequest request =
+        server.takeRequest(1, TimeUnit.SECONDS);
+
+    assertNotNull(request);
+  }
 }
+
+One import you need
+
+Because the test uses:
+
+ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT
+
+make sure this import exists:
+
+import com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants;
 
 
 ---
 
-7. Add a new AppModel.java
+2. Replace AddressValidationServiceImplTest
 
-Create:
+This version adds the missing branches without unnecessarily testing implementation details.
 
-model/AppModel.java
+package com.cardinalhealth.adv.shipping.integration.api.service.impl;
 
-package com.dto.comparator.model;
+import static com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants.FAILURE;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
-import java.nio.file.Path;
+import com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants;
+import com.cardinalhealth.adv.shipping.integration.api.exception.ShippingIntegrationException;
+import com.cardinalhealth.adv.shipping.integration.api.exception.ValidationException;
+import com.cardinalhealth.adv.shipping.integration.api.model.addressvalidation.req.Address;
+import com.cardinalhealth.adv.shipping.integration.api.model.addressvalidation.req.AddressValidationRequest;
+import com.cardinalhealth.adv.shipping.integration.api.model.addressvalidation.resp.AddressData;
+import com.cardinalhealth.adv.shipping.integration.api.model.addressvalidation.resp.AddressSuggestionResp;
+import com.cardinalhealth.adv.shipping.integration.api.model.addressvalidation.resp.AddressValidationResponse;
+import com.cardinalhealth.adv.shipping.integration.api.model.addressvalidation.resp.ValidationDetailResponse;
+import com.cardinalhealth.adv.shipping.integration.api.service.dto.SendFlexRecordDto;
+import com.cardinalhealth.adv.shipping.integration.api.service.dto.ocm.response.DHLConfigDTO;
+import com.cardinalhealth.adv.shipping.integration.api.service.dto.ocm.response.FedexConfig;
+import com.cardinalhealth.adv.shipping.integration.api.service.dto.ocm.response.LocationConfigDTO;
+import com.cardinalhealth.adv.shipping.integration.api.service.dto.ocm.response.USPSConfigDTO;
+import com.cardinalhealth.adv.shipping.integration.api.service.dto.ocm.response.UserConfigResponseDTO;
+import com.cardinalhealth.adv.shipping.integration.api.service.dto.validateaddress.AddressSuggestion;
+import com.cardinalhealth.adv.shipping.integration.api.service.dto.validateaddress.AddressToValidate;
+import com.cardinalhealth.adv.shipping.integration.api.service.dto.validateaddress.Contact;
+import com.cardinalhealth.adv.shipping.integration.api.service.dto.validateaddress.reqdto.AddressValidationRequestDTO;
+import com.cardinalhealth.adv.shipping.integration.api.service.dto.validateaddress.resdto.AddressValidationResponseDTO;
+import com.cardinalhealth.adv.shipping.integration.api.service.dto.validateaddress.resdto.ContactResponse;
+import com.cardinalhealth.adv.shipping.integration.api.service.webclient.SendFlexWebClientService;
+import com.cardinalhealth.adv.shipping.integration.api.service.webclient.ocm.OCMWebClientService;
+import com.cardinalhealth.adv.shipping.integration.api.utility.SendFlexRecordUtil;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
+import reactor.core.publisher.Mono;
 
-public record AppModel(
-        String name,
-        Path directory,
-        List<DtoModel> dtos
-) {
+@ExtendWith(MockitoExtension.class)
+class AddressValidationServiceImplTest {
+
+  @Mock
+  private CustomerHierarchyServiceImpl customerHierarchyService;
+
+  @Mock
+  private SendFlexWebClientService sendFlexWebClientService;
+
+  @Mock
+  private SendFlexRecordUtil sendFlexRecordUtil;
+
+  @Mock
+  private OCMWebClientService ocmWebClientService;
+
+  @InjectMocks
+  private AddressValidationServiceImpl addressValidationService;
+
+  private AddressValidationRequest validRequest;
+  private AddressValidationRequest invalidRequest;
+  private AddressValidationRequest validRequest2;
+
+  private AddressValidationResponseDTO responseDTO;
+  private AddressValidationResponse response;
+
+  private SendFlexRecordDto sendFlexRecordDto;
+  private UserConfigResponseDTO userConfigResponseDTO;
+
+  @BeforeEach
+  void setUp() {
+
+    userConfigResponseDTO =
+        UserConfigResponseDTO.builder()
+            .location(
+                LocationConfigDTO.builder()
+                    .uspsConfiguration(
+                        USPSConfigDTO.builder()
+                            .uspsProfileCode("USPSCardinal")
+                            .build())
+                    .build())
+            .build();
+
+    validRequest = getAddressValidationRequest();
+
+    Address address = validRequest.getAddress();
+
+    responseDTO = new AddressValidationResponseDTO();
+    responseDTO.setAddressValid(true);
+    responseDTO.setProfile(validRequest.getProfileCode());
+
+    AddressToValidate addressToValidate =
+        new AddressToValidate();
+
+    addressToValidate.setAddressLines(address.getAddressLines());
+    addressToValidate.setCity(address.getCity());
+    addressToValidate.setState(address.getState());
+    addressToValidate.setCountryCode(address.getCountry());
+    addressToValidate.setResidential(address.isResidential());
+
+    responseDTO.setAddressToValidate(addressToValidate);
+
+    AddressSuggestion as =
+        new AddressSuggestion();
+
+    as.setAddressLines(address.getAddressLines());
+    as.setCity(address.getCity());
+    as.setState(address.getState());
+    as.setCountryCode(address.getCountry());
+    as.setName(address.getName());
+    as.setPostalCode(address.getZipCode());
+    as.setResidential(address.isResidential());
+
+    responseDTO.setAddressSuggestions(
+        Arrays.asList(as));
+
+    response =
+        new AddressValidationResponse();
+
+    response.setMessage("Validated");
+
+    validRequest2 =
+        new AddressValidationRequest();
+
+    validRequest2.setAddress(address);
+    validRequest2.setProfileCode(
+        "f8e385fd-234e-4bd5-bfb5-6e6c04433b08");
+    validRequest2.setShippingProfile(null);
+
+    invalidRequest =
+        new AddressValidationRequest();
+  }
+
+  // ==========================================================================
+  // validateAddress
+  // ==========================================================================
+
+  @Test
+  void validateAddress_success() throws JsonProcessingException {
+
+    when(ocmWebClientService.getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(userConfigResponseDTO);
+
+    sendFlexRecordDto =
+        SendFlexRecordDto.builder()
+            .apiCode("shipment/book")
+            .build();
+
+    when(sendFlexRecordUtil.saveSendflexRecord(
+            any(SendFlexRecordDto.class)))
+        .thenReturn(sendFlexRecordDto);
+
+    when(sendFlexWebClientService.sendFlexRequest(
+            anyString(),
+            any(),
+            anyMap(),
+            any(),
+            eq(AddressValidationResponseDTO.class)))
+        .thenReturn(Mono.just(responseDTO));
+
+    AddressValidationResponseDTO result =
+        addressValidationService.validateAddress(validRequest);
+
+    assertEquals(responseDTO, result);
+
+    verify(sendFlexRecordUtil)
+        .saveSendflexRecord(any(SendFlexRecordDto.class));
+  }
+
+  @Test
+  void validateAddress_success_whenResultIsNull()
+      throws JsonProcessingException {
+
+    AddressValidationResponseDTO resultDTO =
+        new AddressValidationResponseDTO();
+
+    resultDTO.setAddressValid(true);
+    resultDTO.setResult(null);
+
+    when(ocmWebClientService.getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(userConfigResponseDTO);
+
+    when(sendFlexWebClientService.sendFlexRequest(
+            anyString(),
+            any(),
+            anyMap(),
+            any(),
+            eq(AddressValidationResponseDTO.class)))
+        .thenReturn(Mono.just(resultDTO));
+
+    when(sendFlexRecordUtil.saveSendflexRecord(
+            any(SendFlexRecordDto.class)))
+        .thenReturn(SendFlexRecordDto.builder().build());
+
+    AddressValidationResponseDTO result =
+        addressValidationService.validateAddress(validRequest);
+
+    assertEquals(resultDTO, result);
+
+    verify(sendFlexRecordUtil)
+        .saveSendflexRecord(
+            argThat(record ->
+                record.getStatusCode() == null));
+  }
+
+  @Test
+  void validateAddress_validationException_isPersistedAndNotPropagated()
+      throws JsonProcessingException {
+
+    when(ocmWebClientService.getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(userConfigResponseDTO);
+
+    ValidationException exception =
+        new ValidationException(
+            "Data is not valid: [Invalid address]",
+            "[Invalid address]");
+
+    when(sendFlexWebClientService.sendFlexRequest(
+            anyString(),
+            any(),
+            anyMap(),
+            any(),
+            eq(AddressValidationResponseDTO.class)))
+        .thenReturn(Mono.error(exception));
+
+    when(sendFlexRecordUtil.saveSendflexRecord(
+            any(SendFlexRecordDto.class)))
+        .thenReturn(SendFlexRecordDto.builder().build());
+
+    AddressValidationResponseDTO result =
+        addressValidationService.validateAddress(validRequest);
+
+    assertNotNull(result);
+    assertFalse(result.isAddressValid());
+
+    verify(sendFlexRecordUtil, times(1))
+        .saveSendflexRecord(
+            argThat(record ->
+                record.getStatusCode() == null
+                    && ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT
+                        .equals(record.getApiCode())
+                    && record.getResponseObject()
+                        .toString()
+                        .contains("Invalid address")));
+  }
+
+  @Test
+  void validateAddress_genericException_isPersistedAndWrapped() {
+
+    when(ocmWebClientService.getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(userConfigResponseDTO);
+
+    when(sendFlexWebClientService.sendFlexRequest(
+            anyString(),
+            any(),
+            anyMap(),
+            any(),
+            eq(AddressValidationResponseDTO.class)))
+        .thenReturn(
+            Mono.error(
+                new RuntimeException(
+                    "SendFlex technical failure")));
+
+    when(sendFlexRecordUtil.saveSendflexRecord(
+            any(SendFlexRecordDto.class)))
+        .thenReturn(SendFlexRecordDto.builder().build());
+
+    ShippingIntegrationException exception =
+        assertThrows(
+            ShippingIntegrationException.class,
+            () ->
+                addressValidationService
+                    .validateAddress(validRequest));
+
+    assertThat(exception.getMessage())
+        .contains("An unexpected error occurred");
+
+    verify(sendFlexRecordUtil)
+        .saveSendflexRecord(
+            argThat(record ->
+                FAILURE.equals(record.getStatusCode())));
+  }
+
+  @Test
+  void validateAddress_dataIntegrityViolation_isWrapped() {
+
+    when(ocmWebClientService.getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(userConfigResponseDTO);
+
+    when(sendFlexWebClientService.sendFlexRequest(
+            anyString(),
+            any(),
+            anyMap(),
+            any(),
+            eq(AddressValidationResponseDTO.class)))
+        .thenReturn(
+            Mono.just(responseDTO));
+
+    when(sendFlexRecordUtil.saveSendflexRecord(
+            any(SendFlexRecordDto.class)))
+        .thenThrow(
+            new DataIntegrityViolationException(
+                "data integrity exception raised"));
+
+    RuntimeException exception =
+        assertThrows(
+            RuntimeException.class,
+            () ->
+                addressValidationService
+                    .validateAddress(validRequest));
+
+    assertThat(exception.getMessage())
+        .contains("data integrity exception raised");
+  }
+
+  // ==========================================================================
+  // buildAddressValidationResponse
+  // ==========================================================================
+
+  @Test
+  void buildAddressValidationResponse_validAddress() {
+
+    AddressValidationResponseDTO dto =
+        getAddressValidationResponseDTO(true);
+
+    AddressValidationResponse result =
+        addressValidationService
+            .buildAddressValidationResponse(dto);
+
+    assertNotNull(result);
+    assertNotNull(result.getData());
+    assertTrue(result.getData().isAddressValid());
+    assertNotNull(result.getData().getValidationDetail());
+  }
+
+  @Test
+  void buildAddressValidationResponse_invalidAddress_withSuggestion() {
+
+    AddressValidationResponseDTO dto =
+        getAddressValidationResponseDTO(false);
+
+    AddressSuggestion suggestion =
+        AddressSuggestion.builder()
+            .name("Suggested")
+            .addressLines(
+                Arrays.asList(
+                    "123 RODEO Drive",
+                    ""))
+            .state("CA")
+            .city("BEVERLY HILLS")
+            .countryCode("US")
+            .postalCode("90210")
+            .residential(true)
+            .build();
+
+    ContactResponse contact =
+        new ContactResponse();
+
+    contact.setName("John");
+    contact.setPhone("123456789");
+    contact.setEmail("john@test.com");
+
+    suggestion.setContact(contact);
+
+    dto.setAddressSuggestions(
+        Arrays.asList(suggestion));
+
+    AddressValidationResponse result =
+        addressValidationService
+            .buildAddressValidationResponse(dto);
+
+    AddressSuggestionResp suggestedAddress =
+        result.getData().getSuggestedAddress();
+
+    assertNotNull(suggestedAddress);
+    assertEquals("Suggested", suggestedAddress.getCompany());
+    assertEquals("John", suggestedAddress.getName());
+    assertEquals("123456789", suggestedAddress.getPhoneNumber());
+    assertEquals("john@test.com", suggestedAddress.getEmailAddress());
+  }
+
+  @Test
+  void buildAddressValidationResponse_invalidAddress_withoutSuggestions() {
+
+    AddressValidationResponseDTO dto =
+        getAddressValidationResponseDTO(false);
+
+    dto.setAddressSuggestions(null);
+
+    AddressValidationResponse result =
+        addressValidationService
+            .buildAddressValidationResponse(dto);
+
+    assertNull(
+        result.getData().getSuggestedAddress());
+  }
+
+  @Test
+  void buildAddressValidationResponse_validAddress_withoutSuggestion() {
+
+    AddressValidationResponseDTO dto =
+        getAddressValidationResponseDTO(true);
+
+    dto.setAddressSuggestions(null);
+
+    AddressValidationResponse result =
+        addressValidationService
+            .buildAddressValidationResponse(dto);
+
+    assertNull(
+        result.getData().getSuggestedAddress());
+  }
+
+  @Test
+  void buildAddressValidationResponse_addressToValidateNull() {
+
+    AddressValidationResponseDTO dto =
+        new AddressValidationResponseDTO();
+
+    dto.setAddressValid(false);
+    dto.setAddressToValidate(null);
+    dto.setAddressSuggestions(null);
+
+    AddressValidationResponse result =
+        addressValidationService
+            .buildAddressValidationResponse(dto);
+
+    assertNotNull(result);
+    assertNotNull(result.getData());
+    assertFalse(
+        result.getData()
+            .getValidationDetail()
+            .isValidated());
+  }
+
+  @Test
+  void buildAddressValidationResponse_validationDetailPresent() {
+
+    AddressValidationResponseDTO dto =
+        getAddressValidationResponseDTO(false);
+
+    AddressToValidate addressToValidate =
+        dto.getAddressToValidate();
+
+    addressToValidate.setValidationDetail(
+        com.cardinalhealth.adv.shipping.integration.api.service.dto
+            .validateaddress.ValidationDetail.builder()
+            .validated(true)
+            .build());
+
+    AddressValidationResponse result =
+        addressValidationService
+            .buildAddressValidationResponse(dto);
+
+    ValidationDetailResponse detail =
+        result.getData().getValidationDetail();
+
+    assertNotNull(detail);
+    assertTrue(detail.isValidated());
+  }
+
+  // ==========================================================================
+  // persistence
+  // ==========================================================================
+
+  @Test
+  void persistAddressValidationFailure_shouldSaveFailureRecord() {
+
+    AddressValidationRequestDTO requestDTO =
+        new AddressValidationRequestDTO();
+
+    Exception exception =
+        new Exception(
+            "Validation failed",
+            new RuntimeException("Invalid address"));
+
+    SendFlexRecordDto expectedRecord =
+        SendFlexRecordDto.builder()
+            .requestObject(requestDTO)
+            .responseObject(
+                "Validation failedInvalid address")
+            .statusCode(FAILURE)
+            .apiCode(
+                ServiceCommonConstants
+                    .ADDRESS_VALIDATION_ENDPOINT)
+            .build();
+
+    when(sendFlexRecordUtil.saveSendflexRecord(
+            any(SendFlexRecordDto.class)))
+        .thenReturn(expectedRecord);
+
+    SendFlexRecordDto result =
+        addressValidationService
+            .persistAddressValidationFailure(
+                requestDTO,
+                exception);
+
+    assertNotNull(result);
+    assertEquals(
+        FAILURE,
+        result.getStatusCode());
+    assertEquals(
+        ServiceCommonConstants
+            .ADDRESS_VALIDATION_ENDPOINT,
+        result.getApiCode());
+
+    verify(sendFlexRecordUtil, times(1))
+        .saveSendflexRecord(any());
+  }
+
+  // ==========================================================================
+  // Profile code branches
+  // ==========================================================================
+
+  @Test
+  void getProfileCodeByCarrier_usps() throws Exception {
+
+    AddressValidationRequest request =
+        getAddressValidationRequest();
+
+    request.setShippingProfile("USPS");
+
+    when(customerHierarchyService
+            .getCustomerIdByFacilityId(any()))
+        .thenReturn("CUST1");
+
+    when(ocmWebClientService
+            .getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(userConfigResponseDTO);
+
+    String result =
+        invokeGetProfileCodeByCarrier(
+            "USPS",
+            request);
+
+    assertEquals(
+        "USPSCardinal",
+        result);
+  }
+
+  @Test
+  void getProfileCodeByCarrier_uspsConfigNull()
+      throws Exception {
+
+    AddressValidationRequest request =
+        getAddressValidationRequest();
+
+    request.setShippingProfile("USPS");
+
+    UserConfigResponseDTO config =
+        UserConfigResponseDTO.builder()
+            .location(
+                LocationConfigDTO.builder()
+                    .uspsConfiguration(null)
+                    .build())
+            .build();
+
+    when(customerHierarchyService
+            .getCustomerIdByFacilityId(any()))
+        .thenReturn("CUST1");
+
+    when(ocmWebClientService
+            .getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(config);
+
+    assertNull(
+        invokeGetProfileCodeByCarrier(
+            "USPS",
+            request));
+  }
+
+  @Test
+  void getProfileCodeByCarrier_dhl() throws Exception {
+
+    AddressValidationRequest request =
+        getAddressValidationRequest();
+
+    request.setShippingProfile("DHL");
+
+    UserConfigResponseDTO config =
+        UserConfigResponseDTO.builder()
+            .location(
+                LocationConfigDTO.builder()
+                    .dhlConfiguration(
+                        DHLConfigDTO.builder()
+                            .dhlProfileCode("DHL123")
+                            .build())
+                    .build())
+            .build();
+
+    when(customerHierarchyService
+            .getCustomerIdByFacilityId(any()))
+        .thenReturn("CUST1");
+
+    when(ocmWebClientService
+            .getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(config);
+
+    assertEquals(
+        "DHL123",
+        invokeGetProfileCodeByCarrier(
+            "DHL",
+            request));
+  }
+
+  @Test
+  void getProfileCodeByCarrier_dhlConfigNull()
+      throws Exception {
+
+    AddressValidationRequest request =
+        getAddressValidationRequest();
+
+    request.setShippingProfile("DHL");
+
+    UserConfigResponseDTO config =
+        UserConfigResponseDTO.builder()
+            .location(
+                LocationConfigDTO.builder()
+                    .dhlConfiguration(null)
+                    .build())
+            .build();
+
+    when(customerHierarchyService
+            .getCustomerIdByFacilityId(any()))
+        .thenReturn("CUST1");
+
+    when(ocmWebClientService
+            .getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(config);
+
+    assertNull(
+        invokeGetProfileCodeByCarrier(
+            "DHL",
+            request));
+  }
+
+  @Test
+  void getProfileCodeByCarrier_fedex() throws Exception {
+
+    AddressValidationRequest request =
+        getAddressValidationRequest();
+
+    request.setShippingProfile("FEDEX");
+
+    UserConfigResponseDTO config =
+        UserConfigResponseDTO.builder()
+            .location(
+                LocationConfigDTO.builder()
+                    .fedexConfiguration(
+                        FedexConfig.builder()
+                            .fedexProfileCode("FEDEX123")
+                            .build())
+                    .build())
+            .build();
+
+    when(customerHierarchyService
+            .getCustomerIdByFacilityId(any()))
+        .thenReturn("CUST1");
+
+    when(ocmWebClientService
+            .getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(config);
+
+    assertEquals(
+        "FEDEX123",
+        invokeGetProfileCodeByCarrier(
+            "FEDEX",
+            request));
+  }
+
+  @Test
+  void getProfileCodeByCarrier_fedexConfigNull()
+      throws Exception {
+
+    AddressValidationRequest request =
+        getAddressValidationRequest();
+
+    request.setShippingProfile("FEDEX");
+
+    UserConfigResponseDTO config =
+        UserConfigResponseDTO.builder()
+            .location(
+                LocationConfigDTO.builder()
+                    .fedexConfiguration(null)
+                    .build())
+            .build();
+
+    when(customerHierarchyService
+            .getCustomerIdByFacilityId(any()))
+        .thenReturn("CUST1");
+
+    when(ocmWebClientService
+            .getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(config);
+
+    assertNull(
+        invokeGetProfileCodeByCarrier(
+            "FEDEX",
+            request));
+  }
+
+  @Test
+  void getProfileCodeByCarrier_carrierDoesNotMatch()
+      throws Exception {
+
+    AddressValidationRequest request =
+        getAddressValidationRequest();
+
+    request.setShippingProfile("USPS");
+
+    when(customerHierarchyService
+            .getCustomerIdByFacilityId(any()))
+        .thenReturn("CUST1");
+
+    when(ocmWebClientService
+            .getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(userConfigResponseDTO);
+
+    assertNull(
+        invokeGetProfileCodeByCarrier(
+            "DHL",
+            request));
+  }
+
+  @Test
+  void getProfileCodeByCarrier_nullOcmResponse()
+      throws Exception {
+
+    AddressValidationRequest request =
+        getAddressValidationRequest();
+
+    when(customerHierarchyService
+            .getCustomerIdByFacilityId(any()))
+        .thenReturn("CUST1");
+
+    when(ocmWebClientService
+            .getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(null);
+
+    assertNull(
+        invokeGetProfileCodeByCarrier(
+            "USPS",
+            request));
+  }
+
+  @Test
+  void getProfileCodeByCarrier_nullLocation()
+      throws Exception {
+
+    AddressValidationRequest request =
+        getAddressValidationRequest();
+
+    UserConfigResponseDTO config =
+        UserConfigResponseDTO.builder()
+            .location(null)
+            .build();
+
+    when(customerHierarchyService
+            .getCustomerIdByFacilityId(any()))
+        .thenReturn("CUST1");
+
+    when(ocmWebClientService
+            .getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(config);
+
+    assertNull(
+        invokeGetProfileCodeByCarrier(
+            "USPS",
+            request));
+  }
+
+  // ==========================================================================
+  // fetchProfileCode branches
+  // ==========================================================================
+
+  @Test
+  void validateAddress_dhlProfile() throws Exception {
+
+    UserConfigResponseDTO config =
+        UserConfigResponseDTO.builder()
+            .location(
+                LocationConfigDTO.builder()
+                    .dhlConfiguration(
+                        DHLConfigDTO.builder()
+                            .dhlProfileCode("DHL123")
+                            .build())
+                    .build())
+            .build();
+
+    when(ocmWebClientService
+            .getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(config);
+
+    when(sendFlexWebClientService.sendFlexRequest(
+            anyString(),
+            any(),
+            anyMap(),
+            any(),
+            eq(AddressValidationResponseDTO.class)))
+        .thenReturn(Mono.just(responseDTO));
+
+    when(sendFlexRecordUtil.saveSendflexRecord(
+            any()))
+        .thenReturn(
+            SendFlexRecordDto.builder().build());
+
+    validRequest.setShippingProfile("DHL");
+
+    AddressValidationResponseDTO result =
+        addressValidationService
+            .validateAddress(validRequest);
+
+    assertEquals(responseDTO, result);
+  }
+
+  @Test
+  void validateAddress_fedexProfile() throws Exception {
+
+    UserConfigResponseDTO config =
+        UserConfigResponseDTO.builder()
+            .location(
+                LocationConfigDTO.builder()
+                    .fedexConfiguration(
+                        FedexConfig.builder()
+                            .fedexProfileCode("FEDEX123")
+                            .build())
+                    .build())
+            .build();
+
+    when(ocmWebClientService
+            .getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(config);
+
+    when(sendFlexWebClientService.sendFlexRequest(
+            anyString(),
+            any(),
+            anyMap(),
+            any(),
+            eq(AddressValidationResponseDTO.class)))
+        .thenReturn(Mono.just(responseDTO));
+
+    when(sendFlexRecordUtil.saveSendflexRecord(
+            any()))
+        .thenReturn(
+            SendFlexRecordDto.builder().build());
+
+    validRequest.setShippingProfile("FEDEX");
+
+    AddressValidationResponseDTO result =
+        addressValidationService
+            .validateAddress(validRequest);
+
+    assertEquals(responseDTO, result);
+  }
+
+  @Test
+  void validateAddress_unknownShippingProfile() throws Exception {
+
+    when(ocmWebClientService
+            .getUserConfigDataFromOCM(any(), any()))
+        .thenReturn(userConfigResponseDTO);
+
+    when(sendFlexWebClientService.sendFlexRequest(
+            anyString(),
+            any(),
+            anyMap(),
+            any(),
+            eq(AddressValidationResponseDTO.class)))
+        .thenReturn(Mono.just(responseDTO));
+
+    when(sendFlexRecordUtil.saveSendflexRecord(
+            any()))
+        .thenReturn(
+            SendFlexRecordDto.builder().build());
+
+    validRequest.setShippingProfile("UNKNOWN");
+
+    AddressValidationResponseDTO result =
+        addressValidationService
+            .validateAddress(validRequest);
+
+    assertEquals(responseDTO, result);
+  }
+
+  // ==========================================================================
+  // Error response builder
+  // ==========================================================================
+
+  @Test
+  void buildAddressValidationErrorResponse_withAddress()
+      throws Exception {
+
+    AddressValidationResponseDTO result =
+        invokeBuildAddressValidationErrorResponse(
+            validRequest);
+
+    assertNotNull(result);
+    assertFalse(result.isAddressValid());
+    assertNotNull(result.getAddressToValidate());
+
+    assertEquals(
+        validRequest.getAddress().getName(),
+        result.getAddressToValidate().getName());
+
+    assertEquals(
+        validRequest.getAddress().getCity(),
+        result.getAddressToValidate().getCity());
+
+    assertEquals(
+        validRequest.getAddress().getState(),
+        result.getAddressToValidate().getState());
+
+    assertNotNull(
+        result.getAddressToValidate().getContact());
+  }
+
+  @Test
+  void buildAddressValidationErrorResponse_nullAddress()
+      throws Exception {
+
+    AddressValidationRequest request =
+        new AddressValidationRequest();
+
+    request.setAddress(null);
+
+    AddressValidationResponseDTO result =
+        invokeBuildAddressValidationErrorResponse(
+            request);
+
+    assertNotNull(result);
+    assertFalse(result.isAddressValid());
+    assertNotNull(result.getAddressToValidate());
+  }
+
+  // ==========================================================================
+  // Helper methods
+  // ==========================================================================
+
+  private AddressValidationRequest getAddressValidationRequest() {
+
+    AddressValidationRequest request =
+        new AddressValidationRequest();
+
+    request.setProfileCode(
+        "f8e385fd-234e-4bd5-bfb5-6e6c04433b08");
+
+    request.setShippingProfile("USPS");
+
+    Address address =
+        new Address();
+
+    address.setName("Best Bicycles");
+    address.setCity("BEVERLY HILLS");
+    address.setState("CA");
+    address.setAddressLines(
+        List.of(
+            "123 S RODEO DR",
+            " ",
+            " "));
+    address.setZipCode("90212-2402");
+    address.setCountry("US");
+    address.setEmailAddress("asd@gmail.com");
+    address.setPhoneNumber("1234567891");
+    address.setPhoneExt("91");
+    address.setCompany("asd");
+    address.setResidential(true);
+
+    request.setAddress(address);
+
+    return request;
+  }
+
+  private AddressValidationResponseDTO
+      getAddressValidationResponseDTO(boolean valid) {
+
+    AddressValidationResponseDTO dto =
+        new AddressValidationResponseDTO();
+
+    dto.setAddressValid(valid);
+    dto.setProfile(
+        validRequest.getProfileCode());
+
+    Address address =
+        validRequest.getAddress();
+
+    AddressToValidate addressToValidate =
+        new AddressToValidate();
+
+    addressToValidate.setAddressLines(
+        address.getAddressLines());
+
+    addressToValidate.setCity(
+        valid
+            ? address.getCity()
+            : "");
+
+    addressToValidate.setState(
+        address.getState());
+
+    addressToValidate.setCountryCode(
+        address.getCountry());
+
+    addressToValidate.setResidential(
+        address.isResidential());
+
+    addressToValidate.setName(
+        address.getName());
+
+    Contact contact =
+        new Contact();
+
+    contact.setEmail(
+        address.getEmailAddress());
+
+    contact.setPhone(
+        address.getPhoneNumber());
+
+    addressToValidate.setContact(contact);
+
+    dto.setAddressToValidate(
+        addressToValidate);
+
+    AddressSuggestion suggestion =
+        new AddressSuggestion();
+
+    suggestion.setAddressLines(
+        address.getAddressLines());
+
+    suggestion.setCity(
+        address.getCity());
+
+    suggestion.setState(
+        address.getState());
+
+    suggestion.setCountryCode(
+        address.getCountry());
+
+    suggestion.setName(
+        address.getName());
+
+    suggestion.setResidential(
+        address.isResidential());
+
+    ContactResponse contactResponse =
+        new ContactResponse();
+
+    contactResponse.setPhone(
+        address.getPhoneNumber());
+
+    contactResponse.setEmail(
+        address.getEmailAddress());
+
+    suggestion.setContact(
+        contactResponse);
+
+    dto.setAddressSuggestions(
+        Arrays.asList(suggestion));
+
+    return dto;
+  }
+
+  private String invokeGetProfileCodeByCarrier(
+      String carrier,
+      AddressValidationRequest request)
+      throws Exception {
+
+    var method =
+        AddressValidationServiceImpl.class
+            .getDeclaredMethod(
+                "getProfileCodeByCarrier",
+                String.class,
+                AddressValidationRequest.class);
+
+    method.setAccessible(true);
+
+    return (String)
+        method.invoke(
+            addressValidationService,
+            carrier,
+            request);
+  }
+
+  private AddressValidationResponseDTO
+      invokeBuildAddressValidationErrorResponse(
+          AddressValidationRequest request)
+          throws Exception {
+
+    var method =
+        AddressValidationServiceImpl.class
+            .getDeclaredMethod(
+                "buildAddressValidationErrorResponse",
+                AddressValidationRequest.class);
+
+    method.setAccessible(true);
+
+    return (AddressValidationResponseDTO)
+        method.invoke(
+            addressValidationService,
+            request);
+  }
 }
 
-This represents one microservice/application.
+
+---
+
+One correction in your production class
+
+Your current AddressValidationServiceImpl has:
+
+log.atWarn()
+    .addKeyValue("reason", exception.getMessage())
+    .addKeyValue("message", "SendFlex address validation failed")
+    .log();
+
+That's fine if your SLF4J version supports the fluent API, which it appears to.
+
+However, in persistAddressValidationResponse() you still have:
+
+log.info(new LogBuilder().withMessage("saving the address validation response").toString());
+
+Since you specifically wanted to move away from LogBuilder, change that to:
+
+log.atInfo()
+    .log("Saving the address validation response");
+
+And remove:
+
+import com.cardinalhealth.ofl.next.logging.library.LogBuilder;
+
+from AddressValidationServiceImpl.
 
 
 ---
 
-8. Replace DtoComparatorApplication.java
+Also change the remaining LogBuilder calls in SendFlexWebClientService
 
-This is the most important change.
+You currently have:
 
-Instead of accepting two directories, it accepts one parent directory.
+log.warn(
+    new LogBuilder()
+        .withReason(ex.getMessage())
+        .withMessage("SendFlex address validation returned a validation error")
+        .toString());
 
-Replace the entire class:
+Change to:
 
-package com.dto.comparator;
+log.atWarn()
+    .addKeyValue("reason", ex.getMessage())
+    .log("SendFlex address validation returned a validation error");
 
-import com.dto.comparator.matcher.DtoMatcher;
-import com.dto.comparator.model.AppModel;
-import com.dto.comparator.model.DtoMatch;
-import com.dto.comparator.model.DtoModel;
-import com.dto.comparator.report.CsvReportWriter;
-import com.dto.comparator.report.ExcelReportWriter;
-import com.dto.comparator.scanner.JavaSourceScanner;
+For the other errors:
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.*;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+log.atError()
+    .addKeyValue("reason", ex.getMessage())
+    .addKeyValue("statusCode", statusCode)
+    .log("SendFlex API request failed");
 
-public class DtoComparatorApplication {
-
-    public static void main(String[] args) {
-
-        if (args.length != 1) {
-
-            System.out.println();
-            System.out.println(
-                    "DTO Comparator"
-            );
-
-            System.out.println();
-
-            System.out.println(
-                    "Usage:"
-            );
-
-            System.out.println(
-                    "java -jar dto-comparator.jar " +
-                            "<parent-directory>"
-            );
-
-            System.out.println();
-
-            System.out.println(
-                    "Example:"
-            );
-
-            System.out.println(
-                    "java -jar dto-comparator.jar " +
-                            "/projects/microservices"
-            );
-
-            System.exit(1);
-        }
-
-        Path parentDirectory =
-                Paths.get(args[0]);
-
-        validateDirectory(
-                parentDirectory
-        );
-
-        long start =
-                System.currentTimeMillis();
-
-        System.out.println();
-        System.out.println(
-                "=========================================="
-        );
-        System.out.println(
-                "           DTO COMPARATOR"
-        );
-        System.out.println(
-                "=========================================="
-        );
-
-        System.out.println(
-                "Parent Directory:"
-        );
-
-        System.out.println(
-                parentDirectory
-                        .toAbsolutePath()
-        );
-
-        System.out.println();
-
-        try {
-
-            JavaSourceScanner scanner =
-                    new JavaSourceScanner();
-
-            /*
-             * Step 1:
-             * Discover all applications.
-             */
-            List<AppModel> apps =
-                    discoverApplications(
-                            parentDirectory,
-                            scanner
-                    );
-
-            System.out.println(
-                    "Applications found: "
-                            + apps.size()
-            );
-
-            for (AppModel app : apps) {
-
-                System.out.println(
-                        "  - "
-                                + app.name()
-                                + " ("
-                                + app.dtos().size()
-                                + " DTOs)"
-                );
-            }
-
-            System.out.println();
-
-            /*
-             * Step 2:
-             * Generate every unique pair.
-             */
-            List<AppPair> pairs =
-                    generatePairs(apps);
-
-            System.out.println(
-                    "Application pairs to compare: "
-                            + pairs.size()
-            );
-
-            System.out.println();
-
-            /*
-             * Step 3:
-             * Compare application pairs in parallel.
-             */
-            DtoMatcher matcher =
-                    new DtoMatcher();
-
-            List<DtoMatch> allMatches =
-                    compareApplicationPairs(
-                            pairs,
-                            matcher
-                    );
-
-            matcher.shutdown();
-
-            /*
-             * Step 4:
-             * Create output directory.
-             */
-            Path outputDirectory =
-                    parentDirectory.resolve(
-                            "dto-comparator-output"
-                    );
-
-            Files.createDirectories(
-                    outputDirectory
-            );
-
-            String timestamp =
-                    LocalDateTime.now()
-                            .format(
-                                    DateTimeFormatter
-                                            .ofPattern(
-                                                    "yyyy-MM-dd-HHmmss"
-                                            )
-                            );
-
-            Path csvFile =
-                    outputDirectory.resolve(
-                            "dto-comparison-"
-                                    + timestamp
-                                    + ".csv"
-                    );
-
-            Path excelFile =
-                    outputDirectory.resolve(
-                            "dto-comparison-"
-                                    + timestamp
-                                    + ".xlsx"
-                    );
-
-            /*
-             * Step 5:
-             * Write CSV.
-             */
-            new CsvReportWriter()
-                    .write(
-                            csvFile,
-                            allMatches
-                    );
-
-            /*
-             * Step 6:
-             * Write Excel.
-             */
-            List<DtoModel> allDtos =
-                    apps.stream()
-                            .flatMap(
-                                    app ->
-                                            app.dtos()
-                                                    .stream()
-                            )
-                            .collect(
-                                    Collectors.toList()
-                            );
-
-            new ExcelReportWriter()
-                    .write(
-                            excelFile,
-                            allMatches,
-                            allDtos
-                    );
-
-            long executionTime =
-                    System.currentTimeMillis()
-                            - start;
-
-            System.out.println();
-            System.out.println(
-                    "=========================================="
-            );
-
-            System.out.println(
-                    "COMPLETED"
-            );
-
-            System.out.println(
-                    "=========================================="
-            );
-
-            System.out.println(
-                    "Application count : "
-                            + apps.size()
-            );
-
-            System.out.println(
-                    "Application pairs : "
-                            + pairs.size()
-            );
-
-            System.out.println(
-                    "DTO matches       : "
-                            + allMatches.size()
-            );
-
-            System.out.println();
-
-            System.out.println(
-                    "CSV:"
-            );
-
-            System.out.println(
-                    csvFile.toAbsolutePath()
-            );
-
-            System.out.println();
-
-            System.out.println(
-                    "Excel:"
-            );
-
-            System.out.println(
-                    excelFile.toAbsolutePath()
-            );
-
-            System.out.println();
-
-            System.out.println(
-                    "Execution time: "
-                            + executionTime
-                            + " ms"
-            );
-
-            System.out.println(
-                    "=========================================="
-            );
-
-        } catch (Exception e) {
-
-            System.err.println();
-            System.err.println(
-                    "DTO comparison failed."
-            );
-
-            e.printStackTrace();
-
-            System.exit(2);
-        }
-    }
-
-    /**
-     * Discover applications.
-     *
-     * Every immediate child directory of the
-     * supplied parent directory is treated as an app.
-     */
-    private static List<AppModel>
-    discoverApplications(
-            Path parentDirectory,
-            JavaSourceScanner scanner)
-            throws Exception {
-
-        try (Stream<Path> paths =
-                     Files.list(parentDirectory)) {
-
-            return paths
-                    .filter(Files::isDirectory)
-                    .filter(path ->
-                            !path.getFileName()
-                                    .toString()
-                                    .equalsIgnoreCase(
-                                            "dto-comparator-output"
-                                    ))
-                    .map(path -> {
-
-                        try {
-
-                            System.out.println(
-                                    "Scanning app: "
-                                            + path.getFileName()
-                                    .toString()
-                            );
-
-                            List<DtoModel> dtos =
-                                    scanner.scan(path);
-
-                            return new AppModel(
-                                    path.getFileName()
-                                            .toString(),
-                                    path,
-                                    dtos
-                            );
-
-                        } catch (Exception e) {
-
-                            throw new CompletionException(
-                                    e
-                            );
-                        }
-                    })
-                    .collect(
-                            Collectors.toList()
-                    );
-        }
-    }
-
-    /**
-     * Generate unique application pairs.
-     *
-     * For:
-     *
-     * A B C
-     *
-     * returns:
-     *
-     * A-B
-     * A-C
-     * B-C
-     */
-    private static List<AppPair>
-    generatePairs(
-            List<AppModel> apps) {
-
-        List<AppPair> pairs =
-                new ArrayList<>();
-
-        for (int i = 0;
-             i < apps.size();
-             i++) {
-
-            for (int j = i + 1;
-                 j < apps.size();
-                 j++) {
-
-                pairs.add(
-                        new AppPair(
-                                apps.get(i),
-                                apps.get(j)
-                        )
-                );
-            }
-        }
-
-        return pairs;
-    }
-
-    /**
-     * Compare each application pair concurrently.
-     */
-    private static List<DtoMatch>
-    compareApplicationPairs(
-            List<AppPair> pairs,
-            DtoMatcher matcher) {
-
-        int processors =
-                Runtime.getRuntime()
-                        .availableProcessors();
-
-        int threadCount =
-                Math.max(
-                        2,
-                        Math.min(
-                                processors,
-                                pairs.size()
-                        )
-                );
-
-        ExecutorService executor =
-                Executors.newFixedThreadPool(
-                        threadCount
-                );
-
-        try {
-
-            List<CompletableFuture<List<DtoMatch>>>
-                    futures =
-                    pairs.stream()
-                            .map(pair ->
-                                    CompletableFuture
-                                            .supplyAsync(
-                                                    () -> {
-
-                                                        System.out.println(
-                                                                "Comparing: "
-                                                                        + pair.app1()
-                                                                        .name()
-                                                                        + " <-> "
-                                                                        + pair.app2()
-                                                                        .name()
-                                                        );
-
-                                                        return matcher.compare(
-                                                                pair.app1()
-                                                                        .name(),
-                                                                pair.app1()
-                                                                        .dtos(),
-                                                                pair.app2()
-                                                                        .name(),
-                                                                pair.app2()
-                                                                        .dtos()
-                                                        );
-                                                    },
-                                                    executor
-                                            )
-                            )
-                            .toList();
-
-            return futures.stream()
-                    .flatMap(
-                            future ->
-                                    future.join()
-                                            .stream()
-                    )
-                    .collect(
-                            Collectors.toList()
-                    );
-
-        } finally {
-
-            executor.shutdown();
-        }
-    }
-
-    private static void validateDirectory(
-            Path directory) {
-
-        if (!Files.exists(directory)) {
-
-            throw new IllegalArgumentException(
-                    "Directory does not exist: "
-                            + directory
-            );
-        }
-
-        if (!Files.isDirectory(directory)) {
-
-            throw new IllegalArgumentException(
-                    "Not a directory: "
-                            + directory
-            );
-        }
-    }
-
-    private record AppPair(
-            AppModel app1,
-            AppModel app2
-    ) {
-    }
-}
+And remove the LogBuilder import.
 
 
 ---
 
-9. One correction in the scanner
+One important test issue
 
-There's one thing I strongly recommend changing from the earlier scanner.
+Your existing test has:
 
-Don't share one JavaParser instance across parallel parsing.
+.statusCode("FAILURE")
 
-Your JavaSourceScanner should have:
+but your production code uses:
 
-private List<DtoModel> parseFile(Path file) {
+.statusCode(FAILURE)
 
-    try {
+If FAILURE is defined as lowercase "failure" in ServiceCommonConstants, the test should use:
 
-        ParseResult<CompilationUnit> result =
-                new JavaParser().parse(file);
+.statusCode(FAILURE)
 
-        // rest of implementation...
+rather than:
 
-instead of:
+.statusCode("FAILURE")
 
-javaParser.parse(file)
-
-This makes the parallel file scanning safer.
+This is better because the test verifies the actual production constant.
 
 
 ---
 
-10. Final directory structure
+If JaCoCo still shows a few branches
 
-Your tool should now look like:
+The most likely remaining branches will be from RetryConfig, not these two classes. In particular:
 
-dto-comparator/
-│
-├── pom.xml
-│
-└── src/main/java/com/dto/comparator/
-    │
-    ├── DtoComparatorApplication.java
-    │
-    ├── model/
-    │   ├── AppModel.java
-    │   ├── DtoModel.java
-    │   ├── DtoMatch.java
-    │   ├── FieldModel.java
-    │   └── MatchStatus.java
-    │
-    ├── matcher/
-    │   └── DtoMatcher.java
-    │
-    ├── scanner/
-    │   └── JavaSourceScanner.java
-    │
-    └── report/
-        ├── CsvReportWriter.java
-        └── ExcelReportWriter.java
+if (throwable instanceof WebClientResponseException ex)
 
+and:
 
----
+return statusCode >= 500 && statusCode < 600;
 
-11. Your actual microservice directory
-
-For example:
-
-C:\projects\microservices\
-│
-├── adv-shipping-integration-api\
-│
-├── adv-shipping-customer-edge\
-│
-├── adv-shipping-metering\
-│
-├── adv-shipping-webhook\
-│
-└── adv-shipping-notification\
-
-You do not need to specify each application.
-
-Just run:
-
-java -jar dto-comparator-1.0.0.jar C:\projects\microservices
-
-It automatically discovers:
-
-adv-shipping-integration-api
-adv-shipping-customer-edge
-adv-shipping-metering
-adv-shipping-webhook
-adv-shipping-notification
-
-and compares:
-
-integration-api
-        ↕
-customer-edge
-
-integration-api
-        ↕
-metering
-
-integration-api
-        ↕
-webhook
-
-integration-api
-        ↕
-notification
-
-customer-edge
-        ↕
-metering
-
-...
-
-
----
-
-12. Output
-
-The output is created inside the parent directory:
-
-C:\projects\microservices\
-│
-├── adv-shipping-integration-api\
-├── adv-shipping-customer-edge\
-├── adv-shipping-metering\
-├── adv-shipping-webhook\
-├── adv-shipping-notification\
-│
-└── dto-comparator-output\
-    │
-    ├── dto-comparison-2026-09-08-164500.csv
-    └── dto-comparison-2026-09-08-164500.xlsx
-
-The Excel DTO Matches sheet starts with:
-
-APP 1
-APP 2
-STATUS
-DTO 1
-DTO 2
-SIMILARITY
-...
-
-For example:
-
-APP 1	APP 2	STATUS	DTO 1	DTO 2	SIMILARITY
-
-adv-shipping-integration-api	adv-shipping-customer-edge	EXACT_MATCH	AddressValidationRequest	ValidateAddressRequest	100%
-adv-shipping-integration-api	adv-shipping-customer-edge	HIGH_SIMILARITY	ShipmentRequest	CreateShipmentRequest	93%
-adv-shipping-integration-api	adv-shipping-metering	POSSIBLE_MATCH	CustomerRequest	CustomerInfo	82%
-
-
-So when you open the report, the first two columns immediately tell you which applications are being compared.
-
-
----
-
-One important thing I'd change before you use this on the entire project
-
-The current DTO detector:
-
-name.endsWith("dto")
-|| name.endsWith("request")
-|| name.endsWith("response")
-|| name.endsWith("model")
-
-is intentionally simple. In a real microservice codebase, this can accidentally classify classes such as:
-
-PaymentModel
-DatabaseModel
-SomeResponse
-
-as DTOs.
-
-Since your goal is finding DTOs that can actually be commoned out, I would make the next version detect:
-
-@Data
-
-@Getter / @Setter
-
-@JsonProperty
-
-@JsonIgnore
-
-Java record
-
-DTO/request/response package
-
-fields
-
-inheritance
-
-nested DTOs
-
-
-and, importantly, produce a "Commonization Candidate" score rather than treating every 80% structural match as something that should definitely be commonized.
-
-That would make the report much more useful for deciding which DTOs you should actually move into your common library.
+If your JaCoCo report includes RetryConfig in the 100% requirement, you will need a separate RetryConfigTest. That test should explicitly cover 5xx → retry, 4xx → don't retry, and non-WebClient exception → retry.
