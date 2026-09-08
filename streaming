@@ -1,193 +1,29 @@
-Absolutely. Below is the complete standalone implementation, organized file-by-file so you can copy it directly into a small Maven project.
+Yes. Since your requirement has changed from two directories → one parent directory containing multiple apps, I would simplify the earlier implementation and make the changes in a few files.
 
-The tool will:
+The final usage becomes:
 
-Accept Directory 1 and Directory 2 from command line.
+java -jar dto-comparator.jar /path/to/all-apps
 
-Recursively scan .java files.
+For:
 
-Detect DTOs based on configurable suffixes.
+all-apps/
+├── app-a/
+├── app-b/
+├── app-c/
+└── app-d/
 
-Parse Java using JavaParser.
+the tool automatically compares every unique pair and puts the App 1 / App 2 information first in the report.
 
-Ignore class/package names for the primary comparison.
-
-Compare field names + field types.
-
-Handle field order differences.
-
-Calculate similarity.
-
-Run comparisons in parallel.
-
-Avoid an expensive full N × M comparison by using field-count candidate grouping.
-
-Generate:
-
-.csv
-
-.xlsx
-
-
-Put the reports in an output directory.
-
-Include exact matches, similar matches, and unmatched DTOs.
-
-Show which fields differ.
-
+Below are the exact changes.
 
 
 ---
 
-1. Project structure
+1. DtoModel.java
 
-Create this:
+No change required.
 
-dto-comparator/
-│
-├── pom.xml
-│
-└── src/
-    └── main/
-        └── java/
-            └── com/
-                └── dto/
-                    └── comparator/
-                        │
-                        ├── DtoComparatorApplication.java
-                        │
-                        ├── model/
-                        │   ├── DtoModel.java
-                        │   ├── FieldModel.java
-                        │   ├── DtoMatch.java
-                        │   └── MatchStatus.java
-                        │
-                        ├── scanner/
-                        │   └── JavaSourceScanner.java
-                        │
-                        ├── matcher/
-                        │   └── DtoMatcher.java
-                        │
-                        └── report/
-                            ├── CsvReportWriter.java
-                            └── ExcelReportWriter.java
-
-
----
-
-2. pom.xml
-
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="
-            http://maven.apache.org/POM/4.0.0
-            https://maven.apache.org/xsd/maven-4.0.0.xsd">
-
-    <modelVersion>4.0.0</modelVersion>
-
-    <groupId>com.dto</groupId>
-    <artifactId>dto-comparator</artifactId>
-    <version>1.0.0</version>
-
-    <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    </properties>
-
-    <dependencies>
-
-        <!-- Java source parser -->
-        <dependency>
-            <groupId>com.github.javaparser</groupId>
-            <artifactId>javaparser-core</artifactId>
-            <version>3.27.0</version>
-        </dependency>
-
-        <!-- Excel generation -->
-        <dependency>
-            <groupId>org.apache.poi</groupId>
-            <artifactId>poi-ooxml</artifactId>
-            <version>5.4.1</version>
-        </dependency>
-
-    </dependencies>
-
-    <build>
-
-        <plugins>
-
-            <!-- Create executable JAR -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.6.0</version>
-
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-
-                        <configuration>
-
-                            <createDependencyReducedPom>
-                                false
-                            </createDependencyReducedPom>
-
-                            <transformers>
-
-                                <transformer implementation="
-                                    org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-
-                                    <mainClass>
-                                        com.dto.comparator.DtoComparatorApplication
-                                    </mainClass>
-
-                                </transformer>
-
-                            </transformers>
-
-                        </configuration>
-
-                    </execution>
-                </executions>
-
-            </plugin>
-
-        </plugins>
-
-    </build>
-
-</project>
-
-
----
-
-3. FieldModel.java
-
-Path:
-
-src/main/java/com/dto/comparator/model/FieldModel.java
-
-package com.dto.comparator.model;
-
-public record FieldModel(
-        String name,
-        String type
-) {
-
-    public String signature() {
-        return name + ":" + type;
-    }
-}
-
-
----
-
-4. DtoModel.java
+Keep the previous version:
 
 package com.dto.comparator.model;
 
@@ -206,7 +42,6 @@ public record DtoModel(
     }
 
     public String signature() {
-
         return fields.stream()
                 .map(FieldModel::signature)
                 .sorted()
@@ -220,29 +55,43 @@ public record DtoModel(
 
 ---
 
-5. MatchStatus.java
+2. FieldModel.java
+
+No change.
 
 package com.dto.comparator.model;
 
-public enum MatchStatus {
+public record FieldModel(
+        String name,
+        String type
+) {
 
-    EXACT_MATCH,
+    @Override
+    public String toString() {
+        return name + " : " + type;
+    }
 
-    HIGH_SIMILARITY,
-
-    POSSIBLE_MATCH
+    public String signature() {
+        return name + ":" + type;
+    }
 }
 
 
 ---
 
-6. DtoMatch.java
+3. Change DtoMatch.java
+
+This is important because now we need to know which applications the DTOs came from.
+
+Replace the previous DtoMatch.java completely:
 
 package com.dto.comparator.model;
 
 import java.util.Set;
 
 public record DtoMatch(
+        String app1,
+        String app2,
         DtoModel dto1,
         DtoModel dto2,
         double similarity,
@@ -254,213 +103,30 @@ public record DtoMatch(
 ) {
 }
 
+Now every match knows:
 
----
-
-7. JavaSourceScanner.java
-
-This is responsible for recursively scanning your microservice directories.
-
-package com.dto.comparator.scanner;
-
-import com.dto.comparator.model.DtoModel;
-import com.dto.comparator.model.FieldModel;
-import com.github.javaparser.JavaParser;
-import com.github.javaparser.ParseResult;
-import com.github.javaparser.ast.CompilationUnit;
-import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
-import com.github.javaparser.ast.body.FieldDeclaration;
-import com.github.javaparser.ast.body.VariableDeclarator;
-import com.github.javaparser.ast.type.Type;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.ForkJoinPool;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-public class JavaSourceScanner {
-
-    private final JavaParser javaParser;
-
-    public JavaSourceScanner() {
-        this.javaParser = new JavaParser();
-    }
-
-    public List<DtoModel> scan(Path rootDirectory)
-            throws IOException {
-
-        try (Stream<Path> paths = Files.walk(rootDirectory)) {
-
-            List<Path> javaFiles = paths
-                    .filter(Files::isRegularFile)
-                    .filter(path ->
-                            path.toString()
-                                    .endsWith(".java"))
-                    .collect(Collectors.toList());
-
-            /*
-             * Parsing files is CPU intensive and each file
-             * can be processed independently.
-             */
-            return javaFiles
-                    .parallelStream()
-                    .flatMap(path ->
-                            parseFile(path).stream())
-                    .filter(this::isDto)
-                    .collect(Collectors.toList());
-        }
-    }
-
-    private List<DtoModel> parseFile(Path file) {
-
-        try {
-
-            ParseResult<CompilationUnit> result =
-                    javaParser.parse(file);
-
-            if (result.getResult().isEmpty()) {
-
-                System.err.println(
-                        "Unable to parse: " + file
-                );
-
-                return List.of();
-            }
-
-            CompilationUnit unit =
-                    result.getResult().get();
-
-            String packageName =
-                    unit.getPackageDeclaration()
-                            .map(p ->
-                                    p.getNameAsString())
-                            .orElse("");
-
-            List<DtoModel> resultList =
-                    new ArrayList<>();
-
-            for (ClassOrInterfaceDeclaration clazz :
-                    unit.findAll(
-                            ClassOrInterfaceDeclaration.class)) {
-
-                List<FieldModel> fields =
-                        extractFields(clazz);
-
-                resultList.add(
-                        new DtoModel(
-                                clazz.getNameAsString(),
-                                packageName,
-                                file,
-                                fields
-                        )
-                );
-            }
-
-            return resultList;
-
-        } catch (Exception e) {
-
-            System.err.println(
-                    "Error parsing " +
-                            file +
-                            ": " +
-                            e.getMessage()
-            );
-
-            return List.of();
-        }
-    }
-
-    private List<FieldModel> extractFields(
-            ClassOrInterfaceDeclaration clazz) {
-
-        List<FieldModel> fields =
-                new ArrayList<>();
-
-        for (FieldDeclaration declaration :
-                clazz.getFields()) {
-
-            String type =
-                    normalizeType(
-                            declaration.getElementType()
-                    );
-
-            for (VariableDeclarator variable :
-                    declaration.getVariables()) {
-
-                fields.add(
-                        new FieldModel(
-                                variable.getNameAsString(),
-                                type
-                        )
-                );
-            }
-        }
-
-        return fields.stream()
-                .sorted()
-                .toList();
-    }
-
-    private String normalizeType(Type type) {
-
-        return type.asString()
-                .replaceAll("\\s+", "")
-                .replace("java.lang.", "")
-                .replace("java.util.", "");
-    }
-
-    /**
-     * Configure DTO identification here.
-     */
-    private boolean isDto(DtoModel dto) {
-
-        String name =
-                dto.className().toLowerCase();
-
-        return name.endsWith("dto")
-                || name.endsWith("request")
-                || name.endsWith("response")
-                || name.endsWith("model");
-    }
-}
-
-One correction I'd make to the above for thread safety
-
-JavaParser instances can have parser state, so rather than sharing one parser between parallel tasks, use a new parser per file.
-
-Change:
-
-private final JavaParser javaParser;
-
-and the parser initialization to nothing, then change:
-
-ParseResult<CompilationUnit> result =
-        new JavaParser().parse(file);
-
-So the class should ultimately use:
-
-private List<DtoModel> parseFile(Path file) {
-
-    try {
-
-        ParseResult<CompilationUnit> result =
-                new JavaParser().parse(file);
-
-        // ...
-
-This is the version I recommend.
+app1
+app2
+dto1
+dto2
 
 
 ---
 
-8. DtoMatcher.java
+4. Replace DtoMatcher.java
 
-This is the core of the comparison.
+This is the biggest change.
+
+The matcher now accepts:
+
+App 1 DTOs
+App 2 DTOs
+App 1 name
+App 2 name
+
+and performs the comparison in parallel.
+
+Replace the entire file with:
 
 package com.dto.comparator.matcher;
 
@@ -471,12 +137,9 @@ import com.dto.comparator.model.MatchStatus;
 
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class DtoMatcher {
-
-    private static final double EXACT_THRESHOLD = 1.0;
 
     private static final double HIGH_THRESHOLD = 0.90;
 
@@ -487,37 +150,31 @@ public class DtoMatcher {
     public DtoMatcher() {
 
         int processors =
-                Runtime.getRuntime()
-                        .availableProcessors();
+                Runtime.getRuntime().availableProcessors();
 
-        /*
-         * Don't create thousands of threads.
-         *
-         * CPU-bound work normally performs best
-         * around the number of available CPUs.
-         */
         int threadCount =
-                Math.max(
-                        2,
-                        processors
-                );
+                Math.max(2, processors);
 
-        this.executor =
+        executor =
                 Executors.newFixedThreadPool(
                         threadCount
                 );
     }
 
+    /**
+     * Compare DTOs belonging to two applications.
+     */
     public List<DtoMatch> compare(
+            String app1,
             List<DtoModel> dtos1,
+            String app2,
             List<DtoModel> dtos2) {
 
         /*
-         * Build an index by field count.
+         * Index application 2 DTOs by field count.
          *
-         * A DTO with 5 fields doesn't need to be
-         * compared against a DTO with 50 fields
-         * when we are looking for structural matches.
+         * This avoids comparing every DTO against
+         * completely unrelated DTOs.
          */
         Map<Integer, List<DtoModel>> index =
                 dtos2.stream()
@@ -527,14 +184,15 @@ public class DtoMatcher {
                                 )
                         );
 
-        List<CompletableFuture<List<DtoMatch>>>
-                futures =
+        List<CompletableFuture<DtoMatch>> futures =
                 dtos1.stream()
                         .map(dto ->
                                 CompletableFuture.supplyAsync(
                                         () ->
                                                 findBestMatch(
+                                                        app1,
                                                         dto,
+                                                        app2,
                                                         index
                                                 ),
                                         executor
@@ -544,7 +202,7 @@ public class DtoMatcher {
 
         return futures.stream()
                 .map(CompletableFuture::join)
-                .flatMap(Collection::stream)
+                .filter(Objects::nonNull)
                 .sorted(
                         Comparator.comparing(
                                 DtoMatch::similarity
@@ -553,29 +211,32 @@ public class DtoMatcher {
                 .toList();
     }
 
-    private List<DtoMatch> findBestMatch(
+    private DtoMatch findBestMatch(
+            String app1,
             DtoModel source,
+            String app2,
             Map<Integer, List<DtoModel>> index) {
 
         List<DtoModel> candidates =
                 new ArrayList<>();
 
         /*
-         * Candidate window.
+         * If source has 5 fields, consider DTOs
+         * with 4, 5 or 6 fields.
          *
-         * Example:
-         *
-         * DTO has 5 fields.
-         *
-         * Compare with DTOs having
-         * 4, 5 or 6 fields.
+         * This significantly reduces comparisons.
          */
-        for (int count =
-                     Math.max(0,
-                             source.fieldCount() - 1);
+        int minFields =
+                Math.max(
+                        0,
+                        source.fieldCount() - 1
+                );
 
-             count <= source.fieldCount() + 1;
+        int maxFields =
+                source.fieldCount() + 1;
 
+        for (int count = minFields;
+             count <= maxFields;
              count++) {
 
             candidates.addAll(
@@ -587,39 +248,34 @@ public class DtoMatcher {
         }
 
         if (candidates.isEmpty()) {
-            return List.of();
+            return null;
         }
 
-        DtoMatch bestMatch =
-                candidates.stream()
-                        .map(candidate ->
-                                calculateSimilarity(
-                                        source,
-                                        candidate
-                                )
+        return candidates.stream()
+                .map(candidate ->
+                        calculateSimilarity(
+                                app1,
+                                source,
+                                app2,
+                                candidate
                         )
-                        .max(
-                                Comparator.comparing(
-                                        DtoMatch::similarity
-                                )
+                )
+                .filter(match ->
+                        match.similarity()
+                                >= POSSIBLE_THRESHOLD
+                )
+                .max(
+                        Comparator.comparing(
+                                DtoMatch::similarity
                         )
-                        .orElse(null);
-
-        if (bestMatch == null) {
-            return List.of();
-        }
-
-        if (bestMatch.similarity()
-                < POSSIBLE_THRESHOLD) {
-
-            return List.of();
-        }
-
-        return List.of(bestMatch);
+                )
+                .orElse(null);
     }
 
     private DtoMatch calculateSimilarity(
+            String app1,
             DtoModel dto1,
+            String app2,
             DtoModel dto2) {
 
         Map<String, String> fields1 =
@@ -644,7 +300,7 @@ public class DtoMatcher {
 
         union.addAll(names2);
 
-        double fieldNameScore =
+        double fieldScore =
                 union.isEmpty()
                         ? 1.0
                         : (double) commonNames.size()
@@ -671,11 +327,11 @@ public class DtoMatcher {
             } else {
 
                 differentTypes.add(
-                        fieldName +
-                                ": " +
-                                type1 +
-                                " vs " +
-                                type2
+                        fieldName
+                                + ": "
+                                + type1
+                                + " vs "
+                                + type2
                 );
             }
         }
@@ -687,37 +343,40 @@ public class DtoMatcher {
                         / commonNames.size();
 
         /*
-         * Class name is intentionally given
-         * very low weight.
+         * Class name has only 10% weight.
+         *
+         * Fields are much more important.
          */
-        double classNameScore =
+        double nameScore =
                 calculateNameSimilarity(
                         dto1.className(),
                         dto2.className()
                 );
 
-        /*
-         * Main structural score.
-         *
-         * Field names  : 60%
-         * Types        : 30%
-         * Class names  : 10%
-         */
-        double score =
-                (fieldNameScore * 0.60)
+        double finalScore =
+                (fieldScore * 0.60)
                         +
                         (typeScore * 0.30)
                         +
-                        (classNameScore * 0.10);
+                        (nameScore * 0.10);
 
         Set<FieldModel> commonFields =
-                new HashSet<>();
+                new TreeSet<>(
+                        Comparator
+                                .comparing(FieldModel::name)
+                );
 
         Set<FieldModel> onlyInDto1 =
-                new HashSet<>();
+                new TreeSet<>(
+                        Comparator
+                                .comparing(FieldModel::name)
+                );
 
         Set<FieldModel> onlyInDto2 =
-                new HashSet<>();
+                new TreeSet<>(
+                        Comparator
+                                .comparing(FieldModel::name)
+                );
 
         for (FieldModel field :
                 dto1.fields()) {
@@ -748,12 +407,14 @@ public class DtoMatcher {
         }
 
         MatchStatus status =
-                determineStatus(score);
+                determineStatus(finalScore);
 
         return new DtoMatch(
+                app1,
+                app2,
                 dto1,
                 dto2,
-                score,
+                finalScore,
                 status,
                 commonFields,
                 onlyInDto1,
@@ -765,7 +426,7 @@ public class DtoMatcher {
     private MatchStatus determineStatus(
             double score) {
 
-        if (score >= EXACT_THRESHOLD) {
+        if (score >= 0.999999) {
             return MatchStatus.EXACT_MATCH;
         }
 
@@ -907,190 +568,11 @@ public class DtoMatcher {
 
 ---
 
-9. CsvReportWriter.java
+5. Replace ExcelReportWriter.java
 
-package com.dto.comparator.report;
+This is where we'll make App 1 and App 2 the first columns.
 
-import com.dto.comparator.model.DtoMatch;
-import com.dto.comparator.model.DtoModel;
-
-import java.io.BufferedWriter;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
-
-public class CsvReportWriter {
-
-    public void write(
-            Path outputFile,
-            List<DtoMatch> matches,
-            List<DtoModel> dtos1,
-            List<DtoModel> dtos2)
-            throws IOException {
-
-        Set<String> matched1 =
-                matches.stream()
-                        .map(match ->
-                                match.dto1().sourceFile()
-                                        .toAbsolutePath()
-                                        .toString())
-                        .collect(Collectors.toSet());
-
-        Set<String> matched2 =
-                matches.stream()
-                        .map(match ->
-                                match.dto2().sourceFile()
-                                        .toAbsolutePath()
-                                        .toString())
-                        .collect(Collectors.toSet());
-
-        try (BufferedWriter writer =
-                     Files.newBufferedWriter(outputFile)) {
-
-            writer.write(
-                    "Status,DTO 1,DTO 2,Similarity,Directory 1 File,Directory 2 File,Common Fields,Only In DTO 1,Only In DTO 2,Different Types"
-            );
-
-            writer.newLine();
-
-            for (DtoMatch match : matches) {
-
-                writer.write(
-                        csv(match.status().name())
-                                + ","
-                                + csv(match.dto1().className())
-                                + ","
-                                + csv(match.dto2().className())
-                                + ","
-                                + csv(
-                                String.format(
-                                        "%.2f%%",
-                                        match.similarity() * 100
-                                )
-                        )
-                                + ","
-                                + csv(
-                                match.dto1()
-                                        .sourceFile()
-                                        .toString()
-                        )
-                                + ","
-                                + csv(
-                                match.dto2()
-                                        .sourceFile()
-                                        .toString()
-                        )
-                                + ","
-                                + csv(
-                                fields(match.commonFields())
-                        )
-                                + ","
-                                + csv(
-                                fields(match.onlyInDto1())
-                        )
-                                + ","
-                                + csv(
-                                fields(match.onlyInDto2())
-                        )
-                                + ","
-                                + csv(
-                                String.join(
-                                        " | ",
-                                        match.differentTypes()
-                                )
-                        )
-                );
-
-                writer.newLine();
-            }
-
-            writer.newLine();
-
-            writer.write("UNMATCHED DTOs - DIRECTORY 1");
-            writer.newLine();
-
-            for (DtoModel dto : dtos1) {
-
-                if (!matched1.contains(
-                        dto.sourceFile()
-                                .toAbsolutePath()
-                                .toString())) {
-
-                    writer.write(
-                            csv(dto.className())
-                                    + ","
-                                    + csv(
-                                    dto.sourceFile()
-                                            .toString()
-                            )
-                    );
-
-                    writer.newLine();
-                }
-            }
-
-            writer.newLine();
-
-            writer.write("UNMATCHED DTOs - DIRECTORY 2");
-            writer.newLine();
-
-            for (DtoModel dto : dtos2) {
-
-                if (!matched2.contains(
-                        dto.sourceFile()
-                                .toAbsolutePath()
-                                .toString())) {
-
-                    writer.write(
-                            csv(dto.className())
-                                    + ","
-                                    + csv(
-                                    dto.sourceFile()
-                                            .toString()
-                            )
-                    );
-
-                    writer.newLine();
-                }
-            }
-        }
-    }
-
-    private String fields(
-            Set<?> fields) {
-
-        return fields.stream()
-                .map(Object::toString)
-                .collect(
-                        Collectors.joining(" | ")
-                );
-    }
-
-    private String csv(String value) {
-
-        if (value == null) {
-            return "";
-        }
-
-        return "\"" +
-                value.replace(
-                        "\"",
-                        "\"\""
-                )
-                +
-                "\"";
-    }
-}
-
-
----
-
-10. ExcelReportWriter.java
-
-This produces the more useful Excel report.
+Replace the complete file:
 
 package com.dto.comparator.report;
 
@@ -1110,8 +592,7 @@ public class ExcelReportWriter {
     public void write(
             Path outputFile,
             List<DtoMatch> matches,
-            List<DtoModel> dtos1,
-            List<DtoModel> dtos2)
+            List<DtoModel> allDtos)
             throws IOException {
 
         try (Workbook workbook =
@@ -1120,29 +601,12 @@ public class ExcelReportWriter {
             createSummarySheet(
                     workbook,
                     matches,
-                    dtos1,
-                    dtos2
+                    allDtos
             );
 
             createMatchesSheet(
                     workbook,
                     matches
-            );
-
-            createUnmatchedSheet(
-                    workbook,
-                    "Only Directory 1",
-                    dtos1,
-                    matches,
-                    true
-            );
-
-            createUnmatchedSheet(
-                    workbook,
-                    "Only Directory 2",
-                    dtos2,
-                    matches,
-                    false
             );
 
             try (FileOutputStream output =
@@ -1158,8 +622,7 @@ public class ExcelReportWriter {
     private void createSummarySheet(
             Workbook workbook,
             List<DtoMatch> matches,
-            List<DtoModel> dtos1,
-            List<DtoModel> dtos2) {
+            List<DtoModel> allDtos) {
 
         Sheet sheet =
                 workbook.createSheet("Summary");
@@ -1176,12 +639,8 @@ public class ExcelReportWriter {
         int row = 1;
 
         row(sheet, row++,
-                "DTOs in Directory 1",
-                dtos1.size());
-
-        row(sheet, row++,
-                "DTOs in Directory 2",
-                dtos2.size());
+                "Total DTOs",
+                allDtos.size());
 
         row(sheet, row++,
                 "Total Matches",
@@ -1226,45 +685,10 @@ public class ExcelReportWriter {
                 "Possible Matches",
                 possible);
 
-        Set<String> matched1 =
-                matches.stream()
-                        .map(m ->
-                                m.dto1()
-                                        .sourceFile()
-                                        .toAbsolutePath()
-                                        .toString())
-                        .collect(Collectors.toSet());
-
-        Set<String> matched2 =
-                matches.stream()
-                        .map(m ->
-                                m.dto2()
-                                        .sourceFile()
-                                        .toAbsolutePath()
-                                        .toString())
-                        .collect(Collectors.toSet());
-
-        row(sheet, row++,
-                "Unmatched Directory 1",
-                dtos1.stream()
-                        .filter(dto ->
-                                !matched1.contains(
-                                        dto.sourceFile()
-                                                .toAbsolutePath()
-                                                .toString()))
-                        .count());
-
-        row(sheet, row++,
-                "Unmatched Directory 2",
-                dtos2.stream()
-                        .filter(dto ->
-                                !matched2.contains(
-                                        dto.sourceFile()
-                                                .toAbsolutePath()
-                                                .toString()))
-                        .count());
-
-        autoSize(sheet);
+        autoSize(
+                sheet,
+                2
+        );
     }
 
     private void createMatchesSheet(
@@ -1272,95 +696,126 @@ public class ExcelReportWriter {
             List<DtoMatch> matches) {
 
         Sheet sheet =
-                workbook.createSheet("Matches");
+                workbook.createSheet("DTO Matches");
 
         String[] headers = {
-                "Status",
+
+                "APP 1",
+                "APP 2",
+
+                "STATUS",
+
                 "DTO 1",
                 "DTO 2",
-                "Similarity",
-                "Directory 1 File",
-                "Directory 2 File",
-                "Common Fields",
-                "Only In DTO 1",
-                "Only In DTO 2",
-                "Different Types"
+
+                "SIMILARITY",
+
+                "DTO 1 FILE",
+                "DTO 2 FILE",
+
+                "COMMON FIELDS",
+
+                "ONLY IN APP 1",
+
+                "ONLY IN APP 2",
+
+                "DIFFERENT TYPES"
         };
 
-        createHeader(sheet, headers);
+        createHeader(
+                sheet,
+                headers
+        );
 
         int rowIndex = 1;
 
-        for (DtoMatch match : matches) {
+        for (DtoMatch match :
+                matches) {
 
             Row row =
-                    sheet.createRow(rowIndex++);
+                    sheet.createRow(
+                            rowIndex++
+                    );
 
+            /*
+             * IMPORTANT:
+             *
+             * App names are the FIRST columns.
+             */
             row.createCell(0)
                     .setCellValue(
-                            match.status().name()
+                            match.app1()
                     );
 
             row.createCell(1)
                     .setCellValue(
-                            match.dto1().className()
+                            match.app2()
                     );
 
             row.createCell(2)
                     .setCellValue(
-                            match.dto2().className()
+                            match.status().name()
                     );
 
             row.createCell(3)
                     .setCellValue(
-                            match.similarity()
+                            match.dto1()
+                                    .className()
                     );
 
             row.createCell(4)
+                    .setCellValue(
+                            match.dto2()
+                                    .className()
+                    );
+
+            row.createCell(5)
+                    .setCellValue(
+                            match.similarity()
+                    );
+
+            row.createCell(6)
                     .setCellValue(
                             match.dto1()
                                     .sourceFile()
                                     .toString()
                     );
 
-            row.createCell(5)
+            row.createCell(7)
                     .setCellValue(
                             match.dto2()
                                     .sourceFile()
                                     .toString()
                     );
 
-            row.createCell(6)
+            row.createCell(8)
                     .setCellValue(
                             formatFields(
                                     match.commonFields()
                             )
                     );
 
-            row.createCell(7)
+            row.createCell(9)
                     .setCellValue(
                             formatFields(
                                     match.onlyInDto1()
                             )
                     );
 
-            row.createCell(8)
+            row.createCell(10)
                     .setCellValue(
                             formatFields(
                                     match.onlyInDto2()
                             )
                     );
 
-            row.createCell(9)
+            row.createCell(11)
                     .setCellValue(
                             String.join(
                                     " | ",
                                     match.differentTypes()
                             )
                     );
-
-            Cell scoreCell =
-                    row.getCell(3);
 
             CellStyle percentageStyle =
                     workbook.createCellStyle();
@@ -1369,104 +824,38 @@ public class ExcelReportWriter {
                     workbook
                             .getCreationHelper()
                             .createDataFormat()
-                            .getFormat("0.00%")
-            );
-
-            scoreCell.setCellStyle(
-                    percentageStyle
-            );
-        }
-
-        sheet.createFreezePane(0, 1);
-
-        autoSize(sheet);
-    }
-
-    private void createUnmatchedSheet(
-            Workbook workbook,
-            String sheetName,
-            List<DtoModel> dtos,
-            List<DtoMatch> matches,
-            boolean firstDirectory) {
-
-        Sheet sheet =
-                workbook.createSheet(sheetName);
-
-        String[] headers = {
-                "Class Name",
-                "Package",
-                "File",
-                "Field Count",
-                "Fields"
-        };
-
-        createHeader(sheet, headers);
-
-        Set<String> matchedFiles =
-                matches.stream()
-                        .map(match ->
-                                firstDirectory
-                                        ? match.dto1()
-                                        .sourceFile()
-                                        .toAbsolutePath()
-                                        .toString()
-                                        : match.dto2()
-                                        .sourceFile()
-                                        .toAbsolutePath()
-                                        .toString()
-                        )
-                        .collect(Collectors.toSet());
-
-        int rowIndex = 1;
-
-        for (DtoModel dto : dtos) {
-
-            String file =
-                    dto.sourceFile()
-                            .toAbsolutePath()
-                            .toString();
-
-            if (matchedFiles.contains(file)) {
-                continue;
-            }
-
-            Row row =
-                    sheet.createRow(rowIndex++);
-
-            row.createCell(0)
-                    .setCellValue(
-                            dto.className()
-                    );
-
-            row.createCell(1)
-                    .setCellValue(
-                            dto.packageName()
-                    );
-
-            row.createCell(2)
-                    .setCellValue(
-                            dto.sourceFile()
-                                    .toString()
-                    );
-
-            row.createCell(3)
-                    .setCellValue(
-                            dto.fieldCount()
-                    );
-
-            row.createCell(4)
-                    .setCellValue(
-                            formatFields(
-                                    new HashSet<>(
-                                            dto.fields()
-                                    )
+                            .getFormat(
+                                    "0.00%"
                             )
+            );
+
+            row.getCell(5)
+                    .setCellStyle(
+                            percentageStyle
                     );
         }
 
-        sheet.createFreezePane(0, 1);
+        sheet.createFreezePane(
+                0,
+                1
+        );
 
-        autoSize(sheet);
+        sheet.setAutoFilter(
+                new org.apache.poi.ss.util.CellRangeAddress(
+                        0,
+                        Math.max(
+                                0,
+                                matches.size()
+                        ),
+                        0,
+                        headers.length - 1
+                )
+        );
+
+        autoSize(
+                sheet,
+                headers.length
+        );
     }
 
     private void createHeader(
@@ -1481,10 +870,10 @@ public class ExcelReportWriter {
              i++) {
 
             row.createCell(i)
-                    .setCellValue(headers[i]);
+                    .setCellValue(
+                            headers[i]
+                    );
         }
-
-        sheet.createFreezePane(0, 1);
     }
 
     private void row(
@@ -1494,10 +883,14 @@ public class ExcelReportWriter {
             Object value) {
 
         Row row =
-                sheet.createRow(rowNumber);
+                sheet.createRow(
+                        rowNumber
+                );
 
         row.createCell(0)
-                .setCellValue(metric);
+                .setCellValue(
+                        metric
+                );
 
         row.createCell(1)
                 .setCellValue(
@@ -1519,18 +912,19 @@ public class ExcelReportWriter {
     }
 
     private void autoSize(
-            Sheet sheet) {
-
-        int maxColumns = 10;
+            Sheet sheet,
+            int columns) {
 
         for (int i = 0;
-             i < maxColumns;
+             i < columns;
              i++) {
 
             try {
+
                 sheet.autoSizeColumn(i);
+
             } catch (Exception ignored) {
-                // Ignore sizing issues
+                // Ignore column sizing issues
             }
         }
     }
@@ -1539,15 +933,182 @@ public class ExcelReportWriter {
 
 ---
 
-11. Main application
+6. Replace CsvReportWriter.java
+
+The CSV will also start with the application names.
+
+package com.dto.comparator.report;
+
+import com.dto.comparator.model.DtoMatch;
+import com.dto.comparator.model.DtoModel;
+
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+public class CsvReportWriter {
+
+    public void write(
+            Path outputFile,
+            List<DtoMatch> matches)
+            throws IOException {
+
+        try (BufferedWriter writer =
+                     Files.newBufferedWriter(
+                             outputFile
+                     )) {
+
+            writer.write(
+                    "APP 1,APP 2,STATUS,DTO 1,DTO 2,SIMILARITY,DTO 1 FILE,DTO 2 FILE,COMMON FIELDS,ONLY IN APP 1,ONLY IN APP 2,DIFFERENT TYPES"
+            );
+
+            writer.newLine();
+
+            for (DtoMatch match :
+                    matches) {
+
+                writer.write(
+                        csv(match.app1())
+                                + ","
+                                + csv(match.app2())
+                                + ","
+                                + csv(
+                                match.status()
+                                        .name()
+                        )
+                                + ","
+                                + csv(
+                                match.dto1()
+                                        .className()
+                        )
+                                + ","
+                                + csv(
+                                match.dto2()
+                                        .className()
+                        )
+                                + ","
+                                + csv(
+                                String.format(
+                                        "%.2f%%",
+                                        match.similarity()
+                                                * 100
+                                )
+                        )
+                                + ","
+                                + csv(
+                                match.dto1()
+                                        .sourceFile()
+                                        .toString()
+                        )
+                                + ","
+                                + csv(
+                                match.dto2()
+                                        .sourceFile()
+                                        .toString()
+                        )
+                                + ","
+                                + csv(
+                                formatFields(
+                                        match.commonFields()
+                                )
+                        )
+                                + ","
+                                + csv(
+                                formatFields(
+                                        match.onlyInDto1()
+                                )
+                        )
+                                + ","
+                                + csv(
+                                formatFields(
+                                        match.onlyInDto2()
+                                )
+                        )
+                                + ","
+                                + csv(
+                                String.join(
+                                        " | ",
+                                        match.differentTypes()
+                                )
+                        )
+                );
+
+                writer.newLine();
+            }
+        }
+    }
+
+    private String formatFields(
+            Set<?> fields) {
+
+        return fields.stream()
+                .map(Object::toString)
+                .sorted()
+                .collect(
+                        Collectors.joining(
+                                " | "
+                        )
+                );
+    }
+
+    private String csv(
+            String value) {
+
+        if (value == null) {
+            return "";
+        }
+
+        return "\""
+                + value.replace(
+                "\"",
+                "\"\""
+        )
+                + "\"";
+    }
+}
+
+
+---
+
+7. Add a new AppModel.java
 
 Create:
 
-DtoComparatorApplication.java
+model/AppModel.java
+
+package com.dto.comparator.model;
+
+import java.nio.file.Path;
+import java.util.List;
+
+public record AppModel(
+        String name,
+        Path directory,
+        List<DtoModel> dtos
+) {
+}
+
+This represents one microservice/application.
+
+
+---
+
+8. Replace DtoComparatorApplication.java
+
+This is the most important change.
+
+Instead of accepting two directories, it accepts one parent directory.
+
+Replace the entire class:
 
 package com.dto.comparator;
 
 import com.dto.comparator.matcher.DtoMatcher;
+import com.dto.comparator.model.AppModel;
 import com.dto.comparator.model.DtoMatch;
 import com.dto.comparator.model.DtoModel;
 import com.dto.comparator.report.CsvReportWriter;
@@ -1559,70 +1120,76 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class DtoComparatorApplication {
 
     public static void main(String[] args) {
 
-        if (args.length < 2) {
+        if (args.length != 1) {
 
             System.out.println();
             System.out.println(
                     "DTO Comparator"
             );
+
             System.out.println();
+
             System.out.println(
                     "Usage:"
             );
+
             System.out.println(
                     "java -jar dto-comparator.jar " +
-                            "<directory1> <directory2>"
+                            "<parent-directory>"
             );
+
             System.out.println();
+
             System.out.println(
                     "Example:"
             );
+
             System.out.println(
                     "java -jar dto-comparator.jar " +
-                            "/project/service-a " +
-                            "/project/service-b"
+                            "/projects/microservices"
             );
 
             System.exit(1);
         }
 
-        Path directory1 =
+        Path parentDirectory =
                 Paths.get(args[0]);
 
-        Path directory2 =
-                Paths.get(args[1]);
-
-        validateDirectory(directory1);
-        validateDirectory(directory2);
+        validateDirectory(
+                parentDirectory
+        );
 
         long start =
                 System.currentTimeMillis();
 
         System.out.println();
         System.out.println(
-                "======================================"
+                "=========================================="
         );
         System.out.println(
-                "        DTO COMPARATOR"
+                "           DTO COMPARATOR"
         );
         System.out.println(
-                "======================================"
-        );
-
-        System.out.println(
-                "Directory 1: " +
-                        directory1.toAbsolutePath()
+                "=========================================="
         );
 
         System.out.println(
-                "Directory 2: " +
-                        directory2.toAbsolutePath()
+                "Parent Directory:"
+        );
+
+        System.out.println(
+                parentDirectory
+                        .toAbsolutePath()
         );
 
         System.out.println();
@@ -1632,53 +1199,71 @@ public class DtoComparatorApplication {
             JavaSourceScanner scanner =
                     new JavaSourceScanner();
 
+            /*
+             * Step 1:
+             * Discover all applications.
+             */
+            List<AppModel> apps =
+                    discoverApplications(
+                            parentDirectory,
+                            scanner
+                    );
+
             System.out.println(
-                    "Scanning Directory 1..."
+                    "Applications found: "
+                            + apps.size()
             );
 
-            List<DtoModel> dtos1 =
-                    scanner.scan(directory1);
+            for (AppModel app : apps) {
+
+                System.out.println(
+                        "  - "
+                                + app.name()
+                                + " ("
+                                + app.dtos().size()
+                                + " DTOs)"
+                );
+            }
+
+            System.out.println();
+
+            /*
+             * Step 2:
+             * Generate every unique pair.
+             */
+            List<AppPair> pairs =
+                    generatePairs(apps);
 
             System.out.println(
-                    "Found " +
-                            dtos1.size() +
-                            " DTOs"
+                    "Application pairs to compare: "
+                            + pairs.size()
             );
 
             System.out.println();
 
-            System.out.println(
-                    "Scanning Directory 2..."
-            );
-
-            List<DtoModel> dtos2 =
-                    scanner.scan(directory2);
-
-            System.out.println(
-                    "Found " +
-                            dtos2.size() +
-                            " DTOs"
-            );
-
-            System.out.println();
-
-            System.out.println(
-                    "Comparing DTOs..."
-            );
-
+            /*
+             * Step 3:
+             * Compare application pairs in parallel.
+             */
             DtoMatcher matcher =
                     new DtoMatcher();
 
-            List<DtoMatch> matches =
-                    matcher.compare(
-                            dtos1,
-                            dtos2
+            List<DtoMatch> allMatches =
+                    compareApplicationPairs(
+                            pairs,
+                            matcher
                     );
 
             matcher.shutdown();
 
+            /*
+             * Step 4:
+             * Create output directory.
+             */
             Path outputDirectory =
-                    Paths.get("output");
+                    parentDirectory.resolve(
+                            "dto-comparator-output"
+                    );
 
             Files.createDirectories(
                     outputDirectory
@@ -1695,40 +1280,48 @@ public class DtoComparatorApplication {
 
             Path csvFile =
                     outputDirectory.resolve(
-                            "dto-comparison-" +
-                                    timestamp +
-                                    ".csv"
+                            "dto-comparison-"
+                                    + timestamp
+                                    + ".csv"
                     );
 
             Path excelFile =
                     outputDirectory.resolve(
-                            "dto-comparison-" +
-                                    timestamp +
-                                    ".xlsx"
+                            "dto-comparison-"
+                                    + timestamp
+                                    + ".xlsx"
                     );
 
-            System.out.println(
-                    "Generating CSV..."
-            );
-
+            /*
+             * Step 5:
+             * Write CSV.
+             */
             new CsvReportWriter()
                     .write(
                             csvFile,
-                            matches,
-                            dtos1,
-                            dtos2
+                            allMatches
                     );
 
-            System.out.println(
-                    "Generating Excel..."
-            );
+            /*
+             * Step 6:
+             * Write Excel.
+             */
+            List<DtoModel> allDtos =
+                    apps.stream()
+                            .flatMap(
+                                    app ->
+                                            app.dtos()
+                                                    .stream()
+                            )
+                            .collect(
+                                    Collectors.toList()
+                            );
 
             new ExcelReportWriter()
                     .write(
                             excelFile,
-                            matches,
-                            dtos1,
-                            dtos2
+                            allMatches,
+                            allDtos
                     );
 
             long executionTime =
@@ -1737,7 +1330,7 @@ public class DtoComparatorApplication {
 
             System.out.println();
             System.out.println(
-                    "======================================"
+                    "=========================================="
             );
 
             System.out.println(
@@ -1745,32 +1338,54 @@ public class DtoComparatorApplication {
             );
 
             System.out.println(
-                    "======================================"
+                    "=========================================="
             );
 
             System.out.println(
-                    "Matches : " +
-                            matches.size()
+                    "Application count : "
+                            + apps.size()
             );
 
             System.out.println(
-                    "CSV     : " +
-                            csvFile.toAbsolutePath()
+                    "Application pairs : "
+                            + pairs.size()
             );
 
             System.out.println(
-                    "Excel   : " +
-                            excelFile.toAbsolutePath()
+                    "DTO matches       : "
+                            + allMatches.size()
+            );
+
+            System.out.println();
+
+            System.out.println(
+                    "CSV:"
             );
 
             System.out.println(
-                    "Time    : " +
-                            executionTime +
-                            " ms"
+                    csvFile.toAbsolutePath()
+            );
+
+            System.out.println();
+
+            System.out.println(
+                    "Excel:"
             );
 
             System.out.println(
-                    "======================================"
+                    excelFile.toAbsolutePath()
+            );
+
+            System.out.println();
+
+            System.out.println(
+                    "Execution time: "
+                            + executionTime
+                            + " ms"
+            );
+
+            System.out.println(
+                    "=========================================="
             );
 
         } catch (Exception e) {
@@ -1786,211 +1401,403 @@ public class DtoComparatorApplication {
         }
     }
 
+    /**
+     * Discover applications.
+     *
+     * Every immediate child directory of the
+     * supplied parent directory is treated as an app.
+     */
+    private static List<AppModel>
+    discoverApplications(
+            Path parentDirectory,
+            JavaSourceScanner scanner)
+            throws Exception {
+
+        try (Stream<Path> paths =
+                     Files.list(parentDirectory)) {
+
+            return paths
+                    .filter(Files::isDirectory)
+                    .filter(path ->
+                            !path.getFileName()
+                                    .toString()
+                                    .equalsIgnoreCase(
+                                            "dto-comparator-output"
+                                    ))
+                    .map(path -> {
+
+                        try {
+
+                            System.out.println(
+                                    "Scanning app: "
+                                            + path.getFileName()
+                                    .toString()
+                            );
+
+                            List<DtoModel> dtos =
+                                    scanner.scan(path);
+
+                            return new AppModel(
+                                    path.getFileName()
+                                            .toString(),
+                                    path,
+                                    dtos
+                            );
+
+                        } catch (Exception e) {
+
+                            throw new CompletionException(
+                                    e
+                            );
+                        }
+                    })
+                    .collect(
+                            Collectors.toList()
+                    );
+        }
+    }
+
+    /**
+     * Generate unique application pairs.
+     *
+     * For:
+     *
+     * A B C
+     *
+     * returns:
+     *
+     * A-B
+     * A-C
+     * B-C
+     */
+    private static List<AppPair>
+    generatePairs(
+            List<AppModel> apps) {
+
+        List<AppPair> pairs =
+                new ArrayList<>();
+
+        for (int i = 0;
+             i < apps.size();
+             i++) {
+
+            for (int j = i + 1;
+                 j < apps.size();
+                 j++) {
+
+                pairs.add(
+                        new AppPair(
+                                apps.get(i),
+                                apps.get(j)
+                        )
+                );
+            }
+        }
+
+        return pairs;
+    }
+
+    /**
+     * Compare each application pair concurrently.
+     */
+    private static List<DtoMatch>
+    compareApplicationPairs(
+            List<AppPair> pairs,
+            DtoMatcher matcher) {
+
+        int processors =
+                Runtime.getRuntime()
+                        .availableProcessors();
+
+        int threadCount =
+                Math.max(
+                        2,
+                        Math.min(
+                                processors,
+                                pairs.size()
+                        )
+                );
+
+        ExecutorService executor =
+                Executors.newFixedThreadPool(
+                        threadCount
+                );
+
+        try {
+
+            List<CompletableFuture<List<DtoMatch>>>
+                    futures =
+                    pairs.stream()
+                            .map(pair ->
+                                    CompletableFuture
+                                            .supplyAsync(
+                                                    () -> {
+
+                                                        System.out.println(
+                                                                "Comparing: "
+                                                                        + pair.app1()
+                                                                        .name()
+                                                                        + " <-> "
+                                                                        + pair.app2()
+                                                                        .name()
+                                                        );
+
+                                                        return matcher.compare(
+                                                                pair.app1()
+                                                                        .name(),
+                                                                pair.app1()
+                                                                        .dtos(),
+                                                                pair.app2()
+                                                                        .name(),
+                                                                pair.app2()
+                                                                        .dtos()
+                                                        );
+                                                    },
+                                                    executor
+                                            )
+                            )
+                            .toList();
+
+            return futures.stream()
+                    .flatMap(
+                            future ->
+                                    future.join()
+                                            .stream()
+                    )
+                    .collect(
+                            Collectors.toList()
+                    );
+
+        } finally {
+
+            executor.shutdown();
+        }
+    }
+
     private static void validateDirectory(
             Path directory) {
 
         if (!Files.exists(directory)) {
 
             throw new IllegalArgumentException(
-                    "Directory does not exist: " +
-                            directory
+                    "Directory does not exist: "
+                            + directory
             );
         }
 
         if (!Files.isDirectory(directory)) {
 
             throw new IllegalArgumentException(
-                    "Not a directory: " +
-                            directory
+                    "Not a directory: "
+                            + directory
             );
         }
+    }
+
+    private record AppPair(
+            AppModel app1,
+            AppModel app2
+    ) {
     }
 }
 
 
 ---
 
-12. Build the JAR
+9. One correction in the scanner
 
-From the project root:
+There's one thing I strongly recommend changing from the earlier scanner.
 
-mvn clean package
+Don't share one JavaParser instance across parallel parsing.
 
-You'll get:
+Your JavaSourceScanner should have:
 
-target/
-    dto-comparator-1.0.0.jar
-    original-dto-comparator-1.0.0.jar
+private List<DtoModel> parseFile(Path file) {
 
-Run the shaded JAR:
+    try {
 
-java -jar target/dto-comparator-1.0.0.jar \
-    /path/to/service-a \
-    /path/to/service-b
+        ParseResult<CompilationUnit> result =
+                new JavaParser().parse(file);
 
-For example:
+        // rest of implementation...
 
-java -jar target/dto-comparator-1.0.0.jar \
-    /projects/adv-shipping-integration-api \
-    /projects/adv-shipping-customer-edge
+instead of:
+
+javaParser.parse(file)
+
+This makes the parallel file scanning safer.
 
 
 ---
 
-13. Output
+10. Final directory structure
 
-It will automatically create:
+Your tool should now look like:
 
 dto-comparator/
 │
-├── output/
-│   │
-│   ├── dto-comparison-2026-09-08-154530.csv
-│   │
-│   └── dto-comparison-2026-09-08-154530.xlsx
+├── pom.xml
 │
-└── ...
-
-The Excel file will contain:
-
-Summary
-Matches
-Only Directory 1
-Only Directory 2
+└── src/main/java/com/dto/comparator/
+    │
+    ├── DtoComparatorApplication.java
+    │
+    ├── model/
+    │   ├── AppModel.java
+    │   ├── DtoModel.java
+    │   ├── DtoMatch.java
+    │   ├── FieldModel.java
+    │   └── MatchStatus.java
+    │
+    ├── matcher/
+    │   └── DtoMatcher.java
+    │
+    ├── scanner/
+    │   └── JavaSourceScanner.java
+    │
+    └── report/
+        ├── CsvReportWriter.java
+        └── ExcelReportWriter.java
 
 
 ---
 
-14. What the Matches sheet gives you
+11. Your actual microservice directory
 
 For example:
 
-Status	DTO 1	DTO 2	Similarity
+C:\projects\microservices\
+│
+├── adv-shipping-integration-api\
+│
+├── adv-shipping-customer-edge\
+│
+├── adv-shipping-metering\
+│
+├── adv-shipping-webhook\
+│
+└── adv-shipping-notification\
 
-EXACT_MATCH	AddressRequest	ShippingAddress	100%
-HIGH_SIMILARITY	ShipmentRequest	CreateShipmentRequest	93%
-POSSIBLE_MATCH	CustomerRequest	CustomerInfo	82%
+You do not need to specify each application.
 
+Just run:
 
-And for each match:
+java -jar dto-comparator-1.0.0.jar C:\projects\microservices
 
-Common Fields:
-addressLine1 : String
-city         : String
-state        : String
-zipCode      : String
+It automatically discovers:
 
-Only In DTO 1:
-country : String
+adv-shipping-integration-api
+adv-shipping-customer-edge
+adv-shipping-metering
+adv-shipping-webhook
+adv-shipping-notification
 
-Only In DTO 2:
--
+and compares:
 
-Different Types:
--
+integration-api
+        ↕
+customer-edge
 
-So you can immediately decide:
+integration-api
+        ↕
+metering
 
-> "These two DTOs are effectively the same and should probably be commoned out."
+integration-api
+        ↕
+webhook
 
+integration-api
+        ↕
+notification
 
+customer-edge
+        ↕
+metering
+
+...
 
 
 ---
 
-15. One thing I would change depending on your codebase
+12. Output
 
-Right now DTO detection is:
+The output is created inside the parent directory:
 
-return name.endsWith("dto")
-        || name.endsWith("request")
-        || name.endsWith("response")
-        || name.endsWith("model");
+C:\projects\microservices\
+│
+├── adv-shipping-integration-api\
+├── adv-shipping-customer-edge\
+├── adv-shipping-metering\
+├── adv-shipping-webhook\
+├── adv-shipping-notification\
+│
+└── dto-comparator-output\
+    │
+    ├── dto-comparison-2026-09-08-164500.csv
+    └── dto-comparison-2026-09-08-164500.xlsx
 
-If your project has packages such as:
+The Excel DTO Matches sheet starts with:
 
-model
-request
-response
-dto
+APP 1
+APP 2
+STATUS
+DTO 1
+DTO 2
+SIMILARITY
+...
 
-we can make this much more accurate by detecting DTOs based on:
+For example:
 
-package name
+APP 1	APP 2	STATUS	DTO 1	DTO 2	SIMILARITY
 
-class name
+adv-shipping-integration-api	adv-shipping-customer-edge	EXACT_MATCH	AddressValidationRequest	ValidateAddressRequest	100%
+adv-shipping-integration-api	adv-shipping-customer-edge	HIGH_SIMILARITY	ShipmentRequest	CreateShipmentRequest	93%
+adv-shipping-integration-api	adv-shipping-metering	POSSIBLE_MATCH	CustomerRequest	CustomerInfo	82%
 
-Lombok annotations
 
-Jackson annotations
+So when you open the report, the first two columns immediately tell you which applications are being compared.
 
-Spring annotations
 
-whether the class contains only fields/getters/setters
+---
 
-whether it extends another DTO
+One important thing I'd change before you use this on the entire project
+
+The current DTO detector:
+
+name.endsWith("dto")
+|| name.endsWith("request")
+|| name.endsWith("response")
+|| name.endsWith("model")
+
+is intentionally simple. In a real microservice codebase, this can accidentally classify classes such as:
+
+PaymentModel
+DatabaseModel
+SomeResponse
+
+as DTOs.
+
+Since your goal is finding DTOs that can actually be commoned out, I would make the next version detect:
+
+@Data
+
+@Getter / @Setter
+
+@JsonProperty
+
+@JsonIgnore
 
 Java record
+
+DTO/request/response package
+
+fields
+
+inheritance
 
 nested DTOs
 
 
-That would reduce false positives substantially.
+and, importantly, produce a "Commonization Candidate" score rather than treating every 80% structural match as something that should definitely be commonized.
 
-
----
-
-16. One more important optimization
-
-For a large microservice landscape, I would eventually change the candidate index from just:
-
-field count
-
-to:
-
-field count
-+
-field-name fingerprint
-+
-field-type fingerprint
-
-For example:
-
-AddressRequest
-4 fields
-addressLine1:String
-city:String
-state:String
-zipCode:String
-
-gets a fingerprint such as:
-
-4|addressLine1|city|state|zipCode
-
-Then we don't compare that DTO against hundreds/thousands of unrelated DTOs.
-
-That becomes important if you're comparing entire enterprise repositories rather than two small services.
-
-My recommended production flow
-
-Java Files
-    ↓
-Parallel parsing
-    ↓
-DTO extraction
-    ↓
-Normalization
-    ↓
-Fingerprint/index
-    ↓
-Candidate filtering
-    ↓
-Parallel similarity calculation
-    ↓
-Best-match selection
-    ↓
-CSV + Excel
-
-This gives you the speed of multithreading without blindly doing every DTO × every DTO comparison.
-
-One caveat: the current implementation treats addressLine1:String and street:String as different fields. That's intentional. Automatically assuming those are equivalent can produce bad commonization recommendations. A next-level version can add a configurable semantic field-name mapping (e.g. zipCode, postalCode, zip) so those can be flagged as possible semantic matches rather than incorrectly classified as exact matches.
+That would make the report much more useful for deciding which DTOs you should actually move into your common library.
