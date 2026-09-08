@@ -1,901 +1,1996 @@
-Yes. Let's simplify this completely.
+Absolutely. Below is the complete standalone implementation, organized file-by-file so you can copy it directly into a small Maven project.
 
-Based on all the code you provided, I recommend changes in exactly 3 production files.
+The tool will:
 
-You do not need to change the controller, DTO, SendFlexRecordUtil, SendFlexRecordDto, or GlobalExceptionHandler.
+Accept Directory 1 and Directory 2 from command line.
 
-The implementation below keeps the change scoped to SendFlex Address Validation 400 errors.
+Recursively scan .java files.
+
+Detect DTOs based on configurable suffixes.
+
+Parse Java using JavaParser.
+
+Ignore class/package names for the primary comparison.
+
+Compare field names + field types.
+
+Handle field order differences.
+
+Calculate similarity.
+
+Run comparisons in parallel.
+
+Avoid an expensive full N × M comparison by using field-count candidate grouping.
+
+Generate:
+
+.csv
+
+.xlsx
+
+
+Put the reports in an output directory.
+
+Include exact matches, similar matches, and unmatched DTOs.
+
+Show which fields differ.
+
 
 
 ---
 
-Overall final flow
+1. Project structure
 
-After the change:
+Create this:
 
-SendFlex Address Validation
-        |
-        |-- 200 --> existing flow
-        |
-        |-- 400 --> ValidationException
-                    |
-                    |-- log WARN
-                    |-- save SendFlex record with statusCode = null
-                    |-- DO NOT throw ShippingIntegrationException
-                    |-- return AddressValidationResponseDTO(addressValid=false)
-                    |
-                    `--> Controller returns normal response
-                         
-        |-- 401/404/5xx/timeout
-                    |
-                    |-- existing error behavior
-                    |-- save statusCode = failure
-                    `-- propagate exception
+dto-comparator/
+│
+├── pom.xml
+│
+└── src/
+    └── main/
+        └── java/
+            └── com/
+                └── dto/
+                    └── comparator/
+                        │
+                        ├── DtoComparatorApplication.java
+                        │
+                        ├── model/
+                        │   ├── DtoModel.java
+                        │   ├── FieldModel.java
+                        │   ├── DtoMatch.java
+                        │   └── MatchStatus.java
+                        │
+                        ├── scanner/
+                        │   └── JavaSourceScanner.java
+                        │
+                        ├── matcher/
+                        │   └── DtoMatcher.java
+                        │
+                        └── report/
+                            ├── CsvReportWriter.java
+                            └── ExcelReportWriter.java
 
 
 ---
 
-FILE 1
+2. pom.xml
 
-SendFlexWebClientService.java
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="
+            http://maven.apache.org/POM/4.0.0
+            https://maven.apache.org/xsd/maven-4.0.0.xsd">
 
-Change 1: Modify sendFlexRequest()
+    <modelVersion>4.0.0</modelVersion>
 
-Current
+    <groupId>com.dto</groupId>
+    <artifactId>dto-comparator</artifactId>
+    <version>1.0.0</version>
 
-You have:
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
 
-return webClient
-    .method(method)
-    .uri(getURI(endpoint))
-    ...
-    .retryWhen(retryConfig.createRetry(MAX_ATTEMPTS, INITIAL_DELAY_SECONDS))
-    .onErrorMap(this::handleErrorMap);
+    <dependencies>
 
-Replace the entire method with:
+        <!-- Java source parser -->
+        <dependency>
+            <groupId>com.github.javaparser</groupId>
+            <artifactId>javaparser-core</artifactId>
+            <version>3.27.0</version>
+        </dependency>
 
-@SneakyThrows
-public <T> Mono<T> sendFlexRequest(
-    String endpoint,
-    HttpMethod method,
-    Map<String, String> additionalHeaders,
-    Object requestBody,
-    Class<T> responseType) {
+        <!-- Excel generation -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.4.1</version>
+        </dependency>
 
-  log.info(
-      new LogBuilder()
-          .withField("endpoint", endpoint)
-          .withField("method", method.toString())
-          .withField("additional headers", additionalHeaders.toString())
-          .withMessage("sendflex API request call")
-          .toString());
+    </dependencies>
 
-  return webClient
-      .method(method)
-      .uri(getURI(endpoint))
-      .headers(
-          httpHeaders -> {
-            getDefaultHeaders().forEach(httpHeaders::add);
-            if (!additionalHeaders.isEmpty()) {
-              additionalHeaders.forEach(httpHeaders::add);
-            }
-          })
-      .bodyValue(requestBody == null ? Mono.empty() : requestBody)
-      .retrieve()
-      .bodyToMono(responseType)
-      .retryWhen(
-          retryConfig.createRetry(
-              MAX_ATTEMPTS,
-              INITIAL_DELAY_SECONDS))
-      .onErrorMap(throwable -> handleErrorMap(throwable, endpoint));
+    <build>
+
+        <plugins>
+
+            <!-- Create executable JAR -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.0</version>
+
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+
+                        <configuration>
+
+                            <createDependencyReducedPom>
+                                false
+                            </createDependencyReducedPom>
+
+                            <transformers>
+
+                                <transformer implementation="
+                                    org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+
+                                    <mainClass>
+                                        com.dto.comparator.DtoComparatorApplication
+                                    </mainClass>
+
+                                </transformer>
+
+                            </transformers>
+
+                        </configuration>
+
+                    </execution>
+                </executions>
+
+            </plugin>
+
+        </plugins>
+
+    </build>
+
+</project>
+
+
+---
+
+3. FieldModel.java
+
+Path:
+
+src/main/java/com/dto/comparator/model/FieldModel.java
+
+package com.dto.comparator.model;
+
+public record FieldModel(
+        String name,
+        String type
+) {
+
+    public String signature() {
+        return name + ":" + type;
+    }
 }
 
-Why?
 
-We are changing:
+---
 
-.onErrorMap(this::handleErrorMap)
+4. DtoModel.java
+
+package com.dto.comparator.model;
+
+import java.nio.file.Path;
+import java.util.List;
+
+public record DtoModel(
+        String className,
+        String packageName,
+        Path sourceFile,
+        List<FieldModel> fields
+) {
+
+    public int fieldCount() {
+        return fields.size();
+    }
+
+    public String signature() {
+
+        return fields.stream()
+                .map(FieldModel::signature)
+                .sorted()
+                .reduce(
+                        "",
+                        (a, b) -> a + "|" + b
+                );
+    }
+}
+
+
+---
+
+5. MatchStatus.java
+
+package com.dto.comparator.model;
+
+public enum MatchStatus {
+
+    EXACT_MATCH,
+
+    HIGH_SIMILARITY,
+
+    POSSIBLE_MATCH
+}
+
+
+---
+
+6. DtoMatch.java
+
+package com.dto.comparator.model;
+
+import java.util.Set;
+
+public record DtoMatch(
+        DtoModel dto1,
+        DtoModel dto2,
+        double similarity,
+        MatchStatus status,
+        Set<FieldModel> commonFields,
+        Set<FieldModel> onlyInDto1,
+        Set<FieldModel> onlyInDto2,
+        Set<String> differentTypes
+) {
+}
+
+
+---
+
+7. JavaSourceScanner.java
+
+This is responsible for recursively scanning your microservice directories.
+
+package com.dto.comparator.scanner;
+
+import com.dto.comparator.model.DtoModel;
+import com.dto.comparator.model.FieldModel;
+import com.github.javaparser.JavaParser;
+import com.github.javaparser.ParseResult;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.FieldDeclaration;
+import com.github.javaparser.ast.body.VariableDeclarator;
+import com.github.javaparser.ast.type.Type;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ForkJoinPool;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+public class JavaSourceScanner {
+
+    private final JavaParser javaParser;
+
+    public JavaSourceScanner() {
+        this.javaParser = new JavaParser();
+    }
+
+    public List<DtoModel> scan(Path rootDirectory)
+            throws IOException {
+
+        try (Stream<Path> paths = Files.walk(rootDirectory)) {
+
+            List<Path> javaFiles = paths
+                    .filter(Files::isRegularFile)
+                    .filter(path ->
+                            path.toString()
+                                    .endsWith(".java"))
+                    .collect(Collectors.toList());
+
+            /*
+             * Parsing files is CPU intensive and each file
+             * can be processed independently.
+             */
+            return javaFiles
+                    .parallelStream()
+                    .flatMap(path ->
+                            parseFile(path).stream())
+                    .filter(this::isDto)
+                    .collect(Collectors.toList());
+        }
+    }
+
+    private List<DtoModel> parseFile(Path file) {
+
+        try {
+
+            ParseResult<CompilationUnit> result =
+                    javaParser.parse(file);
+
+            if (result.getResult().isEmpty()) {
+
+                System.err.println(
+                        "Unable to parse: " + file
+                );
+
+                return List.of();
+            }
+
+            CompilationUnit unit =
+                    result.getResult().get();
+
+            String packageName =
+                    unit.getPackageDeclaration()
+                            .map(p ->
+                                    p.getNameAsString())
+                            .orElse("");
+
+            List<DtoModel> resultList =
+                    new ArrayList<>();
+
+            for (ClassOrInterfaceDeclaration clazz :
+                    unit.findAll(
+                            ClassOrInterfaceDeclaration.class)) {
+
+                List<FieldModel> fields =
+                        extractFields(clazz);
+
+                resultList.add(
+                        new DtoModel(
+                                clazz.getNameAsString(),
+                                packageName,
+                                file,
+                                fields
+                        )
+                );
+            }
+
+            return resultList;
+
+        } catch (Exception e) {
+
+            System.err.println(
+                    "Error parsing " +
+                            file +
+                            ": " +
+                            e.getMessage()
+            );
+
+            return List.of();
+        }
+    }
+
+    private List<FieldModel> extractFields(
+            ClassOrInterfaceDeclaration clazz) {
+
+        List<FieldModel> fields =
+                new ArrayList<>();
+
+        for (FieldDeclaration declaration :
+                clazz.getFields()) {
+
+            String type =
+                    normalizeType(
+                            declaration.getElementType()
+                    );
+
+            for (VariableDeclarator variable :
+                    declaration.getVariables()) {
+
+                fields.add(
+                        new FieldModel(
+                                variable.getNameAsString(),
+                                type
+                        )
+                );
+            }
+        }
+
+        return fields.stream()
+                .sorted()
+                .toList();
+    }
+
+    private String normalizeType(Type type) {
+
+        return type.asString()
+                .replaceAll("\\s+", "")
+                .replace("java.lang.", "")
+                .replace("java.util.", "");
+    }
+
+    /**
+     * Configure DTO identification here.
+     */
+    private boolean isDto(DtoModel dto) {
+
+        String name =
+                dto.className().toLowerCase();
+
+        return name.endsWith("dto")
+                || name.endsWith("request")
+                || name.endsWith("response")
+                || name.endsWith("model");
+    }
+}
+
+One correction I'd make to the above for thread safety
+
+JavaParser instances can have parser state, so rather than sharing one parser between parallel tasks, use a new parser per file.
+
+Change:
+
+private final JavaParser javaParser;
+
+and the parser initialization to nothing, then change:
+
+ParseResult<CompilationUnit> result =
+        new JavaParser().parse(file);
+
+So the class should ultimately use:
+
+private List<DtoModel> parseFile(Path file) {
+
+    try {
+
+        ParseResult<CompilationUnit> result =
+                new JavaParser().parse(file);
+
+        // ...
+
+This is the version I recommend.
+
+
+---
+
+8. DtoMatcher.java
+
+This is the core of the comparison.
+
+package com.dto.comparator.matcher;
+
+import com.dto.comparator.model.DtoMatch;
+import com.dto.comparator.model.DtoModel;
+import com.dto.comparator.model.FieldModel;
+import com.dto.comparator.model.MatchStatus;
+
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+public class DtoMatcher {
+
+    private static final double EXACT_THRESHOLD = 1.0;
+
+    private static final double HIGH_THRESHOLD = 0.90;
+
+    private static final double POSSIBLE_THRESHOLD = 0.80;
+
+    private final ExecutorService executor;
+
+    public DtoMatcher() {
+
+        int processors =
+                Runtime.getRuntime()
+                        .availableProcessors();
+
+        /*
+         * Don't create thousands of threads.
+         *
+         * CPU-bound work normally performs best
+         * around the number of available CPUs.
+         */
+        int threadCount =
+                Math.max(
+                        2,
+                        processors
+                );
+
+        this.executor =
+                Executors.newFixedThreadPool(
+                        threadCount
+                );
+    }
+
+    public List<DtoMatch> compare(
+            List<DtoModel> dtos1,
+            List<DtoModel> dtos2) {
+
+        /*
+         * Build an index by field count.
+         *
+         * A DTO with 5 fields doesn't need to be
+         * compared against a DTO with 50 fields
+         * when we are looking for structural matches.
+         */
+        Map<Integer, List<DtoModel>> index =
+                dtos2.stream()
+                        .collect(
+                                Collectors.groupingBy(
+                                        DtoModel::fieldCount
+                                )
+                        );
+
+        List<CompletableFuture<List<DtoMatch>>>
+                futures =
+                dtos1.stream()
+                        .map(dto ->
+                                CompletableFuture.supplyAsync(
+                                        () ->
+                                                findBestMatch(
+                                                        dto,
+                                                        index
+                                                ),
+                                        executor
+                                )
+                        )
+                        .toList();
+
+        return futures.stream()
+                .map(CompletableFuture::join)
+                .flatMap(Collection::stream)
+                .sorted(
+                        Comparator.comparing(
+                                DtoMatch::similarity
+                        ).reversed()
+                )
+                .toList();
+    }
+
+    private List<DtoMatch> findBestMatch(
+            DtoModel source,
+            Map<Integer, List<DtoModel>> index) {
+
+        List<DtoModel> candidates =
+                new ArrayList<>();
+
+        /*
+         * Candidate window.
+         *
+         * Example:
+         *
+         * DTO has 5 fields.
+         *
+         * Compare with DTOs having
+         * 4, 5 or 6 fields.
+         */
+        for (int count =
+                     Math.max(0,
+                             source.fieldCount() - 1);
+
+             count <= source.fieldCount() + 1;
+
+             count++) {
+
+            candidates.addAll(
+                    index.getOrDefault(
+                            count,
+                            List.of()
+                    )
+            );
+        }
+
+        if (candidates.isEmpty()) {
+            return List.of();
+        }
+
+        DtoMatch bestMatch =
+                candidates.stream()
+                        .map(candidate ->
+                                calculateSimilarity(
+                                        source,
+                                        candidate
+                                )
+                        )
+                        .max(
+                                Comparator.comparing(
+                                        DtoMatch::similarity
+                                )
+                        )
+                        .orElse(null);
+
+        if (bestMatch == null) {
+            return List.of();
+        }
+
+        if (bestMatch.similarity()
+                < POSSIBLE_THRESHOLD) {
+
+            return List.of();
+        }
+
+        return List.of(bestMatch);
+    }
+
+    private DtoMatch calculateSimilarity(
+            DtoModel dto1,
+            DtoModel dto2) {
+
+        Map<String, String> fields1 =
+                toFieldMap(dto1);
+
+        Map<String, String> fields2 =
+                toFieldMap(dto2);
+
+        Set<String> names1 =
+                fields1.keySet();
+
+        Set<String> names2 =
+                fields2.keySet();
+
+        Set<String> commonNames =
+                new HashSet<>(names1);
+
+        commonNames.retainAll(names2);
+
+        Set<String> union =
+                new HashSet<>(names1);
+
+        union.addAll(names2);
+
+        double fieldNameScore =
+                union.isEmpty()
+                        ? 1.0
+                        : (double) commonNames.size()
+                        / union.size();
+
+        int matchingTypes = 0;
+
+        Set<String> differentTypes =
+                new TreeSet<>();
+
+        for (String fieldName :
+                commonNames) {
+
+            String type1 =
+                    fields1.get(fieldName);
+
+            String type2 =
+                    fields2.get(fieldName);
+
+            if (Objects.equals(type1, type2)) {
+
+                matchingTypes++;
+
+            } else {
+
+                differentTypes.add(
+                        fieldName +
+                                ": " +
+                                type1 +
+                                " vs " +
+                                type2
+                );
+            }
+        }
+
+        double typeScore =
+                commonNames.isEmpty()
+                        ? 0
+                        : (double) matchingTypes
+                        / commonNames.size();
+
+        /*
+         * Class name is intentionally given
+         * very low weight.
+         */
+        double classNameScore =
+                calculateNameSimilarity(
+                        dto1.className(),
+                        dto2.className()
+                );
+
+        /*
+         * Main structural score.
+         *
+         * Field names  : 60%
+         * Types        : 30%
+         * Class names  : 10%
+         */
+        double score =
+                (fieldNameScore * 0.60)
+                        +
+                        (typeScore * 0.30)
+                        +
+                        (classNameScore * 0.10);
+
+        Set<FieldModel> commonFields =
+                new HashSet<>();
+
+        Set<FieldModel> onlyInDto1 =
+                new HashSet<>();
+
+        Set<FieldModel> onlyInDto2 =
+                new HashSet<>();
+
+        for (FieldModel field :
+                dto1.fields()) {
+
+            if (fields2.containsKey(field.name())
+                    && Objects.equals(
+                    field.type(),
+                    fields2.get(field.name()))) {
+
+                commonFields.add(field);
+
+            } else {
+
+                onlyInDto1.add(field);
+            }
+        }
+
+        for (FieldModel field :
+                dto2.fields()) {
+
+            if (!fields1.containsKey(field.name())
+                    || !Objects.equals(
+                    field.type(),
+                    fields1.get(field.name()))) {
+
+                onlyInDto2.add(field);
+            }
+        }
+
+        MatchStatus status =
+                determineStatus(score);
+
+        return new DtoMatch(
+                dto1,
+                dto2,
+                score,
+                status,
+                commonFields,
+                onlyInDto1,
+                onlyInDto2,
+                differentTypes
+        );
+    }
+
+    private MatchStatus determineStatus(
+            double score) {
+
+        if (score >= EXACT_THRESHOLD) {
+            return MatchStatus.EXACT_MATCH;
+        }
+
+        if (score >= HIGH_THRESHOLD) {
+            return MatchStatus.HIGH_SIMILARITY;
+        }
+
+        return MatchStatus.POSSIBLE_MATCH;
+    }
+
+    private Map<String, String> toFieldMap(
+            DtoModel dto) {
+
+        return dto.fields()
+                .stream()
+                .collect(
+                        Collectors.toMap(
+                                FieldModel::name,
+                                FieldModel::type
+                        )
+                );
+    }
+
+    private double calculateNameSimilarity(
+            String name1,
+            String name2) {
+
+        String a =
+                normalizeClassName(name1);
+
+        String b =
+                normalizeClassName(name2);
+
+        if (a.equals(b)) {
+            return 1.0;
+        }
+
+        int distance =
+                levenshtein(a, b);
+
+        int max =
+                Math.max(
+                        a.length(),
+                        b.length()
+                );
+
+        if (max == 0) {
+            return 1.0;
+        }
+
+        return 1.0 -
+                ((double) distance / max);
+    }
+
+    private String normalizeClassName(
+            String name) {
+
+        return name
+                .toLowerCase()
+                .replace("dto", "")
+                .replace("request", "")
+                .replace("response", "")
+                .replace("model", "");
+    }
+
+    private int levenshtein(
+            String a,
+            String b) {
+
+        int[][] dp =
+                new int[a.length() + 1]
+                        [b.length() + 1];
+
+        for (int i = 0;
+             i <= a.length();
+             i++) {
+
+            dp[i][0] = i;
+        }
+
+        for (int j = 0;
+             j <= b.length();
+             j++) {
+
+            dp[0][j] = j;
+        }
+
+        for (int i = 1;
+             i <= a.length();
+             i++) {
+
+            for (int j = 1;
+                 j <= b.length();
+                 j++) {
+
+                int cost =
+                        a.charAt(i - 1)
+                                == b.charAt(j - 1)
+                                ? 0
+                                : 1;
+
+                dp[i][j] =
+                        Math.min(
+                                Math.min(
+                                        dp[i - 1][j] + 1,
+                                        dp[i][j - 1] + 1
+                                ),
+                                dp[i - 1][j - 1]
+                                        + cost
+                        );
+            }
+        }
+
+        return dp[a.length()][b.length()];
+    }
+
+    public void shutdown() {
+
+        executor.shutdown();
+
+        try {
+
+            if (!executor.awaitTermination(
+                    10,
+                    TimeUnit.SECONDS)) {
+
+                executor.shutdownNow();
+            }
+
+        } catch (InterruptedException e) {
+
+            executor.shutdownNow();
+
+            Thread.currentThread().interrupt();
+        }
+    }
+}
+
+
+---
+
+9. CsvReportWriter.java
+
+package com.dto.comparator.report;
+
+import com.dto.comparator.model.DtoMatch;
+import com.dto.comparator.model.DtoModel;
+
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+public class CsvReportWriter {
+
+    public void write(
+            Path outputFile,
+            List<DtoMatch> matches,
+            List<DtoModel> dtos1,
+            List<DtoModel> dtos2)
+            throws IOException {
+
+        Set<String> matched1 =
+                matches.stream()
+                        .map(match ->
+                                match.dto1().sourceFile()
+                                        .toAbsolutePath()
+                                        .toString())
+                        .collect(Collectors.toSet());
+
+        Set<String> matched2 =
+                matches.stream()
+                        .map(match ->
+                                match.dto2().sourceFile()
+                                        .toAbsolutePath()
+                                        .toString())
+                        .collect(Collectors.toSet());
+
+        try (BufferedWriter writer =
+                     Files.newBufferedWriter(outputFile)) {
+
+            writer.write(
+                    "Status,DTO 1,DTO 2,Similarity,Directory 1 File,Directory 2 File,Common Fields,Only In DTO 1,Only In DTO 2,Different Types"
+            );
+
+            writer.newLine();
+
+            for (DtoMatch match : matches) {
+
+                writer.write(
+                        csv(match.status().name())
+                                + ","
+                                + csv(match.dto1().className())
+                                + ","
+                                + csv(match.dto2().className())
+                                + ","
+                                + csv(
+                                String.format(
+                                        "%.2f%%",
+                                        match.similarity() * 100
+                                )
+                        )
+                                + ","
+                                + csv(
+                                match.dto1()
+                                        .sourceFile()
+                                        .toString()
+                        )
+                                + ","
+                                + csv(
+                                match.dto2()
+                                        .sourceFile()
+                                        .toString()
+                        )
+                                + ","
+                                + csv(
+                                fields(match.commonFields())
+                        )
+                                + ","
+                                + csv(
+                                fields(match.onlyInDto1())
+                        )
+                                + ","
+                                + csv(
+                                fields(match.onlyInDto2())
+                        )
+                                + ","
+                                + csv(
+                                String.join(
+                                        " | ",
+                                        match.differentTypes()
+                                )
+                        )
+                );
+
+                writer.newLine();
+            }
+
+            writer.newLine();
+
+            writer.write("UNMATCHED DTOs - DIRECTORY 1");
+            writer.newLine();
+
+            for (DtoModel dto : dtos1) {
+
+                if (!matched1.contains(
+                        dto.sourceFile()
+                                .toAbsolutePath()
+                                .toString())) {
+
+                    writer.write(
+                            csv(dto.className())
+                                    + ","
+                                    + csv(
+                                    dto.sourceFile()
+                                            .toString()
+                            )
+                    );
+
+                    writer.newLine();
+                }
+            }
+
+            writer.newLine();
+
+            writer.write("UNMATCHED DTOs - DIRECTORY 2");
+            writer.newLine();
+
+            for (DtoModel dto : dtos2) {
+
+                if (!matched2.contains(
+                        dto.sourceFile()
+                                .toAbsolutePath()
+                                .toString())) {
+
+                    writer.write(
+                            csv(dto.className())
+                                    + ","
+                                    + csv(
+                                    dto.sourceFile()
+                                            .toString()
+                            )
+                    );
+
+                    writer.newLine();
+                }
+            }
+        }
+    }
+
+    private String fields(
+            Set<?> fields) {
+
+        return fields.stream()
+                .map(Object::toString)
+                .collect(
+                        Collectors.joining(" | ")
+                );
+    }
+
+    private String csv(String value) {
+
+        if (value == null) {
+            return "";
+        }
+
+        return "\"" +
+                value.replace(
+                        "\"",
+                        "\"\""
+                )
+                +
+                "\"";
+    }
+}
+
+
+---
+
+10. ExcelReportWriter.java
+
+This produces the more useful Excel report.
+
+package com.dto.comparator.report;
+
+import com.dto.comparator.model.DtoMatch;
+import com.dto.comparator.model.DtoModel;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.*;
+import java.util.stream.Collectors;
+
+public class ExcelReportWriter {
+
+    public void write(
+            Path outputFile,
+            List<DtoMatch> matches,
+            List<DtoModel> dtos1,
+            List<DtoModel> dtos2)
+            throws IOException {
+
+        try (Workbook workbook =
+                     new XSSFWorkbook()) {
+
+            createSummarySheet(
+                    workbook,
+                    matches,
+                    dtos1,
+                    dtos2
+            );
+
+            createMatchesSheet(
+                    workbook,
+                    matches
+            );
+
+            createUnmatchedSheet(
+                    workbook,
+                    "Only Directory 1",
+                    dtos1,
+                    matches,
+                    true
+            );
+
+            createUnmatchedSheet(
+                    workbook,
+                    "Only Directory 2",
+                    dtos2,
+                    matches,
+                    false
+            );
+
+            try (FileOutputStream output =
+                         new FileOutputStream(
+                                 outputFile.toFile()
+                         )) {
+
+                workbook.write(output);
+            }
+        }
+    }
+
+    private void createSummarySheet(
+            Workbook workbook,
+            List<DtoMatch> matches,
+            List<DtoModel> dtos1,
+            List<DtoModel> dtos2) {
+
+        Sheet sheet =
+                workbook.createSheet("Summary");
+
+        Row header =
+                sheet.createRow(0);
+
+        header.createCell(0)
+                .setCellValue("Metric");
+
+        header.createCell(1)
+                .setCellValue("Value");
+
+        int row = 1;
+
+        row(sheet, row++,
+                "DTOs in Directory 1",
+                dtos1.size());
+
+        row(sheet, row++,
+                "DTOs in Directory 2",
+                dtos2.size());
+
+        row(sheet, row++,
+                "Total Matches",
+                matches.size());
+
+        long exact =
+                matches.stream()
+                        .filter(m ->
+                                m.status().name()
+                                        .equals(
+                                                "EXACT_MATCH"
+                                        ))
+                        .count();
+
+        long high =
+                matches.stream()
+                        .filter(m ->
+                                m.status().name()
+                                        .equals(
+                                                "HIGH_SIMILARITY"
+                                        ))
+                        .count();
+
+        long possible =
+                matches.stream()
+                        .filter(m ->
+                                m.status().name()
+                                        .equals(
+                                                "POSSIBLE_MATCH"
+                                        ))
+                        .count();
+
+        row(sheet, row++,
+                "Exact Matches",
+                exact);
+
+        row(sheet, row++,
+                "High Similarity",
+                high);
+
+        row(sheet, row++,
+                "Possible Matches",
+                possible);
+
+        Set<String> matched1 =
+                matches.stream()
+                        .map(m ->
+                                m.dto1()
+                                        .sourceFile()
+                                        .toAbsolutePath()
+                                        .toString())
+                        .collect(Collectors.toSet());
+
+        Set<String> matched2 =
+                matches.stream()
+                        .map(m ->
+                                m.dto2()
+                                        .sourceFile()
+                                        .toAbsolutePath()
+                                        .toString())
+                        .collect(Collectors.toSet());
+
+        row(sheet, row++,
+                "Unmatched Directory 1",
+                dtos1.stream()
+                        .filter(dto ->
+                                !matched1.contains(
+                                        dto.sourceFile()
+                                                .toAbsolutePath()
+                                                .toString()))
+                        .count());
+
+        row(sheet, row++,
+                "Unmatched Directory 2",
+                dtos2.stream()
+                        .filter(dto ->
+                                !matched2.contains(
+                                        dto.sourceFile()
+                                                .toAbsolutePath()
+                                                .toString()))
+                        .count());
+
+        autoSize(sheet);
+    }
+
+    private void createMatchesSheet(
+            Workbook workbook,
+            List<DtoMatch> matches) {
+
+        Sheet sheet =
+                workbook.createSheet("Matches");
+
+        String[] headers = {
+                "Status",
+                "DTO 1",
+                "DTO 2",
+                "Similarity",
+                "Directory 1 File",
+                "Directory 2 File",
+                "Common Fields",
+                "Only In DTO 1",
+                "Only In DTO 2",
+                "Different Types"
+        };
+
+        createHeader(sheet, headers);
+
+        int rowIndex = 1;
+
+        for (DtoMatch match : matches) {
+
+            Row row =
+                    sheet.createRow(rowIndex++);
+
+            row.createCell(0)
+                    .setCellValue(
+                            match.status().name()
+                    );
+
+            row.createCell(1)
+                    .setCellValue(
+                            match.dto1().className()
+                    );
+
+            row.createCell(2)
+                    .setCellValue(
+                            match.dto2().className()
+                    );
+
+            row.createCell(3)
+                    .setCellValue(
+                            match.similarity()
+                    );
+
+            row.createCell(4)
+                    .setCellValue(
+                            match.dto1()
+                                    .sourceFile()
+                                    .toString()
+                    );
+
+            row.createCell(5)
+                    .setCellValue(
+                            match.dto2()
+                                    .sourceFile()
+                                    .toString()
+                    );
+
+            row.createCell(6)
+                    .setCellValue(
+                            formatFields(
+                                    match.commonFields()
+                            )
+                    );
+
+            row.createCell(7)
+                    .setCellValue(
+                            formatFields(
+                                    match.onlyInDto1()
+                            )
+                    );
+
+            row.createCell(8)
+                    .setCellValue(
+                            formatFields(
+                                    match.onlyInDto2()
+                            )
+                    );
+
+            row.createCell(9)
+                    .setCellValue(
+                            String.join(
+                                    " | ",
+                                    match.differentTypes()
+                            )
+                    );
+
+            Cell scoreCell =
+                    row.getCell(3);
+
+            CellStyle percentageStyle =
+                    workbook.createCellStyle();
+
+            percentageStyle.setDataFormat(
+                    workbook
+                            .getCreationHelper()
+                            .createDataFormat()
+                            .getFormat("0.00%")
+            );
+
+            scoreCell.setCellStyle(
+                    percentageStyle
+            );
+        }
+
+        sheet.createFreezePane(0, 1);
+
+        autoSize(sheet);
+    }
+
+    private void createUnmatchedSheet(
+            Workbook workbook,
+            String sheetName,
+            List<DtoModel> dtos,
+            List<DtoMatch> matches,
+            boolean firstDirectory) {
+
+        Sheet sheet =
+                workbook.createSheet(sheetName);
+
+        String[] headers = {
+                "Class Name",
+                "Package",
+                "File",
+                "Field Count",
+                "Fields"
+        };
+
+        createHeader(sheet, headers);
+
+        Set<String> matchedFiles =
+                matches.stream()
+                        .map(match ->
+                                firstDirectory
+                                        ? match.dto1()
+                                        .sourceFile()
+                                        .toAbsolutePath()
+                                        .toString()
+                                        : match.dto2()
+                                        .sourceFile()
+                                        .toAbsolutePath()
+                                        .toString()
+                        )
+                        .collect(Collectors.toSet());
+
+        int rowIndex = 1;
+
+        for (DtoModel dto : dtos) {
+
+            String file =
+                    dto.sourceFile()
+                            .toAbsolutePath()
+                            .toString();
+
+            if (matchedFiles.contains(file)) {
+                continue;
+            }
+
+            Row row =
+                    sheet.createRow(rowIndex++);
+
+            row.createCell(0)
+                    .setCellValue(
+                            dto.className()
+                    );
+
+            row.createCell(1)
+                    .setCellValue(
+                            dto.packageName()
+                    );
+
+            row.createCell(2)
+                    .setCellValue(
+                            dto.sourceFile()
+                                    .toString()
+                    );
+
+            row.createCell(3)
+                    .setCellValue(
+                            dto.fieldCount()
+                    );
+
+            row.createCell(4)
+                    .setCellValue(
+                            formatFields(
+                                    new HashSet<>(
+                                            dto.fields()
+                                    )
+                            )
+                    );
+        }
+
+        sheet.createFreezePane(0, 1);
+
+        autoSize(sheet);
+    }
+
+    private void createHeader(
+            Sheet sheet,
+            String[] headers) {
+
+        Row row =
+                sheet.createRow(0);
+
+        for (int i = 0;
+             i < headers.length;
+             i++) {
+
+            row.createCell(i)
+                    .setCellValue(headers[i]);
+        }
+
+        sheet.createFreezePane(0, 1);
+    }
+
+    private void row(
+            Sheet sheet,
+            int rowNumber,
+            String metric,
+            Object value) {
+
+        Row row =
+                sheet.createRow(rowNumber);
+
+        row.createCell(0)
+                .setCellValue(metric);
+
+        row.createCell(1)
+                .setCellValue(
+                        String.valueOf(value)
+                );
+    }
+
+    private String formatFields(
+            Set<?> fields) {
+
+        return fields.stream()
+                .map(Object::toString)
+                .sorted()
+                .collect(
+                        Collectors.joining(
+                                " | "
+                        )
+                );
+    }
+
+    private void autoSize(
+            Sheet sheet) {
+
+        int maxColumns = 10;
+
+        for (int i = 0;
+             i < maxColumns;
+             i++) {
+
+            try {
+                sheet.autoSizeColumn(i);
+            } catch (Exception ignored) {
+                // Ignore sizing issues
+            }
+        }
+    }
+}
+
+
+---
+
+11. Main application
+
+Create:
+
+DtoComparatorApplication.java
+
+package com.dto.comparator;
+
+import com.dto.comparator.matcher.DtoMatcher;
+import com.dto.comparator.model.DtoMatch;
+import com.dto.comparator.model.DtoModel;
+import com.dto.comparator.report.CsvReportWriter;
+import com.dto.comparator.report.ExcelReportWriter;
+import com.dto.comparator.scanner.JavaSourceScanner;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+
+public class DtoComparatorApplication {
+
+    public static void main(String[] args) {
+
+        if (args.length < 2) {
+
+            System.out.println();
+            System.out.println(
+                    "DTO Comparator"
+            );
+            System.out.println();
+            System.out.println(
+                    "Usage:"
+            );
+            System.out.println(
+                    "java -jar dto-comparator.jar " +
+                            "<directory1> <directory2>"
+            );
+            System.out.println();
+            System.out.println(
+                    "Example:"
+            );
+            System.out.println(
+                    "java -jar dto-comparator.jar " +
+                            "/project/service-a " +
+                            "/project/service-b"
+            );
+
+            System.exit(1);
+        }
+
+        Path directory1 =
+                Paths.get(args[0]);
+
+        Path directory2 =
+                Paths.get(args[1]);
+
+        validateDirectory(directory1);
+        validateDirectory(directory2);
+
+        long start =
+                System.currentTimeMillis();
+
+        System.out.println();
+        System.out.println(
+                "======================================"
+        );
+        System.out.println(
+                "        DTO COMPARATOR"
+        );
+        System.out.println(
+                "======================================"
+        );
+
+        System.out.println(
+                "Directory 1: " +
+                        directory1.toAbsolutePath()
+        );
+
+        System.out.println(
+                "Directory 2: " +
+                        directory2.toAbsolutePath()
+        );
+
+        System.out.println();
+
+        try {
+
+            JavaSourceScanner scanner =
+                    new JavaSourceScanner();
+
+            System.out.println(
+                    "Scanning Directory 1..."
+            );
+
+            List<DtoModel> dtos1 =
+                    scanner.scan(directory1);
+
+            System.out.println(
+                    "Found " +
+                            dtos1.size() +
+                            " DTOs"
+            );
+
+            System.out.println();
+
+            System.out.println(
+                    "Scanning Directory 2..."
+            );
+
+            List<DtoModel> dtos2 =
+                    scanner.scan(directory2);
+
+            System.out.println(
+                    "Found " +
+                            dtos2.size() +
+                            " DTOs"
+            );
+
+            System.out.println();
+
+            System.out.println(
+                    "Comparing DTOs..."
+            );
+
+            DtoMatcher matcher =
+                    new DtoMatcher();
+
+            List<DtoMatch> matches =
+                    matcher.compare(
+                            dtos1,
+                            dtos2
+                    );
+
+            matcher.shutdown();
+
+            Path outputDirectory =
+                    Paths.get("output");
+
+            Files.createDirectories(
+                    outputDirectory
+            );
+
+            String timestamp =
+                    LocalDateTime.now()
+                            .format(
+                                    DateTimeFormatter
+                                            .ofPattern(
+                                                    "yyyy-MM-dd-HHmmss"
+                                            )
+                            );
+
+            Path csvFile =
+                    outputDirectory.resolve(
+                            "dto-comparison-" +
+                                    timestamp +
+                                    ".csv"
+                    );
+
+            Path excelFile =
+                    outputDirectory.resolve(
+                            "dto-comparison-" +
+                                    timestamp +
+                                    ".xlsx"
+                    );
+
+            System.out.println(
+                    "Generating CSV..."
+            );
+
+            new CsvReportWriter()
+                    .write(
+                            csvFile,
+                            matches,
+                            dtos1,
+                            dtos2
+                    );
+
+            System.out.println(
+                    "Generating Excel..."
+            );
+
+            new ExcelReportWriter()
+                    .write(
+                            excelFile,
+                            matches,
+                            dtos1,
+                            dtos2
+                    );
+
+            long executionTime =
+                    System.currentTimeMillis()
+                            - start;
+
+            System.out.println();
+            System.out.println(
+                    "======================================"
+            );
+
+            System.out.println(
+                    "COMPLETED"
+            );
+
+            System.out.println(
+                    "======================================"
+            );
+
+            System.out.println(
+                    "Matches : " +
+                            matches.size()
+            );
+
+            System.out.println(
+                    "CSV     : " +
+                            csvFile.toAbsolutePath()
+            );
+
+            System.out.println(
+                    "Excel   : " +
+                            excelFile.toAbsolutePath()
+            );
+
+            System.out.println(
+                    "Time    : " +
+                            executionTime +
+                            " ms"
+            );
+
+            System.out.println(
+                    "======================================"
+            );
+
+        } catch (Exception e) {
+
+            System.err.println();
+            System.err.println(
+                    "DTO comparison failed."
+            );
+
+            e.printStackTrace();
+
+            System.exit(2);
+        }
+    }
+
+    private static void validateDirectory(
+            Path directory) {
+
+        if (!Files.exists(directory)) {
+
+            throw new IllegalArgumentException(
+                    "Directory does not exist: " +
+                            directory
+            );
+        }
+
+        if (!Files.isDirectory(directory)) {
+
+            throw new IllegalArgumentException(
+                    "Not a directory: " +
+                            directory
+            );
+        }
+    }
+}
+
+
+---
+
+12. Build the JAR
+
+From the project root:
+
+mvn clean package
+
+You'll get:
+
+target/
+    dto-comparator-1.0.0.jar
+    original-dto-comparator-1.0.0.jar
+
+Run the shaded JAR:
+
+java -jar target/dto-comparator-1.0.0.jar \
+    /path/to/service-a \
+    /path/to/service-b
+
+For example:
+
+java -jar target/dto-comparator-1.0.0.jar \
+    /projects/adv-shipping-integration-api \
+    /projects/adv-shipping-customer-edge
+
+
+---
+
+13. Output
+
+It will automatically create:
+
+dto-comparator/
+│
+├── output/
+│   │
+│   ├── dto-comparison-2026-09-08-154530.csv
+│   │
+│   └── dto-comparison-2026-09-08-154530.xlsx
+│
+└── ...
+
+The Excel file will contain:
+
+Summary
+Matches
+Only Directory 1
+Only Directory 2
+
+
+---
+
+14. What the Matches sheet gives you
+
+For example:
+
+Status	DTO 1	DTO 2	Similarity
+
+EXACT_MATCH	AddressRequest	ShippingAddress	100%
+HIGH_SIMILARITY	ShipmentRequest	CreateShipmentRequest	93%
+POSSIBLE_MATCH	CustomerRequest	CustomerInfo	82%
+
+
+And for each match:
+
+Common Fields:
+addressLine1 : String
+city         : String
+state        : String
+zipCode      : String
+
+Only In DTO 1:
+country : String
+
+Only In DTO 2:
+-
+
+Different Types:
+-
+
+So you can immediately decide:
+
+> "These two DTOs are effectively the same and should probably be commoned out."
+
+
+
+
+---
+
+15. One thing I would change depending on your codebase
+
+Right now DTO detection is:
+
+return name.endsWith("dto")
+        || name.endsWith("request")
+        || name.endsWith("response")
+        || name.endsWith("model");
+
+If your project has packages such as:
+
+model
+request
+response
+dto
+
+we can make this much more accurate by detecting DTOs based on:
+
+package name
+
+class name
+
+Lombok annotations
+
+Jackson annotations
+
+Spring annotations
+
+whether the class contains only fields/getters/setters
+
+whether it extends another DTO
+
+Java record
+
+nested DTOs
+
+
+That would reduce false positives substantially.
+
+
+---
+
+16. One more important optimization
+
+For a large microservice landscape, I would eventually change the candidate index from just:
+
+field count
 
 to:
 
-.onErrorMap(throwable -> handleErrorMap(throwable, endpoint))
-
-This allows handleErrorMap() to know that the request is:
-
-/AddressValidation
-
-and therefore only apply the special WARN behavior to this API.
-
-
----
-
-Change 2: Modify handleErrorMap()
-
-Remove your current method:
-
-public Exception handleErrorMap(Throwable throwable) {
-    ...
-}
-
-Replace it with:
-
-public Exception handleErrorMap(Throwable throwable, String endpoint) {
-
-  if (throwable instanceof WebClientResponseException ex) {
-
-    List<String> errorMessages =
-        extractErrorMessages(ex.getResponseBodyAsString());
-
-    int statusCode = ex.getStatusCode().value();
-
-    if (statusCode == SendFlexErrorConstants.BAD_REQUEST
-        && ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT.equals(endpoint)) {
-
-      log.warn(
-          new LogBuilder()
-              .withReason(ex.getMessage())
-              .withMessage("SendFlex address validation returned a validation error")
-              .toString());
-
-      return new ValidationException(
-          "Data is not valid: " + errorMessages,
-          errorMessages.toString());
-    }
-
-    switch (statusCode) {
-
-      case SendFlexErrorConstants.BAD_REQUEST:
-        log.error(
-            new LogBuilder()
-                .withReason(ex.getMessage())
-                .withStackTrace(ex.getStackTrace())
-                .withMessage("SendFlex API request failed")
-                .toString());
-
-        return new ValidationException(
-            "Data is not valid: " + errorMessages,
-            errorMessages.toString());
-
-      case SendFlexErrorConstants.UNAUTHORIZED:
-        log.error(
-            new LogBuilder()
-                .withReason(ex.getMessage())
-                .withStackTrace(ex.getStackTrace())
-                .withMessage("SendFlex API request failed")
-                .toString());
-
-        return new UnAuthorizedException(
-            "Not authorized request" + errorMessages);
-
-      case SendFlexErrorConstants.NOT_FOUND:
-        log.error(
-            new LogBuilder()
-                .withReason(ex.getMessage())
-                .withStackTrace(ex.getStackTrace())
-                .withMessage("SendFlex API request failed")
-                .toString());
-
-        return new ResourceNotFoundException(
-            "Resource is not found: " + errorMessages);
-
-      default:
-        log.error(
-            new LogBuilder()
-                .withReason(ex.getMessage())
-                .withStackTrace(ex.getStackTrace())
-                .withMessage("SendFlex API request failed")
-                .toString());
-
-        return new RuntimeException(
-            "Unknown HTTP error occurred: "
-                + ex.getStatusCode()
-                + " - "
-                + errorMessages);
-    }
-
-  } else {
-
-    log.error(
-        new LogBuilder()
-            .withReason(throwable.getMessage())
-            .withStackTrace(throwable.getStackTrace())
-            .withMessage("Unexpected SendFlex API error")
-            .toString());
-
-    return new RuntimeException(
-        "Unexpected error occurred: "
-            + "sendflex API request failed and it's not WebClientResponseException"
-            + throwable.getMessage()
-            + Arrays.toString(throwable.getStackTrace()));
-  }
-}
-
-Add this import if it isn't already there:
-
-import com.cardinalhealth.adv.shipping.integration.api.exception.ValidationException;
-
-Why this implementation?
-
-We are not changing all SendFlex 400 errors to WARN.
-
-Only:
-
-endpoint = /AddressValidation
-AND
-status = 400
-
-gets special handling.
-
-That's safer because SendFlexWebClientService is used by many other APIs.
-
-
----
-
-FILE 2
-
-RetryConfig.java
-
-Your retry logic itself is already correct.
-
-This:
-
-return statusCode >= 500 && statusCode < 600;
-
-means:
-
-400 → don't retry
-401 → don't retry
-404 → don't retry
-500 → retry
-502 → retry
-503 → retry
-
-So do not change the retry condition.
-
-But change isRetryable().
-
-Current:
-
-public boolean isRetryable(Throwable throwable) {
-    if (throwable instanceof WebClientResponseException ex) {
-        int statusCode = ex.getStatusCode().value();
-        log.error(new LogBuilder()
-                        .withMessage("Is this request retryable?")
-                        .withField("statusCode", statusCode)
-                        .toString());
-        return statusCode >= 500 && statusCode < 600;
-    }
-    return true;
-}
-
-Replace with:
-
-public boolean isRetryable(Throwable throwable) {
-  if (throwable instanceof WebClientResponseException ex) {
-    int statusCode = ex.getStatusCode().value();
-    return statusCode >= 500 && statusCode < 600;
-  }
-
-  return true;
-}
-
-That's it.
-
-Why?
-
-This existing code:
-
-log.error(...)
-
-is another source of ERROR logging for a 400.
-
-We don't need this log because the actual error logging is handled by SendFlexWebClientService.
-
-
----
-
-FILE 3
-
-AddressValidationServiceImpl.java
-
-This is where the actual exception propagation needs to stop.
-
-
----
-
-Change 1: Add import
-
-Add:
-
-import com.cardinalhealth.adv.shipping.integration.api.exception.ValidationException;
-
-
----
-
-Change 2: Replace validateAddress()
-
-Remove your current entire method:
-
-@Override
-public AddressValidationResponseDTO validateAddress(
-    AddressValidationRequest addressValidationRequest) throws JsonProcessingException {
-    ...
-}
-
-Replace it with:
-
-@Override
-public AddressValidationResponseDTO validateAddress(
-    AddressValidationRequest addressValidationRequest) throws JsonProcessingException {
-
-  AddressValidationRequestDTO addressValidationRequestDTO =
-      buildAddressValidationRequestDTO(addressValidationRequest);
-
-  Mono<AddressValidationResponseDTO> monoAddressValidationResponse =
-      sendFlexWebClientService.sendFlexRequest(
-          ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT,
-          HttpMethod.POST,
-          Map.of(),
-          addressValidationRequestDTO,
-          AddressValidationResponseDTO.class);
-
-  try {
-
-    AddressValidationResponseDTO addressValidationResponseDTO =
-        monoAddressValidationResponse.block();
-
-    persistAddressValidationResponse(
-        addressValidationRequestDTO,
-        addressValidationResponseDTO);
-
-    return addressValidationResponseDTO;
-
-  } catch (ValidationException exception) {
-
-    log.warn(
-        new LogBuilder()
-            .withReason(exception.getMessage())
-            .withMessage("SendFlex address validation failed")
-            .toString());
-
-    persistAddressValidationValidationFailure(
-        addressValidationRequestDTO,
-        exception);
-
-    return buildAddressValidationErrorResponse(addressValidationRequest);
-    
-  } catch (Exception exception) {
-
-    persistAddressValidationFailure(
-        addressValidationRequestDTO,
-        exception);
-
-    throw new ShippingIntegrationException(
-        "An unexpected error occurred while saving address validation response "
-            + exception.getMessage(),
-        exception);
-  }
-}
-
-
----
-
-Change 3: Add a new method
-
-Add this method to AddressValidationServiceImpl:
-
-private SendFlexRecordDto persistAddressValidationValidationFailure(
-    AddressValidationRequestDTO addressValidationRequestDTO,
-    ValidationException exception) {
-
-  SendFlexRecordDto sendFlexRecordDto =
-      SendFlexRecordDto.builder()
-          .requestObject(addressValidationRequestDTO)
-          .responseObject(exception.getMessage())
-          .statusCode(null)
-          .apiCode(ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT)
-          .build();
-
-  return sendFlexRecordUtil.saveSendflexRecord(sendFlexRecordDto);
-}
-
-Notice the important difference
-
-Your existing method has:
-
-.statusCode(FAILURE)
-
-This new method has:
-
-.statusCode(null)
-
-Do not change the existing persistAddressValidationFailure() method.
-
-It is still needed for real/unexpected errors.
-
-
----
-
-Change 4: Add another new method
-
-Because your controller does this:
-
-AddressValidationResponseDTO responseDTO =
-    addressValidationService.validateAddress(addressValidationRequest);
-
-AddressValidationResponse addressValidationResponse =
-    addressValidationService.buildAddressValidationResponse(responseDTO);
-
-we cannot return null.
-
-So add:
-
-private AddressValidationResponseDTO buildAddressValidationErrorResponse(
-    AddressValidationRequest addressValidationRequest) {
-
-  AddressValidationResponseDTO responseDTO =
-      new AddressValidationResponseDTO();
-
-  responseDTO.setAddressValid(false);
-
-  AddressToValidate addressToValidate =
-      new AddressToValidate();
-
-  Address address = addressValidationRequest.getAddress();
-
-  if (address != null) {
-    addressToValidate.setName(address.getName());
-    addressToValidate.setAddressLines(address.getAddressLines());
-    addressToValidate.setCity(address.getCity());
-    addressToValidate.setState(address.getState());
-    addressToValidate.setCountryCode(address.getCountry());
-    addressToValidate.setResidential(address.isResidential());
-    addressToValidate.setContact(
-        Contact.builder()
-            .name(address.getName())
-            .phone(address.getPhoneNumber())
-            .email(address.getEmailAddress())
-            .build());
-  }
-
-  responseDTO.setAddressToValidate(addressToValidate);
-
-  return responseDTO;
-}
-
-You already have:
-
-AddressToValidate
-Contact
-Address
-
-imports in your class, so you shouldn't need new imports for these.
-
-
----
-
-Why do we need this method?
-
-Because otherwise you might do:
-
-return null;
-
-and then your controller does:
-
-buildAddressValidationResponse(null);
-
-which would eventually hit:
-
-responseDTO.isAddressValid()
-
-and produce a NullPointerException.
-
-So we return a proper DTO:
-
-addressValid = false
-
-The controller can then continue normally.
-
-
----
-
-IMPORTANT: Do NOT modify this existing method
-
-Keep:
-
-SendFlexRecordDto persistAddressValidationFailure(
-    AddressValidationRequestDTO addressValidationRequestDTO,
-    Exception e) {
-
-exactly for unexpected errors.
-
-So you have two persistence methods:
-
-Expected address validation error
-
-persistAddressValidationValidationFailure()
-
-stores:
-
-statusCode = null
-
-Unexpected technical error
-
-persistAddressValidationFailure()
-
-stores:
-
-statusCode = FAILURE
-
-
----
-
-FILE 4 — No change
-
-AddressValidationController
-
-Do nothing.
-
-Your current code can remain:
-
-AddressValidationResponseDTO responseDTO =
-    addressValidationService.validateAddress(addressValidationRequest);
-
-AddressValidationResponse addressValidationResponse =
-    addressValidationService.buildAddressValidationResponse(responseDTO);
-
-return ResponseEntity.ok(addressValidationResponse);
-
-This will now work because the service returns a non-null DTO for a validation failure.
-
-
----
-
-FILE 5 — No change
-
-SendFlexRecordUtil
-
-Do nothing.
-
-This already accepts the DTO:
-
-public SendFlexRecordDto saveSendflexRecord(
-    SendFlexRecordDto sendFlexRecordDto) {
-  return sendFlexRecordService.saveSendflexRecord(sendFlexRecordDto);
-}
-
-No need to modify the generic failure handling.
-
-
----
-
-FILE 6 — No change
-
-SendFlexRecordDto
-
-Do nothing.
-
-This is already correct:
-
-private String statusCode;
-
-It can contain:
-
-null
-
-and your entity mapping already passes it through:
-
-.statusCode(statusCode)
-
-
----
-
-FILE 7 — No change
-
-GlobalExceptionHandler
-
-Do nothing.
-
-We don't want the SendFlex ValidationException to reach:
-
-@ExceptionHandler(ValidationException.class)
-
-because that would propagate the error to the REST exception-handling layer.
-
-We handle it inside AddressValidationServiceImpl.
-
-
----
-
-Your final AddressValidationServiceImpl relevant section
-
-After the change, these methods should look like this:
-
-@Override
-public AddressValidationResponseDTO validateAddress(
-    AddressValidationRequest addressValidationRequest) throws JsonProcessingException {
-
-  AddressValidationRequestDTO addressValidationRequestDTO =
-      buildAddressValidationRequestDTO(addressValidationRequest);
-
-  Mono<AddressValidationResponseDTO> monoAddressValidationResponse =
-      sendFlexWebClientService.sendFlexRequest(
-          ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT,
-          HttpMethod.POST,
-          Map.of(),
-          addressValidationRequestDTO,
-          AddressValidationResponseDTO.class);
-
-  try {
-
-    AddressValidationResponseDTO addressValidationResponseDTO =
-        monoAddressValidationResponse.block();
-
-    persistAddressValidationResponse(
-        addressValidationRequestDTO,
-        addressValidationResponseDTO);
-
-    return addressValidationResponseDTO;
-
-  } catch (ValidationException exception) {
-
-    log.warn(
-        new LogBuilder()
-            .withReason(exception.getMessage())
-            .withMessage("SendFlex address validation failed")
-            .toString());
-
-    persistAddressValidationValidationFailure(
-        addressValidationRequestDTO,
-        exception);
-
-    return buildAddressValidationErrorResponse(addressValidationRequest);
-
-  } catch (Exception exception) {
-
-    persistAddressValidationFailure(
-        addressValidationRequestDTO,
-        exception);
-
-    throw new ShippingIntegrationException(
-        "An unexpected error occurred while saving address validation response "
-            + exception.getMessage(),
-        exception);
-  }
-}
-
-private SendFlexRecordDto persistAddressValidationValidationFailure(
-    AddressValidationRequestDTO addressValidationRequestDTO,
-    ValidationException exception) {
-
-  SendFlexRecordDto sendFlexRecordDto =
-      SendFlexRecordDto.builder()
-          .requestObject(addressValidationRequestDTO)
-          .responseObject(exception.getMessage())
-          .statusCode(null)
-          .apiCode(ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT)
-          .build();
-
-  return sendFlexRecordUtil.saveSendflexRecord(sendFlexRecordDto);
-}
-
-private AddressValidationResponseDTO buildAddressValidationErrorResponse(
-    AddressValidationRequest addressValidationRequest) {
-
-  AddressValidationResponseDTO responseDTO =
-      new AddressValidationResponseDTO();
-
-  responseDTO.setAddressValid(false);
-
-  AddressToValidate addressToValidate =
-      new AddressToValidate();
-
-  Address address = addressValidationRequest.getAddress();
-
-  if (address != null) {
-    addressToValidate.setName(address.getName());
-    addressToValidate.setAddressLines(address.getAddressLines());
-    addressToValidate.setCity(address.getCity());
-    addressToValidate.setState(address.getState());
-    addressToValidate.setCountryCode(address.getCountry());
-    addressToValidate.setResidential(address.isResidential());
-    addressToValidate.setContact(
-        Contact.builder()
-            .name(address.getName())
-            .phone(address.getPhoneNumber())
-            .email(address.getEmailAddress())
-            .build());
-  }
-
-  responseDTO.setAddressToValidate(addressToValidate);
-
-  return responseDTO;
-}
-
-
----
-
-Tests — what to change
-
-Your existing tests can mostly stay.
-
-Add these tests to AddressValidationServiceImplTest
-
-Test 1 — 400/ValidationException should NOT propagate
-
-@Test
-void validateAddress_shouldNotPropagateValidationException() throws JsonProcessingException {
-
-  when(ocmWebClientService.getUserConfigDataFromOCM(any(), any()))
-      .thenReturn(userConfigResponseDTO);
-
-  ValidationException validationException =
-      new ValidationException(
-          "Data is not valid: [Invalid address]",
-          "[Invalid address]");
-
-  when(sendFlexWebClientService.sendFlexRequest(
-          anyString(),
-          any(),
-          anyMap(),
-          any(),
-          eq(AddressValidationResponseDTO.class)))
-      .thenReturn(Mono.error(validationException));
-
-  when(sendFlexRecordUtil.saveSendflexRecord(any(SendFlexRecordDto.class)))
-      .thenReturn(SendFlexRecordDto.builder().build());
-
-  AddressValidationResponseDTO result =
-      addressValidationService.validateAddress(validRequest);
-
-  assertNotNull(result);
-  assertFalse(result.isAddressValid());
-
-  verify(sendFlexRecordUtil, times(1))
-      .saveSendflexRecord(
-          argThat(record -> record.getStatusCode() == null));
-}
-
-You'll need:
-
-import com.cardinalhealth.adv.shipping.integration.api.exception.ValidationException;
-import static org.mockito.ArgumentMatchers.argThat;
-
-
----
-
-Test 2 — existing unexpected exception behavior
-
-Keep your existing:
-
-validateAddress_shouldThrowShippingIntegrationException_whenDataIntegrityViolationExceptionFromSendFlexRequest()
-
-That verifies:
-
-unexpected error
-       ↓
-ShippingIntegrationException
-
-which should still happen.
-
-
----
-
-Test 3 — persistence status is null
-
-Add:
-
-@Test
-void persistAddressValidationValidationFailure_shouldSaveNullStatus() {
-
-  AddressValidationRequestDTO requestDTO =
-      new AddressValidationRequestDTO();
-
-  ValidationException exception =
-      new ValidationException(
-          "Data is not valid: [Invalid address]",
-          "[Invalid address]");
-
-  when(sendFlexRecordUtil.saveSendflexRecord(
-      any(SendFlexRecordDto.class)))
-      .thenReturn(SendFlexRecordDto.builder().build());
-
-  SendFlexRecordDto result =
-      addressValidationService
-          .persistAddressValidationValidationFailure(
-              requestDTO,
-              exception);
-
-  assertNotNull(result);
-}
-
-However, because the method is private, you shouldn't test it directly. So actually skip this test and verify the DTO through the validateAddress_shouldNotPropagateValidationException() test above.
-
-
----
-
-One small correction to your existing test
-
-Your existing test expects:
-
-.statusCode("FAILURE")
-
-but your production constant is:
-
-public static final String FAILURE = "failure";
-
-So this test:
-
-.statusCode("FAILURE")
-
-is potentially inconsistent with production.
-
-Prefer:
-
-.statusCode(ServiceCommonConstants.FAILURE)
-
-or:
-
-.statusCode(FAILURE)
-
-depending on your imports.
-
-
----
-
-Final file-by-file checklist
-
-File	Method	Action
-
-SendFlexWebClientService	sendFlexRequest()	MODIFY
-SendFlexWebClientService	handleErrorMap()	MODIFY
-RetryConfig	isRetryable()	MODIFY — remove ERROR log
-AddressValidationServiceImpl	validateAddress()	MODIFY
-AddressValidationServiceImpl	persistAddressValidationValidationFailure()	ADD
-AddressValidationServiceImpl	buildAddressValidationErrorResponse()	ADD
-AddressValidationServiceImpl	persistAddressValidationFailure()	NO CHANGE
-AddressValidationController	—	NO CHANGE
-SendFlexRecordUtil	—	NO CHANGE
-SendFlexRecordDto	—	NO CHANGE
-GlobalExceptionHandler	—	NO CHANGE
-
-
-Most important behavior
-
-After implementation, when SendFlex returns 400 from /AddressValidation:
-
-400
- ↓
-RetryConfig says NOT retryable
- ↓
-handleErrorMap()
- ↓
-WARN
- ↓
-ValidationException
- ↓
-validateAddress() catches ValidationException
- ↓
-persist statusCode = null
- ↓
-NO ShippingIntegrationException
- ↓
-return AddressValidationResponseDTO(addressValid=false)
- ↓
-Controller returns response
-
-And for a 500/timeout/connection issue:
-
-500 / timeout / connection
- ↓
-retry where applicable
- ↓
-ERROR
- ↓
-existing failure persistence
- ↓
-statusCode = failure
- ↓
-ShippingIntegrationException
-
-That is the implementation I would use for this story because it fixes the alert noise without globally hiding genuine SendFlex failures.    
+field count
++
+field-name fingerprint
++
+field-type fingerprint
+
+For example:
+
+AddressRequest
+4 fields
+addressLine1:String
+city:String
+state:String
+zipCode:String
+
+gets a fingerprint such as:
+
+4|addressLine1|city|state|zipCode
+
+Then we don't compare that DTO against hundreds/thousands of unrelated DTOs.
+
+That becomes important if you're comparing entire enterprise repositories rather than two small services.
+
+My recommended production flow
+
+Java Files
+    ↓
+Parallel parsing
+    ↓
+DTO extraction
+    ↓
+Normalization
+    ↓
+Fingerprint/index
+    ↓
+Candidate filtering
+    ↓
+Parallel similarity calculation
+    ↓
+Best-match selection
+    ↓
+CSV + Excel
+
+This gives you the speed of multithreading without blindly doing every DTO × every DTO comparison.
+
+One caveat: the current implementation treats addressLine1:String and street:String as different fields. That's intentional. Automatically assuming those are equivalent can produce bad commonization recommendations. A next-level version can add a configurable semantic field-name mapping (e.g. zipCode, postalCode, zip) so those can be flagged as possible semantic matches rather than incorrectly classified as exact matches.
