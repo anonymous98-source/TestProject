@@ -1,274 +1,374 @@
-Absolutely. I would continue your existing Confluence in the same style, adding the API details and shipment-fetching flow, then leave a clear placeholder for the Frontend section. I’ve also kept Key Points under each relevant topic, rather than creating one large Key Points section.
+Yes. Based on the story acceptance criteria and this AddressValidationServiceImpl, I see the main change point clearly.
+
+What the story is asking
+
+Currently, a SendFlex address-validation 4xx error is being treated as an application ERROR and propagated upward. That causes it to appear in the Splunk error/alert dashboard.
+
+The desired behavior is:
+
+1. SendFlex address-validation 4xx/validation failures should be treated as WARN.
 
 
----
-
-Introduction
-
-Beacon provides tracking and visibility for shipments created through Navigator as well as shipments originating from external systems. These externally created shipments are referred to as Non-Navigator Shipments or Unverified Data.
-
-Non-Navigator shipments are primarily identified by matching the Bill-to Third-Party Account Number with the Billing Group account number associated with the user's location. This allows Beacon to provide a consolidated view of shipments even when they were not created directly through Navigator.
-
-Key Points
-
-Shipment Identification
-Non-Navigator shipments are identified using the Bill-to Third-Party Account Number and the corresponding Billing Group account.
-
-Shipment Visibility
-These shipments are displayed along with Navigator-originating shipments in Shipment Tracking and Shipping History.
-
-Include Unverified Data
-Users with both Navigator and Beacon access can select Include Unverified Data from the Location dropdown to view these shipments.
-
-Beacon-Only Users
-Users who only have Beacon access will not see the Location dropdown and will automatically see the relevant shipment data available to them.
-
-Data Availability
-Since these shipments originate outside Navigator, some Navigator-specific fields may be unavailable and can appear as blank or N/A.
-
-External Shipment Data
-External data, including Surround data, can provide additional shipment and operational information, especially for Beacon+ customers.
-
-Broader Beacon Capabilities
-Non-Navigator shipments can also support features such as POD, notifications, exports, reporting, and data streaming, depending on the shipment type and customer configuration.
+2. They should not propagate to the next exception-handling layer as an ERROR.
 
 
----
-
-Backend
-
-FedEx Surround Data Flow
-
-The v1/api/surround-tracking-events API is exposed by the Surround Edge Service to receive shipment/tracking details directly from FedEx.
-
-Flow:
-
-FedEx Tracking Event
-→ SurroundTrackingEventController.handleTrackingEvent()
-→ Validate FDX_SIGNATURE and FDX_SUBSCRIPTION_ID headers
-→ Generate expected signature using FedexTrackingEventHashCalculator.encode(requestBody)
-→ Compare FedEx signature with expected signature
-→ If valid, call publish(requestBody)
-→ Parse payload using ObjectMapper
-→ Create SurroundDataDTO and TrackingWebhookDTO
-→ Call TrackingWebhookService.webhookPublisher()
-→ TrackingWebhookServiceImpl.publish()
-→ Serialize TrackingWebhookDTO using ObjectMapper
-→ MessagingPublisher.publish()
-→ Publish message to GCP topic advship-tracking-fedex-surround
-→ Tracking Data Processor consumes and processes the message
-
-Key Points
-
-The Surround Edge Service acts as the entry point for shipment/tracking details received from FedEx.
-
-The v1/api/surround-tracking-events API is specifically exposed for FedEx to send the shipment details.
-
-Requests are validated for the required FedEx headers and signature before publishing.
-
-The incoming FedEx payload is transformed into the application's TrackingWebhookDTO.
-
-The validated event is published to GCP Pub/Sub for further processing.
-
-Unknown fields in the FedEx payload are ignored using FAIL_ON_UNKNOWN_PROPERTIES = false.
+3. The persisted SendFlex record should have the error/status information set appropriately — the story specifically says NULL errors should not appear in the alert dashboard.
 
 
-
----
-
-Tracking Data Processor Listener
-
-Once the message is published to the GCP topic, the Tracking Data Processor consumes the message using TrackingWebhookFedexListener.
-
-Flow:
-
-TrackingWebhookFedexListener.configure()
-→ Subscribe using MessagingSubscriber
-→ receiveMessage(PubsubMessage)
-→ Read Pub/Sub message payload
-→ Deserialize payload into FedexWrapper
-→ Extract TrackingFedexDTO using wrapper.getJsonPayload()
-→ Generate GCS file path using Billing Account Number + Tracking Number + Timestamp
-→ If Cold Storage is enabled → Upload complete FedEx payload to GCS bucket
-→ Check Global Subscription configuration
-→ If enabled → RetryableMessageProcessor.processMessage()
-→ If disabled → TrackingWebhookFedexPublisher.trackingFedexPublisher()
-→ Continue with shipment processing
-
-Key Points
-
-TrackingWebhookFedexListener is the Pub/Sub consumer for FedEx Surround tracking events.
-
-The listener converts the incoming message into FedexWrapper and extracts the actual TrackingFedexDTO.
-
-The Billing Account Number and Tracking Number are used to construct the GCS cold-storage path.
-
-When Cold Storage is enabled, the original FedEx payload is stored in GCS for archival/reprocessing purposes.
-
-Processing behavior is controlled by the Global Subscription Enabled configuration:
-
-Enabled: Uses the newer RetryableMessageProcessor flow.
-
-Disabled: Uses the existing TrackingWebhookFedexPublisher flow.
+4. Actual unexpected/technical failures should continue to behave as errors.
 
 
 
 
 ---
 
-Final Data Persistence
+Where the problem is in your class
 
-After the FedEx data is consumed and processed by the Tracking Data Processor, the application internally calls the Tracking Resource Application through its POST API.
+The most important section is this:
 
-The processed shipment information is ultimately persisted in the shipment table.
+try {
+    addressValidationResponseDTO = monoAddressValidationResponse.block();
+    persistAddressValidationResponse(addressValidationRequestDTO, addressValidationResponseDTO);
 
-Flow:
+} catch (Exception exception) {
+    persistAddressValidationFailure(addressValidationRequestDTO, exception);
+    throw new ShippingIntegrationException(
+          "An unexpected error occurred while saving address validation response "
+              + exception.getMessage(), exception);
+}
 
-FedEx
-→ Surround Edge Service
-→ GCP Pub/Sub – advship-tracking-fedex-surround
-→ TrackingWebhookFedexListener.receiveMessage()
-→ TrackingFedexDTO
-→ RetryableMessageProcessor / TrackingWebhookFedexPublisher
-→ POST API to Tracking Resource Application
-→ Shipment processing
-→ shipment table
-→ Available for Beacon tracking/history
+Current flow
 
-Key Points
+If SendFlex returns something like:
 
-The Tracking Resource Application is responsible for the final shipment persistence.
+HTTP 400
 
-The Tracking Data Processor internally invokes the Tracking Resource Application through its POST API.
+the WebClient can throw an exception when this executes:
 
-The processed FedEx shipment information is stored in the shipment table.
+monoAddressValidationResponse.block();
 
-This persisted data is subsequently available to Beacon for tracking and history views.
+That exception enters:
 
+catch (Exception exception)
 
+Then you do:
 
----
+persistAddressValidationFailure(...);
 
-Shipment Creation / Storage
+And inside that method:
 
-The Tracking Resource Application uses shipmentBook as the aspect name for saving new shipment information.
+.statusCode(FAILURE)
 
-The overall persistence flow can therefore be represented as:
+Then you do:
 
-Tracking Data Processor
-→ POST API to Tracking Resource Application
-→ shipmentBook aspect
-→ Save/Process Shipment
-→ shipment table
+throw new ShippingIntegrationException(...)
 
-Key Points
+So the flow becomes:
 
-shipmentBook is the aspect used for saving new shipment information.
+SendFlex 400
+     ↓
+WebClient throws exception
+     ↓
+catch (Exception)
+     ↓
+persist failure with FAILURE
+     ↓
+throw ShippingIntegrationException
+     ↓
+higher layer sees exception
+     ↓
+ERROR logging
+     ↓
+Splunk alert
 
-FedEx Non-Navigator shipment data eventually reaches the shipment persistence layer through this flow.
-
-The shipment table acts as the persistence layer for the shipment information.
-
-
-
----
-
-Shipment Fetching / Tracking Details
-
-Once the shipment data is stored, Beacon retrieves shipment information through the Tracking API.
-
-API
-
-POST
-v1/api/tracking
-
-The API is exposed through the advship-tracking-api application.
-
-Flow
-
-v1/api/tracking
-→ TrackingDetailsController
-→ TrackingDetailsServiceImpl
-→ Internal call to /tracking/entities
-→ advship-tracking-resource
-→ trackingDetails aspect
-→ Fetch shipment information
-→ Return shipment data to Tracking API
-→ Beacon
-
-Key Points
-
-v1/api/tracking is the API used for fetching shipment/tracking information.
-
-TrackingDetailsController acts as the API entry point.
-
-TrackingDetailsServiceImpl handles the service-level processing.
-
-The Tracking API internally calls /tracking/entities in advship-tracking-resource.
-
-trackingDetails is the aspect used for fetching shipment information.
-
-The response contains the shipment data required by Beacon's Tracking/History views.
-
+That is exactly what the story is trying to eliminate.
 
 
 ---
 
-Non-Navigator Shipment Filtering
+First change: don't catch every exception the same way
 
-The shipment-fetching flow also supports filtering based on the isNonNavigator() flag.
+This:
 
-When isNonNavigator() = false:
+catch (Exception exception)
 
-→ Fetches all applicable shipments, including both Navigator and Non-Navigator shipments.
+is too broad for this story.
 
-When isNonNavigator() = true:
+You need to distinguish between:
 
-→ Fetches only Non-Navigator shipments.
+Expected SendFlex validation 4xx
 
-Flow:
+These should:
 
-v1/api/tracking
-→ TrackingDetailsController
-→ TrackingDetailsServiceImpl
-→ /tracking/entities
-→ trackingDetails aspect
-→ Check isNonNavigator()
-→ false → Navigator + Non-Navigator shipments
-→ true → Non-Navigator shipments only
+WARN
+↓
+do not propagate
+↓
+don't create ERROR alert
 
-Key Points
+Unexpected technical exceptions
 
-isNonNavigator() determines whether the query should return only Non-Navigator shipments or all applicable shipments.
+For example:
 
-False allows both Navigator and Non-Navigator shipment data to be returned.
+connection problems
 
-True restricts the result to Non-Navigator shipment data.
+timeout
 
-This filtering is important for supporting the Include Unverified Data functionality in Beacon.
+5xx
 
+serialization problems
+
+database problems
+
+
+These should continue to be treated as actual errors.
 
 
 ---
 
-Frontend
+Second change: persistAddressValidationFailure()
 
-> Frontend implementation details to be added here.
+This method is another important place:
+
+SendFlexRecordDto persistAddressValidationFailure(
+        AddressValidationRequestDTO addressValidationRequestDTO,
+        Exception e) {
+
+    String detailMessage = e.getMessage();
+    Throwable cause = e.getCause();
+    String causeMessage = (cause != null) ? cause.getMessage() : null;
+
+    SendFlexRecordDto sendFlexRecordDto =
+            SendFlexRecordDto.builder()
+                    .requestObject(addressValidationRequestDTO)
+                    .responseObject(detailMessage + causeMessage)
+                    .statusCode(FAILURE)
+                    .apiCode(ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT)
+                    .build();
+
+    return sendFlexRecordUtil.saveSendflexRecord(sendFlexRecordDto);
+}
+
+The problematic part for the story is:
+
+.statusCode(FAILURE)
+
+The story explicitly says:
+
+> If we mark the errors as NULL, then the errors will not appear in the alert dashboard.
 
 
 
-Key Points
+So for the expected SendFlex address-validation 4xx case, you likely want:
 
-Location dropdown and Include Unverified Data behavior
+.statusCode(null)
 
-API integration with v1/api/tracking
+rather than:
 
-Handling of Navigator vs. Non-Navigator shipment results
+.statusCode(FAILURE)
 
-Shipment Tracking and Shipping History UI
+However, I would not blindly change FAILURE to null for every exception.
 
-Display of missing/N/A fields
+Otherwise you'll hide genuine application/technical failures from the alert dashboard.
 
-Beacon+ fields and additional shipment information
 
-POD and other shipment-level actions
+---
+
+Recommended structure
+
+I'd change the logic to something along these lines:
+
+try {
+    addressValidationResponseDTO = monoAddressValidationResponse.block();
+
+    persistAddressValidationResponse(
+        addressValidationRequestDTO,
+        addressValidationResponseDTO);
+
+} catch (WebClientResponseException exception) {
+
+    if (exception.getStatusCode().is4xxClientError()) {
+        log.warn(
+            new LogBuilder()
+                .withMessage("SendFlex address validation returned a 4xx validation error")
+                .toString());
+
+        persistAddressValidationFailure(
+            addressValidationRequestDTO,
+            exception);
+
+        return null;
+    }
+
+    persistAddressValidationFailure(
+        addressValidationRequestDTO,
+        exception);
+
+    throw new ShippingIntegrationException(
+        "An unexpected error occurred while saving address validation response "
+            + exception.getMessage(),
+        exception);
+
+} catch (Exception exception) {
+
+    persistAddressValidationFailure(
+        addressValidationRequestDTO,
+        exception);
+
+    throw new ShippingIntegrationException(
+        "An unexpected error occurred while saving address validation response "
+            + exception.getMessage(),
+        exception);
+}
+
+And then specifically for the validation error:
+
+.statusCode(null)
+
+But there is an important question here.
+
+
+---
+
+⚠️ I would NOT implement the above blindly yet
+
+The biggest thing I need to verify is what SendFlexWebClientService.sendFlexRequest() actually does.
+
+Because this determines the correct implementation.
+
+You currently have:
+
+Mono<AddressValidationResponseDTO> monoAddressValidationResponse =
+    sendFlexWebClientService.sendFlexRequest(
+        ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT,
+        HttpMethod.POST,
+        Map.of(),
+        addressValidationRequestDTO,
+        AddressValidationResponseDTO.class);
+
+The actual exception handling may already happen inside:
+
+SendFlexWebClientService
+
+For example, it could be doing something like:
+
+.retrieve()
+.onStatus(...)
+.bodyToMono(...)
+
+or it could be wrapping the exception into a custom exception.
+
+So before changing this class, I would inspect:
+
+SendFlexWebClientService
+
+especially the implementation of:
+
+sendFlexRequest(...)
+
+and look for:
+
+onStatus()
+WebClientResponseException
+4xx
+5xx
+HttpStatusCode
+
+
+---
+
+One more important issue
+
+This method currently does:
+
+responseObject(detailMessage + causeMessage)
+
+If both are null, that's not ideal.
+
+Also, the story says the error should be logged as WARN, not necessarily that the error details should be completely removed from the persisted record.
+
+I would separate:
+
+Logging
+
+log.warn(...)
+
+from
+
+Alert dashboard status
+
+.statusCode(null)
+
+Those are two different concerns.
+
+You can still preserve useful SendFlex error information while making the record non-alertable.
+
+
+---
+
+What I think the final flow should be
+
+For a SendFlex address validation request:
+
+Valid address
+
+SendFlex → 200
+       ↓
+AddressValidationResponseDTO
+       ↓
+persist response
+       ↓
+normal flow
+
+Invalid address / expected SendFlex validation 4xx
+
+SendFlex → 4xx
+       ↓
+identify as expected validation error
+       ↓
+log as WARN
+       ↓
+persist record with statusCode = null
+       ↓
+DO NOT throw ShippingIntegrationException
+       ↓
+no ERROR propagation
+       ↓
+no Splunk alert
+
+Genuine technical failure
+
+SendFlex → timeout / connection error / 5xx / unexpected exception
+       ↓
+persist failure
+       ↓
+throw ShippingIntegrationException
+       ↓
+ERROR
+       ↓
+Splunk alert
+
+
+---
+
+So, in your class, the areas to modify are
+
+Location	Change
+
+validateAddress()	Main change — distinguish SendFlex 4xx validation errors from genuine exceptions
+validateAddress()	Log expected 4xx as WARN
+validateAddress()	Don't propagate expected 4xx
+persistAddressValidationFailure()	Allow expected validation errors to be persisted with statusCode = null
+persistAddressValidationResponse()	Probably no change
+buildAddressValidationRequestDTO()	No change
+buildAddressValidationResponse()	No change
+buildValidationDetail()	No change
+buildAddressSuggestionResp()	No change
+fetchProfileCode() / getProfileCodeByCarrier()	No change for this story
+
+
+Most important next step
+
+Send me the SendFlexWebClientService class, especially the sendFlexRequest() method.
+
+That will let me tell you exactly what exception you should catch, exactly where to put the WARN, and exactly how to avoid propagating only the SendFlex 4xx validation errors without accidentally hiding real connectivity/5xx errors.
