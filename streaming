@@ -898,4 +898,4 @@ statusCode = failure
  ↓
 ShippingIntegrationException
 
-That is the implementation I would use for this story because it fixes the alert noise without globally hiding genuine SendFlex failures.
+That is the implementation I would use for this story because it fixes the alert noise without globally hiding genuine SendFlex failures.    
