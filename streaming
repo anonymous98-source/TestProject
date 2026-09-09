@@ -1,19 +1,15 @@
 package com.cardinalhealth.advship.tracking.data.processor.messaging.publisher;
 
 import static com.cardinalhealth.advship.tracking.data.processor.constants.Constants.ADVSHIP_TRACKING;
-import static com.cardinalhealth.advship.tracking.data.processor.constants.Constants.FEDEX_CARRIER;
 import static com.cardinalhealth.advship.tracking.data.processor.constants.Constants.NON_NAVIGATOR;
 import static com.cardinalhealth.advship.tracking.data.processor.constants.Constants.SUCCESS;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -22,12 +18,10 @@ import com.cardinalhealth.advship.tracking.data.processor.model.ShipmentDetailsD
 import com.cardinalhealth.advship.tracking.data.processor.model.request.TrackingNumberRequest;
 import com.cardinalhealth.advship.tracking.data.processor.model.response.CustomerBillingGroupDetailsDTO;
 import com.cardinalhealth.advship.tracking.data.processor.model.response.ShipmentCreatedResponse;
-import com.cardinalhealth.advship.tracking.data.processor.model.response.TrackingWebhookResponse;
 import com.cardinalhealth.advship.tracking.data.processor.service.base.TrackingDataService;
 import com.cardinalhealth.advship.tracking.data.processor.service.base.savefedexlog.SaveFedexJsonService;
 import com.cardinalhealth.advship.tracking.data.processor.service.dto.TrackingEventDTO;
 import com.cardinalhealth.advship.tracking.data.processor.service.dto.TrackingFedexDTO;
-import com.cardinalhealth.advship.tracking.data.processor.service.dto.TrackingEventDTO.Event;
 import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.AddressDTO;
 import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.ContactAndAddressDTO;
 import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.CurrentTrackingInfoDTO;
@@ -35,12 +29,15 @@ import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.E
 import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.LocationContactAndAddressDTO;
 import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.LocationDTO;
 import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.LocationDetailDTO;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.ScanEventDTO;
 import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.ShipperRecipientInfoDTO;
 import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.TrackResultDTO;
 import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.TrackingInfoDTO;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.BillToPartyDTO;
 import com.cardinalhealth.advship.tracking.data.processor.trackingsave.TrackingSave;
 import com.cardinalhealth.advship.tracking.data.processor.trackingsave.publisher.AspNoPhiPublisherRegistry;
 import com.cardinalhealth.advship.tracking.data.processor.utils.FedexToTrackingInputMapper;
+import com.cardinalhealth.advship.tracking.data.processor.model.request.ShipmentDTO;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
@@ -50,7 +47,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -79,6 +75,7 @@ class TrackingWebhookFedexPublisherTest {
 
   @BeforeEach
   void setUp() {
+
     subject =
         new TrackingWebhookFedexPublisher(
             publisher,
@@ -87,48 +84,70 @@ class TrackingWebhookFedexPublisherTest {
             saveFedexJsonService,
             trackingNoPhiDataPublisher);
 
-    mapperMock = org.mockito.Mockito.mockStatic(FedexToTrackingInputMapper.class);
-
-    mapperMock
-        .when(() -> FedexToTrackingInputMapper.convertToCompatibleFormatWithOffset(any()))
-        .thenReturn("2026-09-09T10:00:00+05:30");
-
-    mapperMock
-        .when(() -> FedexToTrackingInputMapper.convertToCompatibleFormatWithoutOffset(any()))
-        .thenReturn("2026-09-09T10:00:00");
-
-    mapperMock
-        .when(() -> FedexToTrackingInputMapper.mapEventTypeFromEventDescriptionStatus(anyString()))
-        .thenReturn("DELIVERED");
-
-    mapperMock
-        .when(() -> FedexToTrackingInputMapper.getBeginDateByType(any(), any()))
-        .thenReturn("2026-09-01");
-
-    mapperMock
-        .when(() -> FedexToTrackingInputMapper.mapFedexToTrackingInput(any(), any()))
-        .thenReturn(mock(Object.class));
+    mapperMock = mockStaticMapper();
   }
 
   @AfterEach
   void tearDown() {
-    mapperMock.close();
+    if (mapperMock != null) {
+      mapperMock.close();
+    }
   }
 
-  // ---------------------------------------------------------------------------
-  // TRACKING NUMBER / ACCOUNT NUMBER HELPERS
-  // ---------------------------------------------------------------------------
+  private MockedStatic<FedexToTrackingInputMapper> mockStaticMapper() {
+
+    MockedStatic<FedexToTrackingInputMapper> mocked =
+        org.mockito.Mockito.mockStatic(FedexToTrackingInputMapper.class);
+
+    mocked
+        .when(() ->
+            FedexToTrackingInputMapper.convertToCompatibleFormatWithOffset(anyString()))
+        .thenReturn("2026-09-09T10:00:00");
+
+    mocked
+        .when(() ->
+            FedexToTrackingInputMapper.convertToCompatibleFormatWithoutOffset(anyString()))
+        .thenReturn("2026-09-09T10:00:00");
+
+    mocked
+        .when(() ->
+            FedexToTrackingInputMapper.mapEventTypeFromEventDescriptionStatus(anyString()))
+        .thenReturn("DELIVERED");
+
+    mocked
+        .when(() ->
+            FedexToTrackingInputMapper.getBeginDateByType(any(), any()))
+        .thenReturn("2026-09-01");
+
+    /*
+     * IMPORTANT:
+     *
+     * mapFedexToTrackingInput() returns ShipmentDTO,
+     * NOT Object.
+     */
+    mocked
+        .when(() ->
+            FedexToTrackingInputMapper.mapFedexToTrackingInput(any(), any()))
+        .thenReturn(mock(ShipmentDTO.class));
+
+    return mocked;
+  }
+
+  // ===========================================================================
+  // NEW NON-NAVIGATOR SHIPMENT
+  // ===========================================================================
 
   @Test
   void shouldProcessNonNavigatorShipmentSuccessfully()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID(null);
 
-    when(trackingDataService.findShipmentDetailsByTrackingNumber(any(TrackingNumberRequest.class)))
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(
+            any(TrackingNumberRequest.class)))
         .thenReturn(shipment);
 
     when(trackingDataService.findBillingGroupIDAndCustomerIdByAccountNumber("123456"))
@@ -137,34 +156,40 @@ class TrackingWebhookFedexPublisherTest {
     ShipmentCreatedResponse response = new ShipmentCreatedResponse();
     response.setStatus(SUCCESS);
 
-    when(trackingDataService.saveTrackingDetailsForNonNavigator(any()))
+    when(trackingDataService.saveTrackingDetailsForNonNavigator(any(ShipmentDTO.class)))
         .thenReturn(response);
 
-    when(trackingNoPhiDataPublisher.publishNoPhiData(anyString(), any()))
+    when(trackingNoPhiDataPublisher.publishNoPhiData(anyString(), any(ShipmentDTO.class)))
         .thenReturn(true);
 
     when(publisher.publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING)))
         .thenReturn(true);
 
-    subject.trackingFedexPublisher(fedex, "{\"tracking\":\"123456789\"}");
+    subject.trackingFedexPublisher(
+        fedex,
+        "{\"tracking\":\"123456789\"}");
 
-    verify(saveFedexJsonService).saveFedexJson("{\"tracking\":\"123456789\"}");
+    verify(saveFedexJsonService)
+        .saveFedexJson("{\"tracking\":\"123456789\"}");
 
     verify(trackingDataService)
-        .saveTrackingDetailsForNonNavigator(any());
+        .saveTrackingDetailsForNonNavigator(any(ShipmentDTO.class));
 
     verify(trackingNoPhiDataPublisher)
-        .publishNoPhiData(anyString(), any());
+        .publishNoPhiData(anyString(), any(ShipmentDTO.class));
 
     verify(publisher)
         .publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING));
   }
 
   @Test
-  void shouldIgnoreNonNavigatorShipmentWhenAccountNumberIsEmpty()
+  void shouldIgnoreShipmentWhenAccountNumberIsEmpty()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createFedexDtoWithoutAccountNumber("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
+
+    when(fedex.getTrackResult().getBillToParties())
+        .thenReturn(Collections.emptyList());
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID(null);
@@ -185,12 +210,17 @@ class TrackingWebhookFedexPublisherTest {
   }
 
   @Test
-  void shouldIgnoreNonNavigatorShipmentWhenAccountNumberIsMasked()
+  void shouldIgnoreShipmentWhenAccountNumberIsNull()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createFedexDtoWithAccountNumber(
-        "123456789",
-        Constants.SHIPPER_ACCOUNT_NUMBER_XXXXXXXXXX);
+    TrackingFedexDTO fedex = createCompleteFedexDto();
+
+    when(fedex.getTrackResult()
+            .getBillToParties()
+            .get(0)
+            .getBillToParty()
+            .getAccountNumber())
+        .thenReturn(null);
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID(null);
@@ -208,10 +238,41 @@ class TrackingWebhookFedexPublisherTest {
   }
 
   @Test
+  void shouldIgnoreShipmentWhenAccountNumberIsMasked()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto();
+
+    when(fedex.getTrackResult()
+            .getBillToParties()
+            .get(0)
+            .getBillToParty()
+            .getAccountNumber())
+        .thenReturn(Constants.SHIPPER_ACCOUNT_NUMBER_XXXXXXXXXX);
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID(null);
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(trackingDataService, never())
+        .saveTrackingDetailsForNonNavigator(any());
+
+    verify(publisher, never())
+        .publish(any(), anyString());
+
+    verify(trackingNoPhiDataPublisher, never())
+        .publishNoPhiData(anyString(), any());
+  }
+
+  @Test
   void shouldNotPublishWhenNonNavigatorSaveFails()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID(null);
@@ -225,10 +286,13 @@ class TrackingWebhookFedexPublisherTest {
     ShipmentCreatedResponse response = new ShipmentCreatedResponse();
     response.setStatus("FAIL");
 
-    when(trackingDataService.saveTrackingDetailsForNonNavigator(any()))
+    when(trackingDataService.saveTrackingDetailsForNonNavigator(any(ShipmentDTO.class)))
         .thenReturn(response);
 
     subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(trackingDataService)
+        .saveTrackingDetailsForNonNavigator(any(ShipmentDTO.class));
 
     verify(trackingNoPhiDataPublisher, never())
         .publishNoPhiData(anyString(), any());
@@ -237,15 +301,15 @@ class TrackingWebhookFedexPublisherTest {
         .publish(any(), anyString());
   }
 
-  // ---------------------------------------------------------------------------
-  // NAVIGATOR / EXISTING SHIPMENT FLOW
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
+  // EXISTING / NAVIGATOR SHIPMENT
+  // ===========================================================================
 
   @Test
   void shouldProcessExistingNavigatorShipment()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID("SHIPMENT-1");
@@ -259,11 +323,13 @@ class TrackingWebhookFedexPublisherTest {
 
     subject.trackingFedexPublisher(fedex, "{}");
 
+    verify(trackingSave)
+        .receiveMessage(
+            any(TrackingEventDTO.class),
+            eq("UNIQUE-ID-1"));
+
     verify(publisher)
         .publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING));
-
-    verify(trackingSave)
-        .receiveMessage(any(TrackingEventDTO.class), eq("UNIQUE-ID-1"));
 
     verify(trackingDataService, never())
         .updateShipment(any());
@@ -273,7 +339,7 @@ class TrackingWebhookFedexPublisherTest {
   void shouldProcessExistingNonNavigatorShipmentAndPopulateCustomerData()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID("SHIPMENT-1");
@@ -309,7 +375,7 @@ class TrackingWebhookFedexPublisherTest {
   void shouldUseFedexAccountNumberWhenSurroundBillToNumberIsBlank()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID("SHIPMENT-1");
@@ -333,13 +399,16 @@ class TrackingWebhookFedexPublisherTest {
 
     verify(trackingDataService)
         .findBillingGroupIDAndCustomerIdByAccountNumber("123456");
+
+    verify(trackingDataService)
+        .updateShipment(any(ShipmentDetailsDTO.class));
   }
 
   @Test
   void shouldNotFetchCustomerDataWhenCustomerAlreadyExists()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID("SHIPMENT-1");
@@ -355,9 +424,7 @@ class TrackingWebhookFedexPublisherTest {
 
     subject.trackingFedexPublisher(fedex, "{}");
 
-    verify(
-            trackingDataService,
-            never())
+    verify(trackingDataService, never())
         .findBillingGroupIDAndCustomerIdByAccountNumber(anyString());
 
     verify(trackingDataService)
@@ -365,10 +432,13 @@ class TrackingWebhookFedexPublisherTest {
   }
 
   @Test
-  void shouldNotFetchCustomerDataWhenBillToNumberIsBlankAndFedexAccountIsBlank()
+  void shouldNotFetchCustomerDataWhenBillToAndFedexAccountAreBlank()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createFedexDtoWithoutAccountNumber("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
+
+    when(fedex.getTrackResult().getBillToParties())
+        .thenReturn(Collections.emptyList());
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID("SHIPMENT-1");
@@ -384,9 +454,7 @@ class TrackingWebhookFedexPublisherTest {
 
     subject.trackingFedexPublisher(fedex, "{}");
 
-    verify(
-            trackingDataService,
-            never())
+    verify(trackingDataService, never())
         .findBillingGroupIDAndCustomerIdByAccountNumber(anyString());
 
     verify(trackingDataService)
@@ -394,10 +462,10 @@ class TrackingWebhookFedexPublisherTest {
   }
 
   @Test
-  void shouldNotUpdateNonNavigatorShipmentWhenSourceIsNavigator()
+  void shouldNotUpdateShipmentWhenSourceIsNavigator()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID("SHIPMENT-1");
@@ -415,15 +483,15 @@ class TrackingWebhookFedexPublisherTest {
         .updateShipment(any());
   }
 
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
   // UNIQUE TRACKING ID
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
 
   @Test
   void shouldSaveTrackingEventWhenUniqueTrackingIdExists()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID("SHIPMENT-1");
@@ -445,14 +513,12 @@ class TrackingWebhookFedexPublisherTest {
   void shouldNotSaveTrackingEventWhenUniqueTrackingIdIsNull()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
-    CurrentTrackingInfoDTO currentTrackingInfo =
-        fedex.getTrackResult()
+    when(fedex.getTrackResult()
             .getTrackingInfo()
-            .getCurrentTrackingInfo();
-
-    when(currentTrackingInfo.getTrackingNumberUniqueId())
+            .getCurrentTrackingInfo()
+            .getTrackingNumberUniqueId())
         .thenReturn(null);
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
@@ -471,19 +537,19 @@ class TrackingWebhookFedexPublisherTest {
         .receiveMessage(any(), anyString());
   }
 
-  // ---------------------------------------------------------------------------
-  // GENERALIZE DATA - NULL / OPTIONAL BRANCHES
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
+  // NULL / OPTIONAL DATA
+  // ===========================================================================
 
   @Test
   void shouldHandleNullTrackResult()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = mock(TrackingFedexDTO.class);
-
-    when(fedex.getTrackResult()).thenReturn(null);
-    when(fedex.getScanEvent()).thenReturn(null);
-    when(fedex.getSurroundInsights()).thenReturn(null);
+    TrackingFedexDTO fedex = TrackingFedexDTO.builder()
+        .trackResult(null)
+        .scanEvent(null)
+        .surroundInsights(null)
+        .build();
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID("SHIPMENT-1");
@@ -506,7 +572,7 @@ class TrackingWebhookFedexPublisherTest {
   void shouldHandleNullEstimatedDeliveryDate()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
     when(fedex.getTrackResult().getEstimatedDeliveryDate())
         .thenReturn(null);
@@ -521,43 +587,17 @@ class TrackingWebhookFedexPublisherTest {
     when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
         .thenReturn(true);
 
-    subject.trackingFedexPublisher(fedex, "{}");
-
-    verify(publisher)
-        .publish(any(), eq(ADVSHIP_TRACKING));
+    assertDoesNotThrow(() ->
+        subject.trackingFedexPublisher(fedex, "{}"));
   }
 
   @Test
   void shouldHandleNullScanEvent()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
-    when(fedex.getScanEvent()).thenReturn(null);
-
-    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
-    shipment.setShipmentID("SHIPMENT-1");
-    shipment.setShipmentSource("NAVIGATOR");
-
-    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
-        .thenReturn(shipment);
-
-    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
-        .thenReturn(true);
-
-    subject.trackingFedexPublisher(fedex, "{}");
-
-    verify(publisher)
-        .publish(any(), eq(ADVSHIP_TRACKING));
-  }
-
-  @Test
-  void shouldHandleScanEventWithoutLocation()
-      throws IOException, ExecutionException, InterruptedException {
-
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
-
-    when(fedex.getScanEvent().getLocation())
+    when(fedex.getScanEvent())
         .thenReturn(null);
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
@@ -570,42 +610,15 @@ class TrackingWebhookFedexPublisherTest {
     when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
         .thenReturn(true);
 
-    subject.trackingFedexPublisher(fedex, "{}");
-
-    verify(publisher)
-        .publish(any(), eq(ADVSHIP_TRACKING));
+    assertDoesNotThrow(() ->
+        subject.trackingFedexPublisher(fedex, "{}"));
   }
 
   @Test
-  void shouldHandleScanEventWithoutAdditionalInfo()
+  void shouldHandleNullOriginAndDestination()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
-
-    when(fedex.getScanEvent().getEventAdditionalInfo())
-        .thenReturn(null);
-
-    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
-    shipment.setShipmentID("SHIPMENT-1");
-    shipment.setShipmentSource("NAVIGATOR");
-
-    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
-        .thenReturn(shipment);
-
-    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
-        .thenReturn(true);
-
-    subject.trackingFedexPublisher(fedex, "{}");
-
-    verify(publisher)
-        .publish(any(), eq(ADVSHIP_TRACKING));
-  }
-
-  @Test
-  void shouldHandleMissingOriginAndDestinationAddresses()
-      throws IOException, ExecutionException, InterruptedException {
-
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
     when(fedex.getTrackResult().getOriginLocation())
         .thenReturn(null);
@@ -623,17 +636,61 @@ class TrackingWebhookFedexPublisherTest {
     when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
         .thenReturn(true);
 
-    subject.trackingFedexPublisher(fedex, "{}");
-
-    verify(publisher)
-        .publish(any(), eq(ADVSHIP_TRACKING));
+    assertDoesNotThrow(() ->
+        subject.trackingFedexPublisher(fedex, "{}"));
   }
 
   @Test
-  void shouldHandleMissingRecipientGpsInformation()
+  void shouldHandleNullScanLocation()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
+
+    when(fedex.getScanEvent().getLocation())
+        .thenReturn(null);
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    assertDoesNotThrow(() ->
+        subject.trackingFedexPublisher(fedex, "{}"));
+  }
+
+  @Test
+  void shouldHandleNullEventAdditionalInfo()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto();
+
+    when(fedex.getScanEvent().getEventAdditionalInfo())
+        .thenReturn(null);
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    assertDoesNotThrow(() ->
+        subject.trackingFedexPublisher(fedex, "{}"));
+  }
+
+  @Test
+  void shouldHandleNullRecipientInfo()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
     when(fedex.getTrackResult().getRecipientInfo())
         .thenReturn(null);
@@ -648,103 +705,19 @@ class TrackingWebhookFedexPublisherTest {
     when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
         .thenReturn(true);
 
-    subject.trackingFedexPublisher(fedex, "{}");
-
-    verify(publisher)
-        .publish(any(), eq(ADVSHIP_TRACKING));
+    assertDoesNotThrow(() ->
+        subject.trackingFedexPublisher(fedex, "{}"));
   }
 
-  // ---------------------------------------------------------------------------
-  // BILLING GROUP MAPPING
-  // ---------------------------------------------------------------------------
-
-  @Test
-  void shouldMapSingleCustomerAndBillingGroup() {
-
-    TrackingEventDTO event = TrackingEventDTO.builder().build();
-
-    CustomerBillingGroupDetailsDTO billingGroup =
-        createCustomerBillingGroup("CUSTOMER-1", "BG-1");
-
-    invokeMapCustomerBillingGroupData(event, List.of(billingGroup));
-
-    assertEquals("CUSTOMER-1", event.getCustomerId());
-    assertEquals("BG-1", event.getBillingGroupId());
-  }
-
-  @Test
-  void shouldNotMapCustomerAndBillingGroupWhenListIsEmpty() {
-
-    TrackingEventDTO event = TrackingEventDTO.builder().build();
-
-    invokeMapCustomerBillingGroupData(event, Collections.emptyList());
-
-    assertEquals(null, event.getCustomerId());
-    assertEquals(null, event.getBillingGroupId());
-  }
-
-  @Test
-  void shouldNotMapCustomerAndBillingGroupWhenMultipleCustomersExist() {
-
-    TrackingEventDTO event = TrackingEventDTO.builder().build();
-
-    CustomerBillingGroupDetailsDTO first =
-        createCustomerBillingGroup("CUSTOMER-1", "BG-1");
-
-    CustomerBillingGroupDetailsDTO second =
-        createCustomerBillingGroup("CUSTOMER-2", "BG-2");
-
-    invokeMapCustomerBillingGroupData(event, List.of(first, second));
-
-    assertEquals(null, event.getCustomerId());
-    assertEquals(null, event.getBillingGroupId());
-  }
-
-  @Test
-  void shouldMapCustomerButLeaveBillingGroupEmptyWhenMultipleBillingGroupsExist() {
-
-    TrackingEventDTO event = TrackingEventDTO.builder().build();
-
-    CustomerBillingGroupDetailsDTO billingGroup =
-        mock(CustomerBillingGroupDetailsDTO.class);
-
-    when(billingGroup.getCustomerId()).thenReturn("CUSTOMER-1");
-
-    CustomerBillingGroupDetailsDTO.BillingGroupDTO bg1 =
-        mock(CustomerBillingGroupDetailsDTO.BillingGroupDTO.class);
-
-    CustomerBillingGroupDetailsDTO.BillingGroupDTO bg2 =
-        mock(CustomerBillingGroupDetailsDTO.BillingGroupDTO.class);
-
-    when(billingGroup.getBillingGroups())
-        .thenReturn(List.of(bg1, bg2));
-
-    invokeMapCustomerBillingGroupData(event, List.of(billingGroup));
-
-    assertEquals("CUSTOMER-1", event.getCustomerId());
-    assertEquals("", event.getBillingGroupId());
-  }
-
-  @Test
-  void shouldHandleNullCustomerBillingGroupEntry() {
-
-    TrackingEventDTO event = TrackingEventDTO.builder().build();
-
-    invokeMapCustomerBillingGroupData(event, Collections.singletonList(null));
-
-    assertEquals("", event.getCustomerId());
-    assertEquals("", event.getBillingGroupId());
-  }
-
-  // ---------------------------------------------------------------------------
-  // LOGGING / PUBLISH RESULT
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
+  // PUBLISH RESULT
+  // ===========================================================================
 
   @Test
   void shouldHandlePublisherReturningFalse()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID("SHIPMENT-1");
@@ -767,7 +740,7 @@ class TrackingWebhookFedexPublisherTest {
   void shouldHandleNoPhiPublisherReturningFalse()
       throws IOException, ExecutionException, InterruptedException {
 
-    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+    TrackingFedexDTO fedex = createCompleteFedexDto();
 
     ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
     shipment.setShipmentID(null);
@@ -781,85 +754,136 @@ class TrackingWebhookFedexPublisherTest {
     ShipmentCreatedResponse response = new ShipmentCreatedResponse();
     response.setStatus(SUCCESS);
 
-    when(trackingDataService.saveTrackingDetailsForNonNavigator(any()))
+    when(trackingDataService.saveTrackingDetailsForNonNavigator(any(ShipmentDTO.class)))
         .thenReturn(response);
 
-    when(trackingNoPhiDataPublisher.publishNoPhiData(anyString(), any()))
+    when(trackingNoPhiDataPublisher.publishNoPhiData(anyString(), any(ShipmentDTO.class)))
         .thenReturn(false);
 
     when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
         .thenReturn(true);
 
-    subject.trackingFedexPublisher(fedex, "{}");
+    assertDoesNotThrow(() ->
+        subject.trackingFedexPublisher(fedex, "{}"));
 
     verify(trackingNoPhiDataPublisher)
-        .publishNoPhiData(anyString(), any());
+        .publishNoPhiData(anyString(), any(ShipmentDTO.class));
 
     verify(publisher)
         .publish(any(), eq(ADVSHIP_TRACKING));
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST DATA HELPERS
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
+  // TEST DATA
+  // ===========================================================================
 
-  private TrackingFedexDTO createCompleteFedexDto(String trackingNumber) {
+  private TrackingFedexDTO createCompleteFedexDto() {
 
-    TrackingFedexDTO fedex = mock(TrackingFedexDTO.class);
+    /*
+     * RETURNS_DEEP_STUBS is intentional here.
+     *
+     * It allows:
+     *
+     * trackResult.getBillToParties()
+     *     .get(0)
+     *     .getBillToParty()
+     *     .getAccountNumber()
+     *
+     * without having to manually construct the BillToParty hierarchy.
+     */
+    TrackResultDTO trackResult =
+        mock(TrackResultDTO.class, RETURNS_DEEP_STUBS);
 
-    TrackResultDTO trackResult = mock(TrackResultDTO.class);
-    TrackingInfoDTO trackingInfo = mock(TrackingInfoDTO.class);
+    TrackingInfoDTO trackingInfo =
+        mock(TrackingInfoDTO.class, RETURNS_DEEP_STUBS);
+
     CurrentTrackingInfoDTO currentTrackingInfo =
         mock(CurrentTrackingInfoDTO.class);
 
-    when(fedex.getTrackResult()).thenReturn(trackResult);
+    when(trackResult.getTrackingInfo())
+        .thenReturn(trackingInfo);
 
-    when(trackResult.getTrackingInfo()).thenReturn(trackingInfo);
-    when(trackingInfo.getCurrentTrackingInfo()).thenReturn(currentTrackingInfo);
+    when(trackingInfo.getCurrentTrackingInfo())
+        .thenReturn(currentTrackingInfo);
 
     when(currentTrackingInfo.getTrackingNumber())
-        .thenReturn(trackingNumber);
+        .thenReturn("123456789");
 
     when(currentTrackingInfo.getTrackingNumberUniqueId())
         .thenReturn("UNIQUE-ID-1");
 
-    // Bill-to-party hierarchy
-    var billToParty = mock(
-        com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto
-            .BillToPartyDTO.class);
+    when(currentTrackingInfo.getCarrierCode())
+        .thenReturn("FDXE");
 
-    when(trackResult.getBillToParties())
-        .thenReturn(List.of(billToParty));
+    when(currentTrackingInfo.getCarrierSCACCode())
+        .thenReturn("FXFE");
 
-    when(billToParty.getBillToParty())
-        .thenReturn(billToParty);
-
-    when(billToParty.getAccountNumber())
+    /*
+     * Bill-to hierarchy.
+     *
+     * No explicit BillToPartyDTO construction is required.
+     */
+    when(trackResult.getBillToParties()
+            .get(0)
+            .getBillToParty()
+            .getAccountNumber())
         .thenReturn("123456");
 
+    // -------------------------------------------------------------------------
     // Origin
-    LocationDTO originLocation = mock(LocationDTO.class);
-    LocationDetailDTO originDetail = mock(LocationDetailDTO.class);
+    // -------------------------------------------------------------------------
+
+    LocationDTO originLocation =
+        mock(LocationDTO.class, RETURNS_DEEP_STUBS);
+
+    LocationDetailDTO originDetail =
+        mock(LocationDetailDTO.class, RETURNS_DEEP_STUBS);
+
     LocationContactAndAddressDTO originContact =
         mock(LocationContactAndAddressDTO.class);
-    AddressDTO originAddress = mock(AddressDTO.class);
 
-    when(trackResult.getOriginLocation()).thenReturn(originLocation);
-    when(originLocation.getLocationDetail()).thenReturn(originDetail);
-    when(originDetail.getLocationContactAndAddress()).thenReturn(originContact);
-    when(originContact.getAddress()).thenReturn(originAddress);
+    AddressDTO originAddress =
+        mock(AddressDTO.class);
 
-    when(originAddress.getCity()).thenReturn("Pune");
-    when(originAddress.getPostalCode()).thenReturn("411001");
-    when(originAddress.getStateOrProvinceCode()).thenReturn("MH");
-    when(originAddress.getCountryCode()).thenReturn("IN");
+    when(trackResult.getOriginLocation())
+        .thenReturn(originLocation);
 
+    when(originLocation.getLocationDetail())
+        .thenReturn(originDetail);
+
+    when(originDetail.getLocationContactAndAddress())
+        .thenReturn(originContact);
+
+    when(originContact.getAddress())
+        .thenReturn(originAddress);
+
+    when(originAddress.getCity())
+        .thenReturn("Pune");
+
+    when(originAddress.getPostalCode())
+        .thenReturn("411001");
+
+    when(originAddress.getStateOrProvinceCode())
+        .thenReturn("MH");
+
+    when(originAddress.getCountryCode())
+        .thenReturn("IN");
+
+    // -------------------------------------------------------------------------
     // Destination
-    LocationDTO destinationLocation = mock(LocationDTO.class);
-    LocationDetailDTO destinationDetail = mock(LocationDetailDTO.class);
+    // -------------------------------------------------------------------------
+
+    LocationDTO destinationLocation =
+        mock(LocationDTO.class, RETURNS_DEEP_STUBS);
+
+    LocationDetailDTO destinationDetail =
+        mock(LocationDetailDTO.class, RETURNS_DEEP_STUBS);
+
     LocationContactAndAddressDTO destinationContact =
         mock(LocationContactAndAddressDTO.class);
-    AddressDTO destinationAddress = mock(AddressDTO.class);
+
+    AddressDTO destinationAddress =
+        mock(AddressDTO.class);
 
     when(trackResult.getDestinationLocation())
         .thenReturn(destinationLocation);
@@ -873,14 +897,24 @@ class TrackingWebhookFedexPublisherTest {
     when(destinationContact.getAddress())
         .thenReturn(destinationAddress);
 
-    when(destinationAddress.getCity()).thenReturn("Mumbai");
-    when(destinationAddress.getPostalCode()).thenReturn("400001");
-    when(destinationAddress.getStateOrProvinceCode()).thenReturn("MH");
-    when(destinationAddress.getCountryCode()).thenReturn("IN");
+    when(destinationAddress.getCity())
+        .thenReturn("Mumbai");
 
-    // Estimated delivery
+    when(destinationAddress.getPostalCode())
+        .thenReturn("400001");
+
+    when(destinationAddress.getStateOrProvinceCode())
+        .thenReturn("MH");
+
+    when(destinationAddress.getCountryCode())
+        .thenReturn("IN");
+
+    // -------------------------------------------------------------------------
+    // Estimated Delivery
+    // -------------------------------------------------------------------------
+
     EstimatedDeliveryDateDTO estimatedDeliveryDate =
-        mock(EstimatedDeliveryDateDTO.class);
+        mock(EstimatedDeliveryDateDTO.class, RETURNS_DEEP_STUBS);
 
     when(trackResult.getEstimatedDeliveryDate())
         .thenReturn(estimatedDeliveryDate);
@@ -894,65 +928,18 @@ class TrackingWebhookFedexPublisherTest {
     when(estimatedDeliveryDate.getArrivalStatusCode())
         .thenReturn("ON_TIME");
 
-    var newDate = mock(
-        com.cardinalhealth.advship.tracking.data.processor.service.dto
-            .fedexdto.EstimatedDeliveryDateDTO.NewDate.class);
+    when(estimatedDeliveryDate.getNewDate().getBegins())
+        .thenReturn("2026-09-10T10:00:00+05:30");
 
-    when(estimatedDeliveryDate.getNewDate())
-        .thenReturn(newDate);
+    when(estimatedDeliveryDate.getNewDate().getEnds())
+        .thenReturn("2026-09-12T10:00:00+05:30");
 
-    when(newDate.getBegins())
-        .thenReturn("2026-09-10");
+    // -------------------------------------------------------------------------
+    // Recipient
+    // -------------------------------------------------------------------------
 
-    when(newDate.getEnds())
-        .thenReturn("2026-09-12");
-
-    // Scan event
-    var scanEvent =
-        mock(com.cardinalhealth.advship.tracking.data.processor.service.dto
-            .fedexdto.ScanEventDTO.class);
-
-    when(fedex.getScanEvent()).thenReturn(scanEvent);
-
-    when(scanEvent.getEventDescription())
-        .thenReturn("Delivered");
-
-    when(scanEvent.getEventCreateTime())
-        .thenReturn("2026-09-09T10:00:00");
-
-    when(scanEvent.getDelayDescription())
-        .thenReturn("NONE");
-
-    LocationDetailDTO scanLocation =
-        mock(LocationDetailDTO.class);
-
-    LocationContactAndAddressDTO scanContact =
-        mock(LocationContactAndAddressDTO.class);
-
-    AddressDTO scanAddress =
-        mock(AddressDTO.class);
-
-    when(scanEvent.getLocation())
-        .thenReturn(scanLocation);
-
-    when(scanLocation.getLocationContactAndAddress())
-        .thenReturn(scanContact);
-
-    when(scanContact.getAddress())
-        .thenReturn(scanAddress);
-
-    when(scanAddress.getCity())
-        .thenReturn("Pune");
-
-    when(scanAddress.getStateOrProvinceCode())
-        .thenReturn("MH");
-
-    when(scanEvent.getEventAdditionalInfo())
-        .thenReturn(Map.of(Constants.RECIPIENT_SIGNEE, "John"));
-
-    // Recipient / GPS address
     ShipperRecipientInfoDTO recipientInfo =
-        mock(ShipperRecipientInfoDTO.class);
+        mock(ShipperRecipientInfoDTO.class, RETURNS_DEEP_STUBS);
 
     ContactAndAddressDTO recipientContact =
         mock(ContactAndAddressDTO.class);
@@ -970,72 +957,57 @@ class TrackingWebhookFedexPublisherTest {
         .thenReturn(recipientAddress);
 
     when(recipientAddress.concatenateAddressFields())
-        .thenReturn("Pune, Maharashtra, India");
+        .thenReturn("Mumbai, Maharashtra, India");
 
-    when(fedex.getSurroundInsights())
-        .thenReturn("INSIGHT");
+    // -------------------------------------------------------------------------
+    // Scan Event
+    // -------------------------------------------------------------------------
 
-    return fedex;
-  }
+    ScanEventDTO scanEvent =
+        mock(ScanEventDTO.class, RETURNS_DEEP_STUBS);
 
-  private TrackingFedexDTO createFedexDtoWithAccountNumber(
-      String trackingNumber,
-      String accountNumber) {
+    when(scanEvent.getEventDescription())
+        .thenReturn("Delivered");
 
-    TrackingFedexDTO fedex = mock(TrackingFedexDTO.class);
-    TrackResultDTO trackResult = mock(TrackResultDTO.class);
+    when(scanEvent.getEventCreateTime())
+        .thenReturn("2026-09-09T10:00:00+05:30");
 
-    when(fedex.getTrackResult())
-        .thenReturn(trackResult);
+    when(scanEvent.getDelayDescription())
+        .thenReturn("NONE");
 
-    CurrentTrackingInfoDTO currentTrackingInfo =
-        mock(CurrentTrackingInfoDTO.class);
+    when(scanEvent.getEventCode())
+        .thenReturn("DL");
 
-    TrackingInfoDTO trackingInfo =
-        mock(TrackingInfoDTO.class);
+    when(scanEvent.getEventReasonDescription())
+        .thenReturn("Delivered");
 
-    when(trackResult.getTrackingInfo())
-        .thenReturn(trackingInfo);
+    when(scanEvent.getLocation()
+            .getLocationContactAndAddress()
+            .getAddress()
+            .getCity())
+        .thenReturn("Pune");
 
-    when(trackingInfo.getCurrentTrackingInfo())
-        .thenReturn(currentTrackingInfo);
+    when(scanEvent.getLocation()
+            .getLocationContactAndAddress()
+            .getAddress()
+            .getStateOrProvinceCode())
+        .thenReturn("MH");
 
-    when(currentTrackingInfo.getTrackingNumber())
-        .thenReturn(trackingNumber);
+    when(scanEvent.getEventAdditionalInfo())
+        .thenReturn(Map.of(
+            Constants.RECIPIENT_SIGNEE,
+            "John"));
 
-    var billToParty =
-        mock(com.cardinalhealth.advship.tracking.data.processor.service.dto
-            .fedexdto.BillToPartyDTO.class);
+    // -------------------------------------------------------------------------
+    // Final DTO
+    // -------------------------------------------------------------------------
 
-    when(trackResult.getBillToParties())
-        .thenReturn(List.of(billToParty));
-
-    when(billToParty.getBillToParty())
-        .thenReturn(billToParty);
-
-    when(billToParty.getAccountNumber())
-        .thenReturn(accountNumber);
-
-    return fedex;
-  }
-
-  private TrackingFedexDTO createFedexDtoWithoutAccountNumber(
-      String trackingNumber) {
-
-    TrackingFedexDTO fedex = mock(TrackingFedexDTO.class);
-
-    TrackResultDTO trackResult = mock(TrackResultDTO.class);
-    TrackingInfoDTO trackingInfo = mock(TrackingInfoDTO.class);
-    CurrentTrackingInfoDTO currentTrackingInfo =
-        mock(CurrentTrackingInfoDTO.class);
-
-    when(fedex.getTrackResult()).thenReturn(trackResult);
-    when(trackResult.getTrackingInfo()).thenReturn(trackingInfo);
-    when(trackingInfo.getCurrentTrackingInfo()).thenReturn(currentTrackingInfo);
-    when(currentTrackingInfo.getTrackingNumber()).thenReturn(trackingNumber);
-
-    when(trackResult.getBillToParties())
-        .thenReturn(Collections.emptyList());
+    TrackingFedexDTO fedex =
+        TrackingFedexDTO.builder()
+            .trackResult(trackResult)
+            .scanEvent(scanEvent)
+            .surroundInsights(null)
+            .build();
 
     return fedex;
   }
@@ -1060,31 +1032,5 @@ class TrackingWebhookFedexPublisherTest {
         .thenReturn(billingGroupId);
 
     return dto;
-  }
-
-  /**
-   * Calls the private mapCustomerBillingGroupData method.
-   *
-   * Reflection is intentionally kept here because this private method has
-   * several independent branches which are easiest to cover directly.
-   */
-  private void invokeMapCustomerBillingGroupData(
-      TrackingEventDTO event,
-      List<CustomerBillingGroupDetailsDTO> billingGroups) {
-
-    try {
-      var method =
-          TrackingWebhookFedexPublisher.class.getDeclaredMethod(
-              "mapCustomerBillingGroupData",
-              TrackingEventDTO.class,
-              List.class);
-
-      method.setAccessible(true);
-      method.invoke(subject, event, billingGroups);
-
-    } catch (Exception e) {
-      throw new AssertionError(
-          "Unable to invoke mapCustomerBillingGroupData", e);
-    }
   }
 }
