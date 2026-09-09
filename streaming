@@ -1,992 +1,108 @@
-Yes — now the root cause is clear from your log.
+Yes — your test suite is now basically fixed. 19 tests ran and only 1 failed, and the failure is purely because of an unnecessary Mockito stub.
 
-The test is not actually stuck in sendFlexRequest(). It is retrying because your test sends a request body with HttpMethod.GET.
+The failing test is:
 
-Your log explicitly says:
+sendFlexRequest - non shipment endpoint does not use performance URL
 
-Request must not have a body: GET /test-endpoint
+The problem is at line 868, where the test is probably doing something like:
 
-Then your RetryConfig sees that failure as a non-WebClientResponseException, returns true, and WebClient retries it. That's why it looks like it's looping.
+when(perfTestDeterminer.usePerfTestUrl()).thenReturn(true);
 
-There is also a second issue:
+But for a non-shipment endpoint, usePerfTestUrl() is never called, so Mockito reports the stub as unnecessary.
+
+Replace only this test
+
+Use this version:
+
+@Test
+void sendFlexRequest_nonShipmentEndpoint_doesNotUsePerformanceUrl() throws Exception {
+
+    String endpoint = "some-other-endpoint";
+
+    server.enqueue(
+        new MockResponse()
+            .setResponseCode(200)
+            .setHeader("Content-Type", "application/json")
+            .setBody("{}"));
+
+    // No stubbing of perfTestDeterminer is required here.
+    // Non-shipment endpoints do not call usePerfTestUrl().
+    subject
+        .sendFlexRequest(
+            endpoint,
+            HttpMethod.POST,
+            Map.of(),
+            new Object(),
+            Object.class)
+        .block();
+
+    RecordedRequest recordedRequest =
+        server.takeRequest(2, TimeUnit.SECONDS);
+
+    assertNotNull(recordedRequest);
+
+    assertEquals(
+        "/some-other-endpoint",
+        recordedRequest.getPath());
+
+    assertEquals(
+        "POST",
+        recordedRequest.getMethod());
+}
+
+Important
+
+Remove this line from that test if you currently have it:
+
+when(perfTestDeterminer.usePerfTestUrl()).thenReturn(true);
+
+or:
 
 when(perfTestDeterminer.usePerfTestUrl()).thenReturn(false);
 
-in @BeforeEach is an unnecessary Mockito stub because many tests don't invoke perfTestDeterminer. Remove it from setup and stub it only in the tests that need it.
+You do not need either one for this test.
 
-Replace your entire SendFlexWebClientServiceMockServerTest with this
+Your test should simply verify that:
 
-package com.cardinalhealth.adv.shipping.integration.api.service.webclient;
+some-other-endpoint
+        ↓
+normal URL
+        ↓
+server
 
-import static com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants.ACCEPT_TYPE;
-import static com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants.CONTENT_TYPE;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+rather than the performance URL.
 
-import com.cardinalhealth.adv.shipping.integration.api.config.AdvShippingIntegrationApiProperties;
-import com.cardinalhealth.adv.shipping.integration.api.config.RetryConfig;
-import com.cardinalhealth.adv.shipping.integration.api.constants.ServiceCommonConstants;
-import com.cardinalhealth.adv.shipping.integration.api.exception.ResourceNotFoundException;
-import com.cardinalhealth.adv.shipping.integration.api.exception.UnAuthorizedException;
-import com.cardinalhealth.adv.shipping.integration.api.exception.ValidationException;
-import com.cardinalhealth.adv.shipping.integration.api.standin.PerfTestDeterminer;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
-import okhttp3.mockwebserver.MockResponse;
-import okhttp3.mockwebserver.MockWebServer;
-import okhttp3.mockwebserver.RecordedRequest;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
-import reactor.core.publisher.Mono;
+Why the other tests pass
 
-@ExtendWith(MockitoExtension.class)
-class SendFlexWebClientServiceMockServerTest {
+Your output confirms the important changes are working:
 
-    private MockWebServer server;
+Address validation 400 → WARN ✅
 
-    private ObjectMapper objectMapper;
+Normal 400 → ERROR ✅
 
-    private AdvShippingIntegrationApiProperties properties;
+401 → ERROR ✅
 
-    private RetryConfig retryConfig;
+404 → ERROR ✅
 
-    @Mock
-    private PerfTestDeterminer perfTestDeterminer;
+Address validation error mapping → ValidationException ✅
 
-    private SendFlexWebClientService subject;
+POST requests → working ✅
 
-    @BeforeEach
-    void setup() throws IOException {
+Performance URL logic → working ✅
 
-        server = new MockWebServer();
-        server.start();
+List request → working ✅
 
-        objectMapper = new ObjectMapper();
+Nested error extraction → working ✅
 
-        properties =
-                new AdvShippingIntegrationApiProperties();
 
-        AdvShippingIntegrationApiProperties.ApiConfig apiConfig =
-                new AdvShippingIntegrationApiProperties.ApiConfig();
+So don't change the production code for this failure. Just replace that one test with the above.
 
-        apiConfig.setUrl(server.url("/").toString());
-        apiConfig.setPerfTestUrl(server.url("/perf/").toString());
-        apiConfig.setKey("key");
+After replacement, run:
 
-        AdvShippingIntegrationApiProperties.SendFlex sendflex =
-                new AdvShippingIntegrationApiProperties.SendFlex();
+./gradlew test --tests "*SendFlexWebClientServiceMockServerTest"
 
-        sendflex.setApi(apiConfig);
+You should get:
 
-        properties.setSendflex(sendflex);
+20 tests completed, 0 failed
 
-        retryConfig = new RetryConfig();
-
-        WebClient webClient =
-                WebClient.builder().build();
-
-        subject =
-                new SendFlexWebClientService(
-                        retryConfig,
-                        webClient,
-                        properties,
-                        perfTestDeterminer);
-    }
-
-    @AfterEach
-    void tearDown() throws IOException {
-
-        if (server != null) {
-            server.shutdown();
-        }
-    }
-
-    // ========================================================================
-    // sendFlexRequest
-    // ========================================================================
-
-    @Test
-    @DisplayName("sendFlexRequest - successful POST with headers")
-    void sendFlexRequest_success_withHeaders()
-            throws Exception {
-
-        JsonNode requestBody =
-                objectMapper
-                        .createObjectNode()
-                        .put("key", "value");
-
-        server.enqueue(
-                new MockResponse()
-                        .setResponseCode(200)
-                        .setHeader(
-                                HttpHeaders.CONTENT_TYPE,
-                                "application/json")
-                        .setBody(
-                                objectMapper.writeValueAsString(
-                                        requestBody)));
-
-        JsonNode result =
-                subject
-                        .sendFlexRequest(
-                                "test-endpoint",
-                                HttpMethod.POST,
-                                Map.of(
-                                        "headerNm",
-                                        "headerVal"),
-                                requestBody,
-                                JsonNode.class)
-                        .block();
-
-        assertThat(result)
-                .isEqualTo(requestBody);
-
-        RecordedRequest request =
-                server.takeRequest(
-                        2,
-                        TimeUnit.SECONDS);
-
-        assertThat(request).isNotNull();
-        assertThat(request.getMethod())
-                .isEqualTo("POST");
-        assertThat(request.getPath())
-                .isEqualTo("/test-endpoint");
-
-        assertThat(
-                request.getHeaders()
-                        .get("headerNm"))
-                .isEqualTo("headerVal");
-
-        assertThat(
-                request.getHeaders()
-                        .get("X-API-Key"))
-                .isEqualTo("key");
-
-        assertThat(
-                request.getHeaders()
-                        .get("Content-Type"))
-                .isEqualTo(CONTENT_TYPE);
-
-        assertThat(
-                request.getHeaders()
-                        .get("Accept"))
-                .isEqualTo(ACCEPT_TYPE);
-    }
-
-    @Test
-    @DisplayName("sendFlexRequest - successful POST with empty headers")
-    void sendFlexRequest_success_withEmptyHeaders()
-            throws Exception {
-
-        JsonNode requestBody =
-                objectMapper
-                        .createObjectNode()
-                        .put("key", "value");
-
-        server.enqueue(
-                new MockResponse()
-                        .setResponseCode(200)
-                        .setHeader(
-                                HttpHeaders.CONTENT_TYPE,
-                                "application/json")
-                        .setBody("{}"));
-
-        JsonNode result =
-                subject
-                        .sendFlexRequest(
-                                "test-endpoint",
-                                HttpMethod.POST,
-                                Collections.emptyMap(),
-                                requestBody,
-                                JsonNode.class)
-                        .block();
-
-        assertNotNull(result);
-
-        RecordedRequest request =
-                server.takeRequest(
-                        2,
-                        TimeUnit.SECONDS);
-
-        assertNotNull(request);
-    }
-
-    // ========================================================================
-    // handleErrorMap - address validation 400
-    // ========================================================================
-
-    @Test
-    @DisplayName(
-            "handleErrorMap - address validation 400 returns ValidationException")
-    void handleErrorMap_addressValidation400_returnsValidationException() {
-
-        WebClientResponseException exception =
-                mock(WebClientResponseException.class);
-
-        when(exception.getMessage())
-                .thenReturn("400 Bad Request");
-
-        when(exception.getStatusCode())
-                .thenReturn(HttpStatus.BAD_REQUEST);
-
-        when(exception.getResponseBodyAsString())
-                .thenReturn(
-                        "{\"contents\":\"Invalid address\"}");
-
-        Exception result =
-                subject.handleErrorMap(
-                        exception,
-                        ServiceCommonConstants
-                                .ADDRESS_VALIDATION_ENDPOINT);
-
-        assertThat(result)
-                .isInstanceOf(
-                        ValidationException.class);
-
-        assertThat(result.getMessage())
-                .contains("Data is not valid");
-
-        assertThat(result.getMessage())
-                .contains("Invalid address");
-    }
-
-    // ========================================================================
-    // handleErrorMap - normal 400
-    // ========================================================================
-
-    @Test
-    @DisplayName(
-            "handleErrorMap - normal 400 returns ValidationException")
-    void handleErrorMap_normal400_returnsValidationException() {
-
-        WebClientResponseException exception =
-                mock(WebClientResponseException.class);
-
-        when(exception.getMessage())
-                .thenReturn("400 Bad Request");
-
-        when(exception.getStatusCode())
-                .thenReturn(HttpStatus.BAD_REQUEST);
-
-        when(exception.getResponseBodyAsString())
-                .thenReturn(
-                        "{\"contents\":\"Invalid data\"}");
-
-        Exception result =
-                subject.handleErrorMap(
-                        exception,
-                        "some-other-endpoint");
-
-        assertThat(result)
-                .isInstanceOf(
-                        ValidationException.class);
-
-        assertThat(result.getMessage())
-                .contains("Data is not valid");
-    }
-
-    // ========================================================================
-    // handleErrorMap - 401
-    // ========================================================================
-
-    @Test
-    @DisplayName(
-            "handleErrorMap - 401 returns UnAuthorizedException")
-    void handleErrorMap_401_returnsUnauthorizedException() {
-
-        WebClientResponseException exception =
-                mock(WebClientResponseException.class);
-
-        when(exception.getMessage())
-                .thenReturn("401 Unauthorized");
-
-        when(exception.getStatusCode())
-                .thenReturn(HttpStatus.UNAUTHORIZED);
-
-        when(exception.getResponseBodyAsString())
-                .thenReturn(
-                        "{\"contents\":\"Unauthorized\"}");
-
-        Exception result =
-                subject.handleErrorMap(
-                        exception,
-                        "some-endpoint");
-
-        assertThat(result)
-                .isInstanceOf(
-                        UnAuthorizedException.class);
-
-        assertThat(result.getMessage())
-                .contains("Not authorized");
-    }
-
-    // ========================================================================
-    // handleErrorMap - 404
-    // ========================================================================
-
-    @Test
-    @DisplayName(
-            "handleErrorMap - 404 returns ResourceNotFoundException")
-    void handleErrorMap_404_returnsResourceNotFoundException() {
-
-        WebClientResponseException exception =
-                mock(WebClientResponseException.class);
-
-        when(exception.getMessage())
-                .thenReturn("404 Not Found");
-
-        when(exception.getStatusCode())
-                .thenReturn(HttpStatus.NOT_FOUND);
-
-        when(exception.getResponseBodyAsString())
-                .thenReturn(
-                        "{\"contents\":\"Resource not found\"}");
-
-        Exception result =
-                subject.handleErrorMap(
-                        exception,
-                        "some-endpoint");
-
-        assertThat(result)
-                .isInstanceOf(
-                        ResourceNotFoundException.class);
-
-        assertThat(result.getMessage())
-                .contains("Resource is not found");
-    }
-
-    // ========================================================================
-    // handleErrorMap - unknown status
-    // ========================================================================
-
-    @Test
-    @DisplayName(
-            "handleErrorMap - unknown status returns RuntimeException")
-    void handleErrorMap_unknownStatus_returnsRuntimeException() {
-
-        WebClientResponseException exception =
-                mock(WebClientResponseException.class);
-
-        when(exception.getMessage())
-                .thenReturn("418 I'm a teapot");
-
-        when(exception.getStatusCode())
-                .thenReturn(HttpStatus.I_AM_A_TEAPOT);
-
-        when(exception.getResponseBodyAsString())
-                .thenReturn(
-                        "{\"contents\":\"Unknown HTTP error\"}");
-
-        Exception result =
-                subject.handleErrorMap(
-                        exception,
-                        "some-endpoint");
-
-        assertThat(result)
-                .isInstanceOf(RuntimeException.class);
-
-        assertThat(result.getMessage())
-                .contains("Unknown HTTP error occurred");
-
-        assertThat(result.getMessage())
-                .contains("418");
-    }
-
-    // ========================================================================
-    // handleErrorMap - generic exception
-    // ========================================================================
-
-    @Test
-    @DisplayName(
-            "handleErrorMap - generic Throwable returns RuntimeException")
-    void handleErrorMap_genericThrowable_returnsRuntimeException() {
-
-        Throwable throwable =
-                new RuntimeException(
-                        "Something went wrong");
-
-        Exception result =
-                subject.handleErrorMap(
-                        throwable,
-                        "some-endpoint");
-
-        assertThat(result)
-                .isInstanceOf(RuntimeException.class);
-
-        assertThat(result.getMessage())
-                .contains("Unexpected error occurred");
-
-        assertThat(result.getMessage())
-                .contains("Something went wrong");
-    }
-
-    // ========================================================================
-    // Error body parsing
-    // ========================================================================
-
-    @Test
-    @DisplayName(
-            "handleErrorMap - malformed response body")
-    void handleErrorMap_malformedResponseBody() {
-
-        WebClientResponseException exception =
-                mock(WebClientResponseException.class);
-
-        when(exception.getMessage())
-                .thenReturn("400 Bad Request");
-
-        when(exception.getStatusCode())
-                .thenReturn(HttpStatus.BAD_REQUEST);
-
-        when(exception.getResponseBodyAsString())
-                .thenReturn("not-valid-json");
-
-        Exception result =
-                subject.handleErrorMap(
-                        exception,
-                        "some-other-endpoint");
-
-        assertThat(result)
-                .isInstanceOf(
-                        ValidationException.class);
-
-        assertThat(result.getMessage())
-                .contains("Data is not valid");
-    }
-
-    @Test
-    @DisplayName(
-            "handleErrorMap - nested contents are extracted")
-    void handleErrorMap_nestedContents_areExtracted() {
-
-        WebClientResponseException exception =
-                mock(WebClientResponseException.class);
-
-        when(exception.getMessage())
-                .thenReturn("400 Bad Request");
-
-        when(exception.getStatusCode())
-                .thenReturn(HttpStatus.BAD_REQUEST);
-
-        when(exception.getResponseBodyAsString())
-                .thenReturn(
-                        """
-                        {
-                          "errors": [
-                            {
-                              "contents": "Invalid city"
-                            },
-                            {
-                              "details": {
-                                "contents": "Invalid postal code"
-                              }
-                            }
-                          ]
-                        }
-                        """);
-
-        Exception result =
-                subject.handleErrorMap(
-                        exception,
-                        "some-endpoint");
-
-        assertThat(result.getMessage())
-                .contains("Invalid city");
-
-        assertThat(result.getMessage())
-                .contains("Invalid postal code");
-    }
-
-    // ========================================================================
-    // findErrors
-    // ========================================================================
-
-    @Test
-    @DisplayName(
-            "findErrors - object with contents")
-    void findErrors_objectWithContents()
-            throws Exception {
-
-        JsonNode root =
-                objectMapper.readTree(
-                        """
-                        {
-                          "contents": "Invalid address",
-                          "details": {
-                            "contents": "Invalid city"
-                          }
-                        }
-                        """);
-
-        Set<String> errors =
-                new java.util.LinkedHashSet<>();
-
-        subject.findErrors(
-                root,
-                errors);
-
-        assertThat(errors)
-                .containsExactly(
-                        "Invalid address",
-                        "Invalid city");
-    }
-
-    @Test
-    @DisplayName(
-            "findErrors - array")
-    void findErrors_array()
-            throws Exception {
-
-        JsonNode root =
-                objectMapper.readTree(
-                        """
-                        [
-                          {
-                            "contents": "Invalid city"
-                          },
-                          {
-                            "contents": "Invalid state"
-                          }
-                        ]
-                        """);
-
-        Set<String> errors =
-                new java.util.LinkedHashSet<>();
-
-        subject.findErrors(
-                root,
-                errors);
-
-        assertThat(errors)
-                .containsExactly(
-                        "Invalid city",
-                        "Invalid state");
-    }
-
-    @Test
-    @DisplayName(
-            "findErrors - primitive")
-    void findErrors_primitive()
-            throws Exception {
-
-        JsonNode root =
-                objectMapper.readTree(
-                        "\"simple-value\"");
-
-        Set<String> errors =
-                new java.util.LinkedHashSet<>();
-
-        subject.findErrors(
-                root,
-                errors);
-
-        assertThat(errors)
-                .isEmpty();
-    }
-
-    @Test
-    @DisplayName(
-            "findErrors - object without contents")
-    void findErrors_objectWithoutContents()
-            throws Exception {
-
-        JsonNode root =
-                objectMapper.readTree(
-                        """
-                        {
-                          "message": "invalid",
-                          "code": "400"
-                        }
-                        """);
-
-        Set<String> errors =
-                new java.util.LinkedHashSet<>();
-
-        subject.findErrors(
-                root,
-                errors);
-
-        assertThat(errors)
-                .isEmpty();
-    }
-
-    // ========================================================================
-    // sendFlexListRequest
-    // ========================================================================
-
-    @Test
-    @DisplayName(
-            "sendFlexListRequest - successful response")
-    void sendFlexListRequest_success()
-            throws Exception {
-
-        JsonNode jsonNode1 =
-                objectMapper
-                        .createObjectNode()
-                        .put("key", "value1");
-
-        JsonNode jsonNode2 =
-                objectMapper
-                        .createObjectNode()
-                        .put("key", "value2");
-
-        var jsonArray =
-                objectMapper
-                        .createArrayNode()
-                        .add(jsonNode1)
-                        .add(jsonNode2);
-
-        JsonNode requestBody =
-                objectMapper
-                        .createObjectNode()
-                        .put("key", "value");
-
-        server.enqueue(
-                new MockResponse()
-                        .setResponseCode(200)
-                        .setHeader(
-                                HttpHeaders.CONTENT_TYPE,
-                                "application/json")
-                        .setBody(
-                                objectMapper.writeValueAsString(
-                                        jsonArray)));
-
-        List<JsonNode> result =
-                subject
-                        .sendFlexListRequest(
-                                "test-endpoint",
-                                HttpMethod.POST,
-                                Map.of(
-                                        "headerNm",
-                                        "headerVal"),
-                                requestBody,
-                                new ParameterizedTypeReference<
-                                        List<JsonNode>>() {})
-                        .block();
-
-        assertThat(result)
-                .containsExactly(
-                        jsonNode1,
-                        jsonNode2);
-
-        RecordedRequest request =
-                server.takeRequest(
-                        2,
-                        TimeUnit.SECONDS);
-
-        assertThat(request).isNotNull();
-
-        assertThat(request.getMethod())
-                .isEqualTo("POST");
-
-        assertThat(request.getPath())
-                .isEqualTo("/test-endpoint");
-
-        assertThat(
-                request.getHeaders()
-                        .get("headerNm"))
-                .isEqualTo("headerVal");
-
-        assertThat(
-                request.getHeaders()
-                        .get("X-API-Key"))
-                .isEqualTo("key");
-
-        assertThat(
-                request.getHeaders()
-                        .get("Content-Type"))
-                .isEqualTo(CONTENT_TYPE);
-
-        assertThat(
-                request.getHeaders()
-                        .get("Accept"))
-                .isEqualTo(ACCEPT_TYPE);
-    }
-
-    // ========================================================================
-    // sendFlexListRequest - error
-    // ========================================================================
-
-    @Test
-    @DisplayName(
-            "sendFlexListRequest - 400 maps to ValidationException")
-    void sendFlexListRequest_400_mapsValidationException() {
-
-        server.enqueue(
-                new MockResponse()
-                        .setResponseCode(400)
-                        .setHeader(
-                                HttpHeaders.CONTENT_TYPE,
-                                "application/json")
-                        .setBody(
-                                "{\"contents\":\"Invalid request\"}"));
-
-        Throwable exception =
-                assertThrows(
-                        Throwable.class,
-                        () ->
-                                subject
-                                        .sendFlexListRequest(
-                                                "some-endpoint",
-                                                HttpMethod.POST,
-                                                Collections.emptyMap(),
-                                                Map.of(
-                                                        "test",
-                                                        "value"),
-                                                new ParameterizedTypeReference<
-                                                        List<String>>() {})
-                                        .block());
-
-        Throwable cause = exception;
-
-        while (cause != null
-                && !(cause instanceof ValidationException)) {
-            cause = cause.getCause();
-        }
-
-        assertThat(cause)
-                .isInstanceOf(
-                        ValidationException.class);
-    }
-
-    // ========================================================================
-    // Normal URL
-    // ========================================================================
-
-    @Test
-    @DisplayName(
-            "sendFlexRequest - shipment book uses normal URL")
-    void sendFlexRequest_usesNormalUrl()
-            throws Exception {
-
-        when(perfTestDeterminer.usePerfTestUrl())
-                .thenReturn(false);
-
-        server.enqueue(
-                new MockResponse()
-                        .setResponseCode(200)
-                        .setHeader(
-                                HttpHeaders.CONTENT_TYPE,
-                                "application/json")
-                        .setBody("{}"));
-
-        JsonNode requestBody =
-                objectMapper
-                        .createObjectNode()
-                        .put("key", "value");
-
-        JsonNode result =
-                subject
-                        .sendFlexRequest(
-                                ServiceCommonConstants
-                                        .SHIPMENT_BOOK_SUB_URI,
-                                HttpMethod.POST,
-                                Collections.emptyMap(),
-                                requestBody,
-                                JsonNode.class)
-                        .block();
-
-        assertNotNull(result);
-
-        RecordedRequest request =
-                server.takeRequest(
-                        2,
-                        TimeUnit.SECONDS);
-
-        assertNotNull(request);
-
-        assertThat(request.getPath())
-                .contains(
-                        ServiceCommonConstants
-                                .SHIPMENT_BOOK_SUB_URI);
-    }
-
-    // ========================================================================
-    // Performance URL
-    // ========================================================================
-
-    @Test
-    @DisplayName(
-            "sendFlexRequest - shipment book uses performance URL")
-    void sendFlexRequest_usesPerformanceUrl()
-            throws Exception {
-
-        when(perfTestDeterminer.usePerfTestUrl())
-                .thenReturn(true);
-
-        server.enqueue(
-                new MockResponse()
-                        .setResponseCode(200)
-                        .setHeader(
-                                HttpHeaders.CONTENT_TYPE,
-                                "application/json")
-                        .setBody("{}"));
-
-        JsonNode requestBody =
-                objectMapper
-                        .createObjectNode()
-                        .put("key", "value");
-
-        JsonNode result =
-                subject
-                        .sendFlexRequest(
-                                ServiceCommonConstants
-                                        .SHIPMENT_BOOK_SUB_URI,
-                                HttpMethod.POST,
-                                Collections.emptyMap(),
-                                requestBody,
-                                JsonNode.class)
-                        .block();
-
-        assertNotNull(result);
-
-        RecordedRequest request =
-                server.takeRequest(
-                        2,
-                        TimeUnit.SECONDS);
-
-        assertNotNull(request);
-
-        assertThat(request.getPath())
-                .contains(
-                        ServiceCommonConstants
-                                .SHIPMENT_BOOK_SUB_URI);
-    }
-
-    // ========================================================================
-    // Non shipment endpoint
-    // ========================================================================
-
-    @Test
-    @DisplayName(
-            "sendFlexRequest - non shipment endpoint does not use performance URL")
-    void sendFlexRequest_nonShipmentEndpoint()
-            throws Exception {
-
-        when(perfTestDeterminer.usePerfTestUrl())
-                .thenReturn(true);
-
-        server.enqueue(
-                new MockResponse()
-                        .setResponseCode(200)
-                        .setHeader(
-                                HttpHeaders.CONTENT_TYPE,
-                                "application/json")
-                        .setBody("{}"));
-
-        JsonNode requestBody =
-                objectMapper
-                        .createObjectNode()
-                        .put("key", "value");
-
-        JsonNode result =
-                subject
-                        .sendFlexRequest(
-                                "some-other-endpoint",
-                                HttpMethod.POST,
-                                Collections.emptyMap(),
-                                requestBody,
-                                JsonNode.class)
-                        .block();
-
-        assertNotNull(result);
-
-        RecordedRequest request =
-                server.takeRequest(
-                        2,
-                        TimeUnit.SECONDS);
-
-        assertNotNull(request);
-
-        assertThat(request.getPath())
-                .isEqualTo(
-                        "/some-other-endpoint");
-    }
-}
-
-The critical fixes are these
-
-1. Removed this from setup()
-
-when(perfTestDeterminer.usePerfTestUrl())
-    .thenReturn(false);
-
-That was causing:
-
-Unnecessary stubbings detected
-line 114
-
-Now it is only stubbed in the three tests that actually call it.
-
-2. Changed GET + body to POST
-
-Your failing tests had:
-
-HttpMethod.GET,
-requestBody
-
-That's invalid with MockWebServer.
-
-They are now:
-
-HttpMethod.POST,
-requestBody
-
-This is the main reason your test was repeatedly retrying.
-
-3. No @SpringBootTest
-
-The class remains a lightweight unit test:
-
-@ExtendWith(MockitoExtension.class)
-
-so you shouldn't get the 14-second Spring Boot startup anymore.
-
-
----
-
-About this warning
-
-This:
-
-Mockito is currently self-attaching to enable the inline-mock-maker
-
-is not the reason your tests are failing.
-
-It's a JDK 21/Mockito warning about future Mockito/JDK behavior. You can address it later in your Gradle configuration. Don't change your tests because of that warning.
-
-One thing to check before running
-
-Your production sendFlexRequest() should currently have the body handling you decided on:
-
-.body(
-    requestBody == null
-        ? BodyInserters.empty()
-        : BodyInserters.fromValue(requestBody))
-
-If it still has:
-
-.bodyValue(requestBody == null ? Mono.empty() : requestBody)
-
-then don't test the null body path yet—the production implementation itself needs to be corrected first.
-
-With the class above, there are no GET requests carrying a body and no global Mockito stubbing that gets unused, so the two problems shown in your latest output are removed.
+The Mockito self-attaching/Java agent messages are warnings, not the cause of this failure.
