@@ -1,108 +1,1090 @@
-Yes — your test suite is now basically fixed. 19 tests ran and only 1 failed, and the failure is purely because of an unnecessary Mockito stub.
+package com.cardinalhealth.advship.tracking.data.processor.messaging.publisher;
 
-The failing test is:
+import static com.cardinalhealth.advship.tracking.data.processor.constants.Constants.ADVSHIP_TRACKING;
+import static com.cardinalhealth.advship.tracking.data.processor.constants.Constants.FEDEX_CARRIER;
+import static com.cardinalhealth.advship.tracking.data.processor.constants.Constants.NON_NAVIGATOR;
+import static com.cardinalhealth.advship.tracking.data.processor.constants.Constants.SUCCESS;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
-sendFlexRequest - non shipment endpoint does not use performance URL
+import com.cardinalhealth.advship.tracking.data.processor.constants.Constants;
+import com.cardinalhealth.advship.tracking.data.processor.model.ShipmentDetailsDTO;
+import com.cardinalhealth.advship.tracking.data.processor.model.request.TrackingNumberRequest;
+import com.cardinalhealth.advship.tracking.data.processor.model.response.CustomerBillingGroupDetailsDTO;
+import com.cardinalhealth.advship.tracking.data.processor.model.response.ShipmentCreatedResponse;
+import com.cardinalhealth.advship.tracking.data.processor.model.response.TrackingWebhookResponse;
+import com.cardinalhealth.advship.tracking.data.processor.service.base.TrackingDataService;
+import com.cardinalhealth.advship.tracking.data.processor.service.base.savefedexlog.SaveFedexJsonService;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.TrackingEventDTO;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.TrackingFedexDTO;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.TrackingEventDTO.Event;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.AddressDTO;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.ContactAndAddressDTO;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.CurrentTrackingInfoDTO;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.EstimatedDeliveryDateDTO;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.LocationContactAndAddressDTO;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.LocationDTO;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.LocationDetailDTO;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.ShipperRecipientInfoDTO;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.TrackResultDTO;
+import com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto.TrackingInfoDTO;
+import com.cardinalhealth.advship.tracking.data.processor.trackingsave.TrackingSave;
+import com.cardinalhealth.advship.tracking.data.processor.trackingsave.publisher.AspNoPhiPublisherRegistry;
+import com.cardinalhealth.advship.tracking.data.processor.utils.FedexToTrackingInputMapper;
+import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-The problem is at line 868, where the test is probably doing something like:
+@ExtendWith(MockitoExtension.class)
+class TrackingWebhookFedexPublisherTest {
 
-when(perfTestDeterminer.usePerfTestUrl()).thenReturn(true);
+  @Mock
+  private WebhookPublisher publisher;
 
-But for a non-shipment endpoint, usePerfTestUrl() is never called, so Mockito reports the stub as unnecessary.
+  @Mock
+  private TrackingDataService trackingDataService;
 
-Replace only this test
+  @Mock
+  private TrackingSave trackingSave;
 
-Use this version:
+  @Mock
+  private SaveFedexJsonService saveFedexJsonService;
 
-@Test
-void sendFlexRequest_nonShipmentEndpoint_doesNotUsePerformanceUrl() throws Exception {
+  @Mock
+  private AspNoPhiPublisherRegistry trackingNoPhiDataPublisher;
 
-    String endpoint = "some-other-endpoint";
+  private TrackingWebhookFedexPublisher subject;
 
-    server.enqueue(
-        new MockResponse()
-            .setResponseCode(200)
-            .setHeader("Content-Type", "application/json")
-            .setBody("{}"));
+  private MockedStatic<FedexToTrackingInputMapper> mapperMock;
 
-    // No stubbing of perfTestDeterminer is required here.
-    // Non-shipment endpoints do not call usePerfTestUrl().
-    subject
-        .sendFlexRequest(
-            endpoint,
-            HttpMethod.POST,
-            Map.of(),
-            new Object(),
-            Object.class)
-        .block();
+  @BeforeEach
+  void setUp() {
+    subject =
+        new TrackingWebhookFedexPublisher(
+            publisher,
+            trackingDataService,
+            trackingSave,
+            saveFedexJsonService,
+            trackingNoPhiDataPublisher);
 
-    RecordedRequest recordedRequest =
-        server.takeRequest(2, TimeUnit.SECONDS);
+    mapperMock = org.mockito.Mockito.mockStatic(FedexToTrackingInputMapper.class);
 
-    assertNotNull(recordedRequest);
+    mapperMock
+        .when(() -> FedexToTrackingInputMapper.convertToCompatibleFormatWithOffset(any()))
+        .thenReturn("2026-09-09T10:00:00+05:30");
 
-    assertEquals(
-        "/some-other-endpoint",
-        recordedRequest.getPath());
+    mapperMock
+        .when(() -> FedexToTrackingInputMapper.convertToCompatibleFormatWithoutOffset(any()))
+        .thenReturn("2026-09-09T10:00:00");
 
-    assertEquals(
-        "POST",
-        recordedRequest.getMethod());
+    mapperMock
+        .when(() -> FedexToTrackingInputMapper.mapEventTypeFromEventDescriptionStatus(anyString()))
+        .thenReturn("DELIVERED");
+
+    mapperMock
+        .when(() -> FedexToTrackingInputMapper.getBeginDateByType(any(), any()))
+        .thenReturn("2026-09-01");
+
+    mapperMock
+        .when(() -> FedexToTrackingInputMapper.mapFedexToTrackingInput(any(), any()))
+        .thenReturn(mock(Object.class));
+  }
+
+  @AfterEach
+  void tearDown() {
+    mapperMock.close();
+  }
+
+  // ---------------------------------------------------------------------------
+  // TRACKING NUMBER / ACCOUNT NUMBER HELPERS
+  // ---------------------------------------------------------------------------
+
+  @Test
+  void shouldProcessNonNavigatorShipmentSuccessfully()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID(null);
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any(TrackingNumberRequest.class)))
+        .thenReturn(shipment);
+
+    when(trackingDataService.findBillingGroupIDAndCustomerIdByAccountNumber("123456"))
+        .thenReturn(Collections.emptyList());
+
+    ShipmentCreatedResponse response = new ShipmentCreatedResponse();
+    response.setStatus(SUCCESS);
+
+    when(trackingDataService.saveTrackingDetailsForNonNavigator(any()))
+        .thenReturn(response);
+
+    when(trackingNoPhiDataPublisher.publishNoPhiData(anyString(), any()))
+        .thenReturn(true);
+
+    when(publisher.publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{\"tracking\":\"123456789\"}");
+
+    verify(saveFedexJsonService).saveFedexJson("{\"tracking\":\"123456789\"}");
+
+    verify(trackingDataService)
+        .saveTrackingDetailsForNonNavigator(any());
+
+    verify(trackingNoPhiDataPublisher)
+        .publishNoPhiData(anyString(), any());
+
+    verify(publisher)
+        .publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING));
+  }
+
+  @Test
+  void shouldIgnoreNonNavigatorShipmentWhenAccountNumberIsEmpty()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createFedexDtoWithoutAccountNumber("123456789");
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID(null);
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(trackingDataService, never())
+        .saveTrackingDetailsForNonNavigator(any());
+
+    verify(publisher, never())
+        .publish(any(), anyString());
+
+    verify(trackingNoPhiDataPublisher, never())
+        .publishNoPhiData(anyString(), any());
+  }
+
+  @Test
+  void shouldIgnoreNonNavigatorShipmentWhenAccountNumberIsMasked()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createFedexDtoWithAccountNumber(
+        "123456789",
+        Constants.SHIPPER_ACCOUNT_NUMBER_XXXXXXXXXX);
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID(null);
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(trackingDataService, never())
+        .saveTrackingDetailsForNonNavigator(any());
+
+    verify(publisher, never())
+        .publish(any(), anyString());
+  }
+
+  @Test
+  void shouldNotPublishWhenNonNavigatorSaveFails()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID(null);
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(trackingDataService.findBillingGroupIDAndCustomerIdByAccountNumber("123456"))
+        .thenReturn(Collections.emptyList());
+
+    ShipmentCreatedResponse response = new ShipmentCreatedResponse();
+    response.setStatus("FAIL");
+
+    when(trackingDataService.saveTrackingDetailsForNonNavigator(any()))
+        .thenReturn(response);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(trackingNoPhiDataPublisher, never())
+        .publishNoPhiData(anyString(), any());
+
+    verify(publisher, never())
+        .publish(any(), anyString());
+  }
+
+  // ---------------------------------------------------------------------------
+  // NAVIGATOR / EXISTING SHIPMENT FLOW
+  // ---------------------------------------------------------------------------
+
+  @Test
+  void shouldProcessExistingNavigatorShipment()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(publisher)
+        .publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING));
+
+    verify(trackingSave)
+        .receiveMessage(any(TrackingEventDTO.class), eq("UNIQUE-ID-1"));
+
+    verify(trackingDataService, never())
+        .updateShipment(any());
+  }
+
+  @Test
+  void shouldProcessExistingNonNavigatorShipmentAndPopulateCustomerData()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource(NON_NAVIGATOR);
+    shipment.setSurroundBillToNumber("999999");
+    shipment.setCustomerId(null);
+
+    CustomerBillingGroupDetailsDTO billingGroup =
+        createCustomerBillingGroup("CUSTOMER-1", "BG-1");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(trackingDataService.findBillingGroupIDAndCustomerIdByAccountNumber("999999"))
+        .thenReturn(List.of(billingGroup));
+
+    when(publisher.publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(trackingDataService)
+        .findBillingGroupIDAndCustomerIdByAccountNumber("999999");
+
+    verify(trackingDataService)
+        .updateShipment(any(ShipmentDetailsDTO.class));
+
+    verify(publisher)
+        .publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING));
+  }
+
+  @Test
+  void shouldUseFedexAccountNumberWhenSurroundBillToNumberIsBlank()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource(NON_NAVIGATOR);
+    shipment.setSurroundBillToNumber("");
+    shipment.setCustomerId(null);
+
+    CustomerBillingGroupDetailsDTO billingGroup =
+        createCustomerBillingGroup("CUSTOMER-1", "BG-1");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(trackingDataService.findBillingGroupIDAndCustomerIdByAccountNumber("123456"))
+        .thenReturn(List.of(billingGroup));
+
+    when(publisher.publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(trackingDataService)
+        .findBillingGroupIDAndCustomerIdByAccountNumber("123456");
+  }
+
+  @Test
+  void shouldNotFetchCustomerDataWhenCustomerAlreadyExists()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource(NON_NAVIGATOR);
+    shipment.setSurroundBillToNumber("999999");
+    shipment.setCustomerId("CUSTOMER-EXISTING");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(
+            trackingDataService,
+            never())
+        .findBillingGroupIDAndCustomerIdByAccountNumber(anyString());
+
+    verify(trackingDataService)
+        .updateShipment(any(ShipmentDetailsDTO.class));
+  }
+
+  @Test
+  void shouldNotFetchCustomerDataWhenBillToNumberIsBlankAndFedexAccountIsBlank()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createFedexDtoWithoutAccountNumber("123456789");
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource(NON_NAVIGATOR);
+    shipment.setSurroundBillToNumber("");
+    shipment.setCustomerId(null);
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(
+            trackingDataService,
+            never())
+        .findBillingGroupIDAndCustomerIdByAccountNumber(anyString());
+
+    verify(trackingDataService)
+        .updateShipment(any(ShipmentDetailsDTO.class));
+  }
+
+  @Test
+  void shouldNotUpdateNonNavigatorShipmentWhenSourceIsNavigator()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(trackingDataService, never())
+        .updateShipment(any());
+  }
+
+  // ---------------------------------------------------------------------------
+  // UNIQUE TRACKING ID
+  // ---------------------------------------------------------------------------
+
+  @Test
+  void shouldSaveTrackingEventWhenUniqueTrackingIdExists()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(trackingSave)
+        .receiveMessage(any(TrackingEventDTO.class), eq("UNIQUE-ID-1"));
+  }
+
+  @Test
+  void shouldNotSaveTrackingEventWhenUniqueTrackingIdIsNull()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    CurrentTrackingInfoDTO currentTrackingInfo =
+        fedex.getTrackResult()
+            .getTrackingInfo()
+            .getCurrentTrackingInfo();
+
+    when(currentTrackingInfo.getTrackingNumberUniqueId())
+        .thenReturn(null);
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(trackingSave, never())
+        .receiveMessage(any(), anyString());
+  }
+
+  // ---------------------------------------------------------------------------
+  // GENERALIZE DATA - NULL / OPTIONAL BRANCHES
+  // ---------------------------------------------------------------------------
+
+  @Test
+  void shouldHandleNullTrackResult()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = mock(TrackingFedexDTO.class);
+
+    when(fedex.getTrackResult()).thenReturn(null);
+    when(fedex.getScanEvent()).thenReturn(null);
+    when(fedex.getSurroundInsights()).thenReturn(null);
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    assertDoesNotThrow(() ->
+        subject.trackingFedexPublisher(fedex, "{}"));
+
+    verify(publisher)
+        .publish(any(TrackingEventDTO.class), eq(ADVSHIP_TRACKING));
+  }
+
+  @Test
+  void shouldHandleNullEstimatedDeliveryDate()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    when(fedex.getTrackResult().getEstimatedDeliveryDate())
+        .thenReturn(null);
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(publisher)
+        .publish(any(), eq(ADVSHIP_TRACKING));
+  }
+
+  @Test
+  void shouldHandleNullScanEvent()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    when(fedex.getScanEvent()).thenReturn(null);
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(publisher)
+        .publish(any(), eq(ADVSHIP_TRACKING));
+  }
+
+  @Test
+  void shouldHandleScanEventWithoutLocation()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    when(fedex.getScanEvent().getLocation())
+        .thenReturn(null);
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(publisher)
+        .publish(any(), eq(ADVSHIP_TRACKING));
+  }
+
+  @Test
+  void shouldHandleScanEventWithoutAdditionalInfo()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    when(fedex.getScanEvent().getEventAdditionalInfo())
+        .thenReturn(null);
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(publisher)
+        .publish(any(), eq(ADVSHIP_TRACKING));
+  }
+
+  @Test
+  void shouldHandleMissingOriginAndDestinationAddresses()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    when(fedex.getTrackResult().getOriginLocation())
+        .thenReturn(null);
+
+    when(fedex.getTrackResult().getDestinationLocation())
+        .thenReturn(null);
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(publisher)
+        .publish(any(), eq(ADVSHIP_TRACKING));
+  }
+
+  @Test
+  void shouldHandleMissingRecipientGpsInformation()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    when(fedex.getTrackResult().getRecipientInfo())
+        .thenReturn(null);
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(publisher)
+        .publish(any(), eq(ADVSHIP_TRACKING));
+  }
+
+  // ---------------------------------------------------------------------------
+  // BILLING GROUP MAPPING
+  // ---------------------------------------------------------------------------
+
+  @Test
+  void shouldMapSingleCustomerAndBillingGroup() {
+
+    TrackingEventDTO event = TrackingEventDTO.builder().build();
+
+    CustomerBillingGroupDetailsDTO billingGroup =
+        createCustomerBillingGroup("CUSTOMER-1", "BG-1");
+
+    invokeMapCustomerBillingGroupData(event, List.of(billingGroup));
+
+    assertEquals("CUSTOMER-1", event.getCustomerId());
+    assertEquals("BG-1", event.getBillingGroupId());
+  }
+
+  @Test
+  void shouldNotMapCustomerAndBillingGroupWhenListIsEmpty() {
+
+    TrackingEventDTO event = TrackingEventDTO.builder().build();
+
+    invokeMapCustomerBillingGroupData(event, Collections.emptyList());
+
+    assertEquals(null, event.getCustomerId());
+    assertEquals(null, event.getBillingGroupId());
+  }
+
+  @Test
+  void shouldNotMapCustomerAndBillingGroupWhenMultipleCustomersExist() {
+
+    TrackingEventDTO event = TrackingEventDTO.builder().build();
+
+    CustomerBillingGroupDetailsDTO first =
+        createCustomerBillingGroup("CUSTOMER-1", "BG-1");
+
+    CustomerBillingGroupDetailsDTO second =
+        createCustomerBillingGroup("CUSTOMER-2", "BG-2");
+
+    invokeMapCustomerBillingGroupData(event, List.of(first, second));
+
+    assertEquals(null, event.getCustomerId());
+    assertEquals(null, event.getBillingGroupId());
+  }
+
+  @Test
+  void shouldMapCustomerButLeaveBillingGroupEmptyWhenMultipleBillingGroupsExist() {
+
+    TrackingEventDTO event = TrackingEventDTO.builder().build();
+
+    CustomerBillingGroupDetailsDTO billingGroup =
+        mock(CustomerBillingGroupDetailsDTO.class);
+
+    when(billingGroup.getCustomerId()).thenReturn("CUSTOMER-1");
+
+    CustomerBillingGroupDetailsDTO.BillingGroupDTO bg1 =
+        mock(CustomerBillingGroupDetailsDTO.BillingGroupDTO.class);
+
+    CustomerBillingGroupDetailsDTO.BillingGroupDTO bg2 =
+        mock(CustomerBillingGroupDetailsDTO.BillingGroupDTO.class);
+
+    when(billingGroup.getBillingGroups())
+        .thenReturn(List.of(bg1, bg2));
+
+    invokeMapCustomerBillingGroupData(event, List.of(billingGroup));
+
+    assertEquals("CUSTOMER-1", event.getCustomerId());
+    assertEquals("", event.getBillingGroupId());
+  }
+
+  @Test
+  void shouldHandleNullCustomerBillingGroupEntry() {
+
+    TrackingEventDTO event = TrackingEventDTO.builder().build();
+
+    invokeMapCustomerBillingGroupData(event, Collections.singletonList(null));
+
+    assertEquals("", event.getCustomerId());
+    assertEquals("", event.getBillingGroupId());
+  }
+
+  // ---------------------------------------------------------------------------
+  // LOGGING / PUBLISH RESULT
+  // ---------------------------------------------------------------------------
+
+  @Test
+  void shouldHandlePublisherReturningFalse()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID("SHIPMENT-1");
+    shipment.setShipmentSource("NAVIGATOR");
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
+        .thenReturn(false);
+
+    assertDoesNotThrow(() ->
+        subject.trackingFedexPublisher(fedex, "{}"));
+
+    verify(publisher)
+        .publish(any(), eq(ADVSHIP_TRACKING));
+  }
+
+  @Test
+  void shouldHandleNoPhiPublisherReturningFalse()
+      throws IOException, ExecutionException, InterruptedException {
+
+    TrackingFedexDTO fedex = createCompleteFedexDto("123456789");
+
+    ShipmentDetailsDTO shipment = new ShipmentDetailsDTO();
+    shipment.setShipmentID(null);
+
+    when(trackingDataService.findShipmentDetailsByTrackingNumber(any()))
+        .thenReturn(shipment);
+
+    when(trackingDataService.findBillingGroupIDAndCustomerIdByAccountNumber("123456"))
+        .thenReturn(Collections.emptyList());
+
+    ShipmentCreatedResponse response = new ShipmentCreatedResponse();
+    response.setStatus(SUCCESS);
+
+    when(trackingDataService.saveTrackingDetailsForNonNavigator(any()))
+        .thenReturn(response);
+
+    when(trackingNoPhiDataPublisher.publishNoPhiData(anyString(), any()))
+        .thenReturn(false);
+
+    when(publisher.publish(any(), eq(ADVSHIP_TRACKING)))
+        .thenReturn(true);
+
+    subject.trackingFedexPublisher(fedex, "{}");
+
+    verify(trackingNoPhiDataPublisher)
+        .publishNoPhiData(anyString(), any());
+
+    verify(publisher)
+        .publish(any(), eq(ADVSHIP_TRACKING));
+  }
+
+  // ---------------------------------------------------------------------------
+  // TEST DATA HELPERS
+  // ---------------------------------------------------------------------------
+
+  private TrackingFedexDTO createCompleteFedexDto(String trackingNumber) {
+
+    TrackingFedexDTO fedex = mock(TrackingFedexDTO.class);
+
+    TrackResultDTO trackResult = mock(TrackResultDTO.class);
+    TrackingInfoDTO trackingInfo = mock(TrackingInfoDTO.class);
+    CurrentTrackingInfoDTO currentTrackingInfo =
+        mock(CurrentTrackingInfoDTO.class);
+
+    when(fedex.getTrackResult()).thenReturn(trackResult);
+
+    when(trackResult.getTrackingInfo()).thenReturn(trackingInfo);
+    when(trackingInfo.getCurrentTrackingInfo()).thenReturn(currentTrackingInfo);
+
+    when(currentTrackingInfo.getTrackingNumber())
+        .thenReturn(trackingNumber);
+
+    when(currentTrackingInfo.getTrackingNumberUniqueId())
+        .thenReturn("UNIQUE-ID-1");
+
+    // Bill-to-party hierarchy
+    var billToParty = mock(
+        com.cardinalhealth.advship.tracking.data.processor.service.dto.fedexdto
+            .BillToPartyDTO.class);
+
+    when(trackResult.getBillToParties())
+        .thenReturn(List.of(billToParty));
+
+    when(billToParty.getBillToParty())
+        .thenReturn(billToParty);
+
+    when(billToParty.getAccountNumber())
+        .thenReturn("123456");
+
+    // Origin
+    LocationDTO originLocation = mock(LocationDTO.class);
+    LocationDetailDTO originDetail = mock(LocationDetailDTO.class);
+    LocationContactAndAddressDTO originContact =
+        mock(LocationContactAndAddressDTO.class);
+    AddressDTO originAddress = mock(AddressDTO.class);
+
+    when(trackResult.getOriginLocation()).thenReturn(originLocation);
+    when(originLocation.getLocationDetail()).thenReturn(originDetail);
+    when(originDetail.getLocationContactAndAddress()).thenReturn(originContact);
+    when(originContact.getAddress()).thenReturn(originAddress);
+
+    when(originAddress.getCity()).thenReturn("Pune");
+    when(originAddress.getPostalCode()).thenReturn("411001");
+    when(originAddress.getStateOrProvinceCode()).thenReturn("MH");
+    when(originAddress.getCountryCode()).thenReturn("IN");
+
+    // Destination
+    LocationDTO destinationLocation = mock(LocationDTO.class);
+    LocationDetailDTO destinationDetail = mock(LocationDetailDTO.class);
+    LocationContactAndAddressDTO destinationContact =
+        mock(LocationContactAndAddressDTO.class);
+    AddressDTO destinationAddress = mock(AddressDTO.class);
+
+    when(trackResult.getDestinationLocation())
+        .thenReturn(destinationLocation);
+
+    when(destinationLocation.getLocationDetail())
+        .thenReturn(destinationDetail);
+
+    when(destinationDetail.getLocationContactAndAddress())
+        .thenReturn(destinationContact);
+
+    when(destinationContact.getAddress())
+        .thenReturn(destinationAddress);
+
+    when(destinationAddress.getCity()).thenReturn("Mumbai");
+    when(destinationAddress.getPostalCode()).thenReturn("400001");
+    when(destinationAddress.getStateOrProvinceCode()).thenReturn("MH");
+    when(destinationAddress.getCountryCode()).thenReturn("IN");
+
+    // Estimated delivery
+    EstimatedDeliveryDateDTO estimatedDeliveryDate =
+        mock(EstimatedDeliveryDateDTO.class);
+
+    when(trackResult.getEstimatedDeliveryDate())
+        .thenReturn(estimatedDeliveryDate);
+
+    when(estimatedDeliveryDate.getRiskScore())
+        .thenReturn("LOW");
+
+    when(estimatedDeliveryDate.getConfidenceScore())
+        .thenReturn("HIGH");
+
+    when(estimatedDeliveryDate.getArrivalStatusCode())
+        .thenReturn("ON_TIME");
+
+    var newDate = mock(
+        com.cardinalhealth.advship.tracking.data.processor.service.dto
+            .fedexdto.EstimatedDeliveryDateDTO.NewDate.class);
+
+    when(estimatedDeliveryDate.getNewDate())
+        .thenReturn(newDate);
+
+    when(newDate.getBegins())
+        .thenReturn("2026-09-10");
+
+    when(newDate.getEnds())
+        .thenReturn("2026-09-12");
+
+    // Scan event
+    var scanEvent =
+        mock(com.cardinalhealth.advship.tracking.data.processor.service.dto
+            .fedexdto.ScanEventDTO.class);
+
+    when(fedex.getScanEvent()).thenReturn(scanEvent);
+
+    when(scanEvent.getEventDescription())
+        .thenReturn("Delivered");
+
+    when(scanEvent.getEventCreateTime())
+        .thenReturn("2026-09-09T10:00:00");
+
+    when(scanEvent.getDelayDescription())
+        .thenReturn("NONE");
+
+    LocationDetailDTO scanLocation =
+        mock(LocationDetailDTO.class);
+
+    LocationContactAndAddressDTO scanContact =
+        mock(LocationContactAndAddressDTO.class);
+
+    AddressDTO scanAddress =
+        mock(AddressDTO.class);
+
+    when(scanEvent.getLocation())
+        .thenReturn(scanLocation);
+
+    when(scanLocation.getLocationContactAndAddress())
+        .thenReturn(scanContact);
+
+    when(scanContact.getAddress())
+        .thenReturn(scanAddress);
+
+    when(scanAddress.getCity())
+        .thenReturn("Pune");
+
+    when(scanAddress.getStateOrProvinceCode())
+        .thenReturn("MH");
+
+    when(scanEvent.getEventAdditionalInfo())
+        .thenReturn(Map.of(Constants.RECIPIENT_SIGNEE, "John"));
+
+    // Recipient / GPS address
+    ShipperRecipientInfoDTO recipientInfo =
+        mock(ShipperRecipientInfoDTO.class);
+
+    ContactAndAddressDTO recipientContact =
+        mock(ContactAndAddressDTO.class);
+
+    ContactAndAddressDTO recipientAddress =
+        mock(ContactAndAddressDTO.class);
+
+    when(trackResult.getRecipientInfo())
+        .thenReturn(recipientInfo);
+
+    when(recipientInfo.getContactAndAddress())
+        .thenReturn(recipientContact);
+
+    when(recipientContact.getAddress())
+        .thenReturn(recipientAddress);
+
+    when(recipientAddress.concatenateAddressFields())
+        .thenReturn("Pune, Maharashtra, India");
+
+    when(fedex.getSurroundInsights())
+        .thenReturn("INSIGHT");
+
+    return fedex;
+  }
+
+  private TrackingFedexDTO createFedexDtoWithAccountNumber(
+      String trackingNumber,
+      String accountNumber) {
+
+    TrackingFedexDTO fedex = mock(TrackingFedexDTO.class);
+    TrackResultDTO trackResult = mock(TrackResultDTO.class);
+
+    when(fedex.getTrackResult())
+        .thenReturn(trackResult);
+
+    CurrentTrackingInfoDTO currentTrackingInfo =
+        mock(CurrentTrackingInfoDTO.class);
+
+    TrackingInfoDTO trackingInfo =
+        mock(TrackingInfoDTO.class);
+
+    when(trackResult.getTrackingInfo())
+        .thenReturn(trackingInfo);
+
+    when(trackingInfo.getCurrentTrackingInfo())
+        .thenReturn(currentTrackingInfo);
+
+    when(currentTrackingInfo.getTrackingNumber())
+        .thenReturn(trackingNumber);
+
+    var billToParty =
+        mock(com.cardinalhealth.advship.tracking.data.processor.service.dto
+            .fedexdto.BillToPartyDTO.class);
+
+    when(trackResult.getBillToParties())
+        .thenReturn(List.of(billToParty));
+
+    when(billToParty.getBillToParty())
+        .thenReturn(billToParty);
+
+    when(billToParty.getAccountNumber())
+        .thenReturn(accountNumber);
+
+    return fedex;
+  }
+
+  private TrackingFedexDTO createFedexDtoWithoutAccountNumber(
+      String trackingNumber) {
+
+    TrackingFedexDTO fedex = mock(TrackingFedexDTO.class);
+
+    TrackResultDTO trackResult = mock(TrackResultDTO.class);
+    TrackingInfoDTO trackingInfo = mock(TrackingInfoDTO.class);
+    CurrentTrackingInfoDTO currentTrackingInfo =
+        mock(CurrentTrackingInfoDTO.class);
+
+    when(fedex.getTrackResult()).thenReturn(trackResult);
+    when(trackResult.getTrackingInfo()).thenReturn(trackingInfo);
+    when(trackingInfo.getCurrentTrackingInfo()).thenReturn(currentTrackingInfo);
+    when(currentTrackingInfo.getTrackingNumber()).thenReturn(trackingNumber);
+
+    when(trackResult.getBillToParties())
+        .thenReturn(Collections.emptyList());
+
+    return fedex;
+  }
+
+  private CustomerBillingGroupDetailsDTO createCustomerBillingGroup(
+      String customerId,
+      String billingGroupId) {
+
+    CustomerBillingGroupDetailsDTO dto =
+        mock(CustomerBillingGroupDetailsDTO.class);
+
+    CustomerBillingGroupDetailsDTO.BillingGroupDTO billingGroup =
+        mock(CustomerBillingGroupDetailsDTO.BillingGroupDTO.class);
+
+    when(dto.getCustomerId())
+        .thenReturn(customerId);
+
+    when(dto.getBillingGroups())
+        .thenReturn(List.of(billingGroup));
+
+    when(billingGroup.getId())
+        .thenReturn(billingGroupId);
+
+    return dto;
+  }
+
+  /**
+   * Calls the private mapCustomerBillingGroupData method.
+   *
+   * Reflection is intentionally kept here because this private method has
+   * several independent branches which are easiest to cover directly.
+   */
+  private void invokeMapCustomerBillingGroupData(
+      TrackingEventDTO event,
+      List<CustomerBillingGroupDetailsDTO> billingGroups) {
+
+    try {
+      var method =
+          TrackingWebhookFedexPublisher.class.getDeclaredMethod(
+              "mapCustomerBillingGroupData",
+              TrackingEventDTO.class,
+              List.class);
+
+      method.setAccessible(true);
+      method.invoke(subject, event, billingGroups);
+
+    } catch (Exception e) {
+      throw new AssertionError(
+          "Unable to invoke mapCustomerBillingGroupData", e);
+    }
+  }
 }
-
-Important
-
-Remove this line from that test if you currently have it:
-
-when(perfTestDeterminer.usePerfTestUrl()).thenReturn(true);
-
-or:
-
-when(perfTestDeterminer.usePerfTestUrl()).thenReturn(false);
-
-You do not need either one for this test.
-
-Your test should simply verify that:
-
-some-other-endpoint
-        ↓
-normal URL
-        ↓
-server
-
-rather than the performance URL.
-
-Why the other tests pass
-
-Your output confirms the important changes are working:
-
-Address validation 400 → WARN ✅
-
-Normal 400 → ERROR ✅
-
-401 → ERROR ✅
-
-404 → ERROR ✅
-
-Address validation error mapping → ValidationException ✅
-
-POST requests → working ✅
-
-Performance URL logic → working ✅
-
-List request → working ✅
-
-Nested error extraction → working ✅
-
-
-So don't change the production code for this failure. Just replace that one test with the above.
-
-After replacement, run:
-
-./gradlew test --tests "*SendFlexWebClientServiceMockServerTest"
-
-You should get:
-
-20 tests completed, 0 failed
-
-The Mockito self-attaching/Java agent messages are warnings, not the cause of this failure.
