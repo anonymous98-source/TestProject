@@ -1,56 +1,29 @@
-For your story, implement the change in `ShipmentTrackingActionsCellRendererComponent` and its HTML template. The goal is to keep the bell visible, show the slashed bell when alerts are unavailable, disable the button, and display the correct tooltip.
+Since you've pulled the latest changes, we'll make a minimal, targeted change to your current files. This will preserve the newly added `showShipmentProtectionClaimAction`, its getters, the shipment protection claim menu action, and all existing shipment functionality.
 
-I'll walk you through the implementation in the order you should make the changes.
+We'll change only:
 
-### Step 1: Understand the existing logic
+* The bell tooltip logic in the TypeScript file.
 
-Your component already has these relevant properties:
+* The bell button markup in the HTML file.
 
-```typescript
-icontoggle: boolean = true;
-smsSubscribed: boolean = false;
-notificationResource = [];
-```
+* One tooltip constant in the TypeScript file.
 
-And this method:
+We will not change `enableBellIcon()`, because its existing Navigator and non-Navigator eligibility rules could affect other shipments.
 
-```typescript
-enableBellIcon(): boolean {
-  return (
-    this.params?.data?.premiumFeatureResponse?.beaconPlus &&
-    this.params?.data?.premiumFeatureResponse?.smsNotificationsEnabled
-  ) || this.params?.data?.shipmentSource !== 'Navigator';
-}
-```
+### Step 1: Add the tooltip constant in TypeScript
 
-The issue is that your current HTML always renders the bell button, and `onAlert()` silently does nothing when `enableBellIcon()` returns `false`.
-
-The story requires three changes:
-
-* Show `notifications_off` when alerts are unavailable.
-
-* Disable the bell button when alerts are unavailable.
-
-* Display `Alerts are not available for this shipment.` on hover.
-
-Important: Your current `enableBellIcon()` logic treats non-Navigator shipments as eligible regardless of the SMS setting. Don't change this business rule without confirming the intended eligibility rules. We will first reuse the existing method and then verify it against the story's test cases.
-
-### Step 2: Add the unavailable-alert tooltip
-
-Open `actions-sidebar-cell-renderer.component.ts`.
-
-Inside `ShipmentTrackingActionsCellRendererComponent`, add this property:
+In `ShipmentTrackingActionsCellRendererComponent`, add this property near your existing component properties:
 
 ```typescript
 private readonly ALERTS_UNAVAILABLE_TOOLTIP =
   'Alerts are not available for this shipment.';
 ```
 
-Place it near your other component properties, such as `label`, `HEADER_CONSTANTS`, and `isVoidShipmentDisabled`.
+Do not remove or rename any existing properties.
 
-### Step 3: Update the `bellTooltip` getter
+### Step 2: Update only the `bellTooltip` getter
 
-Find your existing `bellTooltip` getter and replace it with:
+Find the existing `bellTooltip` getter near the `normalizeValue()` method. Replace only that getter with this version:
 
 ```typescript
 
@@ -73,34 +46,13 @@ get bellTooltip(): string {
 }
 ```
 
-What this changes:
+This preserves the existing tooltip behavior for eligible shipments and adds the required message for ineligible ones.
 
-* When alerts are unavailable, the new tooltip is returned immediately.
+### Step 3: Replace only the bell button in the HTML
 
-* When alerts are available and recipients exist, the existing formatted recipient list remains unchanged.
+In `actions-sidebar-cell-renderer.component.html`, find the first `@if` block containing the bell icon.
 
-* When alerts are available but no recipients exist, the existing manage-alerts tooltip remains unchanged.
-
-### Step 4: Update the bell button in the HTML
-
-Open `actions-sidebar-cell-renderer.component.html`.
-
-Find this existing block:
-
-```html
-@if (this.pageName === HEADER_CONSTANTS.TRACKING.route) {
-  <opti-button
-    [centerIcon]="icontoggle ? 'notifications_active' : 'notifications_none'"
-    buttonType="secondary"
-    [matTooltip]="bellTooltip"
-    matTooltipClass="multiline-tooltip"
-    matTooltipPosition="above"
-    (click)="onAlert()"
-  ></opti-button>
-}
-```
-
-Replace it with:
+Replace that block with the following:
 
 ```html
 
@@ -109,15 +61,13 @@ Replace it with:
     [matTooltip]="bellTooltip"
     matTooltipClass="multiline-tooltip"
     matTooltipPosition="above"
-    class="alert-button-wrapper"
+    style="display: inline-flex"
   >
     <opti-button
       [centerIcon]="
         !enableBellIcon()
           ? 'notifications_off'
-          : (icontoggle
-              ? 'notifications_active'
-              : 'notifications_none')
+          : (icontoggle ? 'notifications_active' : 'notifications_none')
       "
       buttonType="secondary"
       [disabled]="!enableBellIcon()"
@@ -127,36 +77,27 @@ Replace it with:
 }
 ```
 
-This preserves your existing subscribed/unsubscribed icons for eligible shipments while adding the unavailable state.
+Why this works:
 
-### Why the wrapper is needed
+* `notifications_off` displays the slashed bell when alerts are unavailable.
 
-Angular Material tooltips may not trigger on disabled buttons. Putting the tooltip on the surrounding `span` lets users hover over the disabled bell and see the reason.
+* `[disabled]="!enableBellIcon()"` disables the button in that state.
 
-The wrapper must receive pointer events. If your component styles interfere with that, adjust the wrapper's CSS as described in Step 5.
+* The tooltip is attached to the wrapper so it can still appear when the button is disabled.
 
-### Step 5: Verify the button's disabled input
+* When alerts are available, your existing subscribed and unsubscribed icons remain unchanged.
 
-Before proceeding, check `OptiButtonComponent` in `@ofl-next/advship-core-components` to confirm that it supports `[disabled]`.
+Keep the rest of the HTML exactly as it is, including the new Shipment Protection Claim menu item.
 
-If it does, the HTML above is sufficient for the disabled input. If it uses a different input name, use the actual API.
+### Step 4: Verify the `OptiButtonComponent` input
 
-If needed, add this to `actions-sidebar-cell-renderer.component.scss`:
+Your code imports `OptiButtonComponent` from `@ofl-next/advship-core-components`.
 
-```scss
-.alert-button-wrapper {
-  display: inline-flex;
-  cursor: default;
-}
-```
+Check that it supports the `disabled` input. If Angular reports that `disabled` is not a recognized input, use the input exposed by that component's API. Do not modify the component library just for this story unless necessary.
 
-Do not add CSS that makes the button look enabled when alerts are unavailable.
+### Step 5: Leave `enableBellIcon()` unchanged for now
 
-### Step 6: Verify `enableBellIcon()` against the story
-
-This is the most important business-logic check.
-
-Your current implementation is:
+Keep your current implementation:
 
 ```typescript
 enableBellIcon(): boolean {
@@ -167,67 +108,22 @@ enableBellIcon(): boolean {
 }
 ```
 
-Because of the `||` condition, every non-Navigator shipment is considered eligible, even when `smsNotificationsEnabled` is `false`.
+This is important because the new code relies on this method to decide whether alerts are available. Your current rule treats non-Navigator shipments as eligible regardless of the SMS flag. The story should not inadvertently change that existing business behavior.
 
-The story says unavailable alerts should result in a disabled, slashed bell. Therefore, verify the actual API response for a shipment where alerts are unavailable and confirm how Navigator and non-Navigator shipments are supposed to behave.
+If testing confirms that the affected shipment incorrectly returns `true`, investigate the API response and the intended eligibility rule before changing this method.
 
-If `premiumFeatureResponse` is authoritative for all shipments, the method could be simplified to:
+### Step 6: Test and review the changes
 
-```typescript
-enableBellIcon(): boolean {
-  return this.params?.data?.premiumFeatureResponse
-    ?.smsNotificationsEnabled === true;
-}
-```
+* Unavailable shipment: slashed bell, disabled button, exact tooltip text.
 
-Do not make this change blindly. It removes the existing `beaconPlus` and shipment-source eligibility rules, which may be important for other shipment types. Confirm the intended business rules with the existing implementation or acceptance criteria before changing them.
+* Eligible and subscribed shipment: active bell, alert dialog opens.
 
-### Step 7: Test the story locally
+* Eligible and unsubscribed shipment: outline bell, alert dialog opens.
 
-Use the following checklist to validate the implementation.
+* Eligible shipment with recipients: existing recipient tooltip is preserved.
 
-Local testing checklist
+* Shipment Protection Claim menu item remains unchanged.
 
-0 of 6
+* More Actions, shipping labels, POD, and Void Shipment continue to work.
 
-Eligible and subscribed shipment
-
-Active bell icon; clicking opens the Manage Alerts dialog.
-
-Eligible but unsubscribed shipment
-
-Outline bell icon; clicking opens the Manage Alerts dialog.
-
-Alerts unavailable
-
-Slashed bell icon; clicking does nothing; button is disabled.
-
-Unavailable-alert tooltip
-
-Hovering over the slashed bell displays the exact required message.
-
-Eligible shipment with recipients
-
-Existing recipient count and formatted phone numbers remain visible in the tooltip.
-
-Other shipment actions
-
-More Actions, shipping labels, POD, and Void Shipment continue working.
-
-### Step 8: Run checks and raise the PR
-
-* Run the frontend application and test both eligible and ineligible shipments.
-
-* Run the relevant unit tests and add or update tests for the bell icon, disabled state, and tooltip.
-
-* Confirm that the alert modal still opens for eligible shipments.
-
-* Review the diff to ensure unrelated shipment actions have not changed.
-
-* Commit and raise the PR for review.
-
-Suggested commit message:
-
-`Fix unavailable shipment alert indicator`
-
-The key implementation is in the HTML template and `bellTooltip` getter. The only potentially broader change is the availability method, which must be validated against the shipment-source business rules before you modify it.
+Final scope: one new tooltip constant, one updated getter, and one replaced HTML block. No changes to your newly pulled menu functionality or other TypeScript methods are required.
