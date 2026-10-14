@@ -1,250 +1,233 @@
-Yes — with the RetryConfig, the situation is clearer. You do not need to change RetryConfig for the six errors you listed, assuming they are returned as HTTP 400 responses, which your logs indicate.
+For your story, implement the change in `ShipmentTrackingActionsCellRendererComponent` and its HTML template. The goal is to keep the bell visible, show the slashed bell when alerts are unavailable, disable the button, and display the correct tooltip.
 
-Why?
+I'll walk you through the implementation in the order you should make the changes.
 
-Your retry condition is:
+### Step 1: Understand the existing logic
 
-public boolean isRetryable(Throwable throwable) {
-    if (throwable instanceof WebClientResponseException ex) {
-        int statusCode = ex.getStatusCode().value();
+Your component already has these relevant properties:
 
-        return statusCode >= 500 && statusCode < 600;
-    }
+```typescript
+icontoggle: boolean = true;
+smsSubscribed: boolean = false;
+notificationResource = [];
+```
 
-    return true;
+And this method:
+
+```typescript
+enableBellIcon(): boolean {
+  return (
+    this.params?.data?.premiumFeatureResponse?.beaconPlus &&
+    this.params?.data?.premiumFeatureResponse?.smsNotificationsEnabled
+  ) || this.params?.data?.shipmentSource !== 'Navigator';
 }
+```
 
-So:
+The issue is that your current HTML always renders the bell button, and `onAlert()` silently does nothing when `enableBellIcon()` returns `false`.
 
-Error	HTTP status	Retried?	Final logging
+The story requires three changes:
 
-SYSTEM.UNEXPECTED.ERROR	400	❌ No	Should be WARN
-No valid address suggestions	400	❌ No	Should be WARN
-STANDARDIZED.ADDRESS.NOTFOUND	400	❌ No	Should be WARN
-INTERPOLATED.STREET.ADDRESS	400	❌ No	Should be WARN
-STATEORPROVINCECODE.TOO.LONG	400	❌ No	Should be WARN
-INVALID.SUITE.NUMBER	400	❌ No	Should be WARN
-Other 400	400	❌ No	Existing ERROR behavior
-500+	500–599	✅ Yes	ERROR if retries exhausted
+* Show `notifications_off` when alerts are unavailable.
 
+* Disable the bell button when alerts are unavailable.
 
-So the retry configuration already does the right thing for the validation errors.
+* Display `Alerts are not available for this shipment.` on hover.
 
+Important: Your current `enableBellIcon()` logic treats non-Navigator shipments as eligible regardless of the SMS setting. Don't change this business rule without confirming the intended eligibility rules. We will first reuse the existing method and then verify it against the story's test cases.
 
----
+### Step 2: Add the unavailable-alert tooltip
 
-But there is one important problem
+Open `actions-sidebar-cell-renderer.component.ts`.
 
-Your current SendFlexWebClientService has this:
+Inside `ShipmentTrackingActionsCellRendererComponent`, add this property:
 
-if (statusCode == SendFlexErrorConstants.BAD_REQUEST
-        && ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT.equals(endpoint)) {
+```typescript
+private readonly ALERTS_UNAVAILABLE_TOOLTIP =
+  'Alerts are not available for this shipment.';
+```
 
-    log.warn(...);
+Place it near your other component properties, such as `label`, `HEADER_CONSTANTS`, and `isVoidShipmentDisabled`.
 
-    return new ValidationException(...);
+### Step 3: Update the `bellTooltip` getter
+
+Find your existing `bellTooltip` getter and replace it with:
+
+```typescript
+
+get bellTooltip(): string {
+  if (!this.enableBellIcon()) {
+    return this.ALERTS_UNAVAILABLE_TOOLTIP;
+  }
+
+  if (this.notificationResource?.length) {
+    const recipients = this.notificationResource
+      .map(item =>
+        this.phoneFormat.transform(item['communicationValue'])
+      )
+      .join('\n');
+
+    return `(${this.notificationResource.length}) Alert Recipients\n${recipients}`;
+  }
+
+  return ACTIONS_SIDEBAR_MENU.ALERT_NOTIFY;
 }
+```
 
-That means:
+What this changes:
 
-> Every HTTP 400 from the address-validation endpoint becomes WARN.
+* When alerts are unavailable, the new tooltip is returned immediately.
 
+* When alerts are available and recipients exist, the existing formatted recipient list remains unchanged.
 
+* When alerts are available but no recipients exist, the existing manage-alerts tooltip remains unchanged.
 
-But based on your clarification, you don't want that.
+### Step 4: Update the bell button in the HTML
 
-You want only the specific errors to be ignored.
+Open `actions-sidebar-cell-renderer.component.html`.
 
-So I would change only SendFlexWebClientService, not RetryConfig.
+Find this existing block:
 
-
----
-
-Recommended implementation
-
-I would actually avoid matching the complete error message because your logs contain:
-
-"Data is not valid: [FedEx rest api error: SYSTEM.UNEXPECTED.ERROR - GENERAL FAILURE {FAILURE_CAUSE}. Please update and try again..]null"
-
-The useful identifiers are:
-
-SYSTEM.UNEXPECTED.ERROR
-FedEx was unable to provide any valid address suggestions.
-STANDARDIZED.ADDRESS.NOTFOUND
-INTERPOLATED.STREET.ADDRESS
-STATEORPROVINCECODE.TOO.LONG
-INVALID.SUITE.NUMBER
-
-Create a method like this:
-
-private boolean isIgnorableAddressValidationError(
-        String endpoint, List<String> errorMessages) {
-
-    if (!ServiceCommonConstants.ADDRESS_VALIDATION_ENDPOINT.equals(endpoint)) {
-        return false;
-    }
-
-    return errorMessages.stream().anyMatch(errorMessage ->
-            errorMessage.contains("SYSTEM.UNEXPECTED.ERROR")
-                    || errorMessage.contains(
-                            "FedEx was unable to provide any valid address suggestions.")
-                    || errorMessage.contains("STANDARDIZED.ADDRESS.NOTFOUND")
-                    || errorMessage.contains("INTERPOLATED.STREET.ADDRESS")
-                    || errorMessage.contains("STATEORPROVINCECODE.TOO.LONG")
-                    || errorMessage.contains("INVALID.SUITE.NUMBER"));
+```html
+@if (this.pageName === HEADER_CONSTANTS.TRACKING.route) {
+  <opti-button
+    [centerIcon]="icontoggle ? 'notifications_active' : 'notifications_none'"
+    buttonType="secondary"
+    [matTooltip]="bellTooltip"
+    matTooltipClass="multiline-tooltip"
+    matTooltipPosition="above"
+    (click)="onAlert()"
+  ></opti-button>
 }
+```
 
-Then modify your handleErrorMap():
+Replace it with:
 
-public Exception handleErrorMap(Throwable throwable, String endpoint) {
+```html
 
-    if (throwable instanceof WebClientResponseException ex) {
-
-        List<String> errorMessages =
-                extractErrorMessages(ex.getResponseBodyAsString());
-
-        int statusCode = ex.getStatusCode().value();
-
-        if (statusCode == SendFlexErrorConstants.BAD_REQUEST
-                && isIgnorableAddressValidationError(endpoint, errorMessages)) {
-
-            log.warn(new LogBuilder()
-                    .withReason(ex.getMessage())
-                    .withMessage(
-                            "SendFlex address validation returned an ignorable validation error")
-                    .toString());
-
-            return new ValidationException(
-                    "Data is not valid: " + errorMessages,
-                    errorMessages.toString());
-        }
-
-        return switch (statusCode) {
-
-            case SendFlexErrorConstants.BAD_REQUEST -> {
-                log.error(new LogBuilder()
-                        .withReason(ex.getMessage())
-                        .withStackTrace(ex.getStackTrace())
-                        .withMessage("SendFlex API request failed")
-                        .toString());
-
-                yield new ValidationException(
-                        "Data is not valid: " + errorMessages,
-                        errorMessages.toString());
-            }
-
-            case SendFlexErrorConstants.UNAUTHORIZED -> {
-                log.error(new LogBuilder()
-                        .withReason(ex.getMessage())
-                        .withStackTrace(ex.getStackTrace())
-                        .withMessage("SendFlex API request failed")
-                        .toString());
-
-                yield new UnAuthorizedException(
-                        "Not authorized request" + errorMessages);
-            }
-
-            case SendFlexErrorConstants.NOT_FOUND -> {
-                log.error(new LogBuilder()
-                        .withReason(ex.getMessage())
-                        .withStackTrace(ex.getStackTrace())
-                        .withMessage("SendFlex API request failed")
-                        .toString());
-
-                yield new ResourceNotFoundException(
-                        "Resource is not found: " + errorMessages);
-            }
-
-            default -> {
-                log.error(new LogBuilder()
-                        .withReason(ex.getMessage())
-                        .withStackTrace(ex.getStackTrace())
-                        .withMessage("SendFlex API request failed")
-                        .toString());
-
-                yield new RuntimeException(
-                        "Unknown HTTP error occurred: "
-                                + ex.getStatusCode()
-                                + " - "
-                                + errorMessages);
-            }
-        };
-
-    } else {
-
-        log.atError()
-                .log(
-                        "Unexpected SendFlex API error occurred: {}",
-                        throwable.getMessage(),
-                        throwable);
-
-        return new RuntimeException(
-                "Unexpected error occurred: "
-                        + "sendflex API request failed and it's not WebClientResponseException"
-                        + throwable.getMessage()
-                        + Arrays.toString(throwable.getStackTrace()));
-    }
+@if (this.pageName === HEADER_CONSTANTS.TRACKING.route) {
+  <span
+    [matTooltip]="bellTooltip"
+    matTooltipClass="multiline-tooltip"
+    matTooltipPosition="above"
+    class="alert-button-wrapper"
+  >
+    <opti-button
+      [centerIcon]="
+        !enableBellIcon()
+          ? 'notifications_off'
+          : (icontoggle
+              ? 'notifications_active'
+              : 'notifications_none')
+      "
+      buttonType="secondary"
+      [disabled]="!enableBellIcon()"
+      (click)="onAlert()"
+    ></opti-button>
+  </span>
 }
+```
 
-Resulting behavior
+This preserves your existing subscribed/unsubscribed icons for eligible shipments while adding the unavailable state.
 
-For:
+### Why the wrapper is needed
 
-STANDARDIZED.ADDRESS.NOTFOUND
+Angular Material tooltips may not trigger on disabled buttons. Putting the tooltip on the surrounding `span` lets users hover over the disabled bell and see the reason.
 
-the flow will be:
+The wrapper must receive pointer events. If your component styles interfere with that, adjust the wrapper's CSS as described in Step 5.
 
-HTTP 400
-   ↓
-isIgnorableAddressValidationError() = true
-   ↓
-log.warn()
-   ↓
-ValidationException
-   ↓
-validateAddress() catches ValidationException
-   ↓
-log.atWarn()
-   ↓
-persist statusCode = null
-   ↓
-return address validation response
+### Step 5: Verify the button's disabled input
 
-So it doesn't reach the ERROR branch.
+Before proceeding, check `OptiButtonComponent` in `@ofl-next/advship-core-components` to confirm that it supports `[disabled]`.
 
-But for an unrelated address-validation 400:
+If it does, the HTML above is sufficient for the disabled input. If it uses a different input name, use the actual API.
 
-SomeOtherSendFlexError
+If needed, add this to `actions-sidebar-cell-renderer.component.scss`:
 
-the flow is:
+```scss
+.alert-button-wrapper {
+  display: inline-flex;
+  cursor: default;
+}
+```
 
-HTTP 400
-   ↓
-isIgnorableAddressValidationError() = false
-   ↓
-existing BAD_REQUEST case
-   ↓
-log.error()
+Do not add CSS that makes the button look enabled when alerts are unavailable.
 
-That's what you want based on your clarification.
+### Step 6: Verify `enableBellIcon()` against the story
 
+This is the most important business-logic check.
 
----
+Your current implementation is:
 
-One more thing: SYSTEM.UNEXPECTED.ERROR
+```typescript
+enableBellIcon(): boolean {
+  return (
+    this.params?.data?.premiumFeatureResponse?.beaconPlus &&
+    this.params?.data?.premiumFeatureResponse?.smsNotificationsEnabled
+  ) || this.params?.data?.shipmentSource !== 'Navigator';
+}
+```
 
-This one caught my attention:
+Because of the `||` condition, every non-Navigator shipment is considered eligible, even when `smsNotificationsEnabled` is `false`.
 
-FedEx rest api error: SYSTEM.UNEXPECTED.ERROR - GENERAL FAILURE
+The story says unavailable alerts should result in a disabled, slashed bell. Therefore, verify the actual API response for a shipment where alerts are unavailable and confirm how Navigator and non-Navigator shipments are supposed to behave.
 
-Even though the error sounds like a system error, your requirement specifically says this particular error must be ignored. So matching the specific error code SYSTEM.UNEXPECTED.ERROR is appropriate rather than treating all GENERAL FAILURE errors as WARN.
+If `premiumFeatureResponse` is authoritative for all shipments, the method could be simplified to:
 
-Verdict after seeing RetryConfig
+```typescript
+enableBellIcon(): boolean {
+  return this.params?.data?.premiumFeatureResponse
+    ?.smsNotificationsEnabled === true;
+}
+```
 
-RetryConfig: ✅ No change needed.
+Do not make this change blindly. It removes the existing `beaconPlus` and shipment-source eligibility rules, which may be important for other shipment types. Confirm the intended business rules with the existing implementation or acceptance criteria before changing them.
 
-AddressValidationServiceImpl: ✅ The ValidationException handling is correct.
+### Step 7: Test the story locally
 
-SendFlexWebClientService: ⚠️ Needs modification because currently all address-validation HTTP 400s are converted to WARN, whereas you now have a specific list of errors that should be ignored.
+Use the following checklist to validate the implementation.
 
-One additional improvement I'd recommend is moving those six error identifiers into SendFlexErrorConstants instead of hardcoding them inside the method. That would make the implementation cleaner and easier to maintain/test.
+Local testing checklist
+
+0 of 6
+
+Eligible and subscribed shipment
+
+Active bell icon; clicking opens the Manage Alerts dialog.
+
+Eligible but unsubscribed shipment
+
+Outline bell icon; clicking opens the Manage Alerts dialog.
+
+Alerts unavailable
+
+Slashed bell icon; clicking does nothing; button is disabled.
+
+Unavailable-alert tooltip
+
+Hovering over the slashed bell displays the exact required message.
+
+Eligible shipment with recipients
+
+Existing recipient count and formatted phone numbers remain visible in the tooltip.
+
+Other shipment actions
+
+More Actions, shipping labels, POD, and Void Shipment continue working.
+
+### Step 8: Run checks and raise the PR
+
+* Run the frontend application and test both eligible and ineligible shipments.
+
+* Run the relevant unit tests and add or update tests for the bell icon, disabled state, and tooltip.
+
+* Confirm that the alert modal still opens for eligible shipments.
+
+* Review the diff to ensure unrelated shipment actions have not changed.
+
+* Commit and raise the PR for review.
+
+Suggested commit message:
+
+`Fix unavailable shipment alert indicator`
+
+The key implementation is in the HTML template and `bellTooltip` getter. The only potentially broader change is the availability method, which must be validated against the shipment-source business rules before you modify it.
