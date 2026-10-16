@@ -1,139 +1,342 @@
-Based on the latest component you shared, we'll make only the changes required for your shipment-alert story and preserve today's pulled changes, including Shipment Protection Claim, Void Shipment, and the existing alert modal.
+Your test suite is already passing, and `actions-sidebar-cell-renderer.component.ts` currently has 92.52% statement coverage, 79.22% branch coverage, and 94.44% function coverage.
 
-There are three targeted changes:
+To reach 100%, the main task is to add tests for the uncovered lines and exercise both outcomes of every conditional branch. In particular, `viewShippingLabelTooltip` needs tests for both the enabled and disabled states of `isViewShippingLabelDisabled`.
 
-* Update `bellTooltip` to show the unavailable-alert message.
+The uncovered lines in your report are `113–114`, `119`, `136–143`, `149`, `236–240`, `247`, and `380–386`. Below are the additional tests to add to your existing spec file. They focus on the missing paths without duplicating your existing tests.
 
-* Add a getter to determine which bell icon to display.
+### 1\. Add tests for `viewShippingLabelTooltip`
 
-* Update the HTML to display `notifications_off` and prevent interaction without using the unsupported `[disabled]` input on `OptiButtonComponent`.
-
-### Step 1: Update the TypeScript component
-
-In `ShipmentTrackingActionsCellRendererComponent`, add this constant near your existing component properties:
+Add these inside your existing `describe('getPodMenuTooltip'...)` area or near your existing shipping-label tests.
 
 ```typescript
-private readonly ALERTS_UNAVAILABLE_TOOLTIP =
-  'Alerts are not available for this shipment.';
+describe('viewShippingLabelTooltip', () => {
+  it('should return tooltip text when viewing a ZPL shipping label is disabled', () => {
+    component.params = {
+      data: {
+        labelType: SHIPPING_LABEL_CONSTANTS.ZPL_LABEL_TYPE,
+      },
+    };
+
+    expect(component.isViewShippingLabelDisabled).toBe(true);
+    expect(component.viewShippingLabelTooltip).toBe(
+      component.SHIPMENT_TRACKING_CONSTANTS.VIEW_LABEL_TOOLTIP,
+    );
+  });
+
+  it('should return an empty string when viewing a PDF shipping label is enabled', () => {
+    component.params = {
+      data: {
+        labelType: 'PDF',
+      },
+    };
+
+    expect(component.isViewShippingLabelDisabled).toBe(false);
+    expect(component.viewShippingLabelTooltip).toBe('');
+  });
+
+  it('should return an empty string when labelType is missing', () => {
+    component.params = {
+      data: {},
+    };
+
+    expect(component.viewShippingLabelTooltip).toBe('');
+  });
+});
 ```
 
-Keep all existing properties and methods unchanged.
+This covers both outcomes of the tooltip getter and the missing-label case.
 
-### Step 2: Add the bell icon getter
+### 2\. Add tests for `getVoidTooltip`
 
-Add this getter immediately after your existing `enableBellIcon()` method:
+Your current tests cover only `totalPackages <= 1`. Add the missing branch:
 
 ```typescript
+it('should return multipiece tooltip when totalPackages is greater than 1', () => {
+  component.totalPackages = 2;
 
-get bellIcon(): string {
-  if (!this.enableBellIcon()) {
-    return 'notifications_off';
-  }
-
-  return this.icontoggle
-    ? 'notifications_active'
-    : 'notifications_none';
-}
+  expect(component.getVoidTooltip()).toBe(
+    component.SHIPMENT_DETAILS_CONSTANTS.MULTIPIECE_VOID_TOOLTIP,
+  );
+});
 ```
 
-This centralizes the icon selection and preserves the existing subscribed/unsubscribed behavior when alerts are available.
+### 3\. Add tests for `isNonCourier`
 
-### Step 3: Update the `bellTooltip` getter
-
-Find your existing `bellTooltip` getter, currently located after `normalizeValue()`. Replace only that getter with:
+Add case-insensitive and partial carrier-name coverage:
 
 ```typescript
+describe('isNonCourier additional cases', () => {
+  it('should support uppercase carrier names', () => {
+    component.params = {
+      data: {
+        carrier: 'FEDEX',
+      },
+    };
 
-get bellTooltip(): string {
-  if (!this.enableBellIcon()) {
-    return this.ALERTS_UNAVAILABLE_TOOLTIP;
-  }
+    expect(component.isNonCourier).toBe(true);
+  });
 
-  if (this.notificationResource?.length) {
-    const recipients = this.notificationResource
-      .map(item =>
-        this.phoneFormat.transform(item['communicationValue'])
-      )
-      .join('\n');
+  it('should support carrier names containing a supported carrier', () => {
+    component.params = {
+      data: {
+        carrier: 'FedEx Express',
+      },
+    };
 
-    return `(${this.notificationResource.length}) Alert Recipients\n${recipients}`;
-  }
+    expect(component.isNonCourier).toBe(true);
+  });
 
-  return ACTIONS_SIDEBAR_MENU.ALERT_NOTIFY;
-}
+  it('should return false for an empty carrier name', () => {
+    component.params = {
+      data: {
+        carrier: '',
+      },
+    };
+
+    expect(component.isNonCourier).toBe(false);
+  });
+});
 ```
 
-This retains the existing recipient information and manage-alerts tooltip for eligible shipments.
+### 4\. Add tests for `checkVoidShipment` through `agInit`
 
-### Step 4: Update the HTML bell button
-
-In `actions-sidebar-cell-renderer.component.html`, replace only the existing bell-button `@if` block with:
-
-```html
-
-@if (this.pageName === HEADER_CONSTANTS.TRACKING.route) {
-  <span
-    [matTooltip]="bellTooltip"
-    matTooltipClass="multiline-tooltip"
-    matTooltipPosition="above"
-    style="display: inline-flex"
-  >
-    <opti-button
-      [centerIcon]="bellIcon"
-      buttonType="secondary"
-      [class.alert-disabled]="!enableBellIcon()"
-      (click)="onAlert()"
-    ></opti-button>
-  </span>
-}
-```
-
-Why this avoids your previous error: We have removed `[disabled]` from `opti-button`, since Angular reported that it isn't a supported input. Instead, the conditional CSS class prevents mouse interaction when alerts are unavailable. Your existing `onAlert()` method also checks availability before opening the modal.
-
-### Step 5: Update the SCSS
-
-Open `actions-sidebar-cell-renderer.component.scss` and add:
-
-```scss
-.alert-disabled {
-  pointer-events: none;
-  opacity: 0.6;
-}
-```
-
-The tooltip stays on the wrapper, so users can still hover over the unavailable bell and see the explanation.
-
-Note that this CSS approach blocks mouse interaction but is not a fully accessible native disabled state. If `OptiButtonComponent` supports a disabled input under a different name, prefer that supported input.
-
-### Step 6: Verify the availability logic
-
-Keep your existing `enableBellIcon()` unchanged for this targeted update:
+The private method is best tested through the public initialization method.
 
 ```typescript
-enableBellIcon(): boolean {
-  return (
-    this.params?.data?.premiumFeatureResponse?.beaconPlus &&
-    this.params?.data?.premiumFeatureResponse?.smsNotificationsEnabled
-  ) || this.params?.data?.shipmentSource !== 'Navigator';
-}
+describe('checkVoidShipment additional cases', () => {
+  beforeEach(() => {
+    component.appUtilityService = {
+      getUserEmail: jest.fn().mockReturnValue('user@example.com'),
+    } as any;
+
+    component.additionalService.userRole = '';
+  });
+
+  it('should enable void shipment when the current user owns a label-created shipment', () => {
+    component.agInit({
+      data: {
+        status: component.SHIPMENT_DETAILS_CONSTANTS
+          .LABEL_CREATED_STATUS[0],
+        userEmail: 'user@example.com',
+        carrier: 'fedex',
+        shipmentTransactionId: 'txid',
+        total_packages: 1,
+      },
+    });
+
+    expect(component.isVoidShipmentDisabled).toBe(false);
+  });
+
+  it('should disable void shipment when another user owns the shipment', () => {
+    component.agInit({
+      data: {
+        status: component.SHIPMENT_DETAILS_CONSTANTS
+          .LABEL_CREATED_STATUS[0],
+        userEmail: 'other@example.com',
+        carrier: 'fedex',
+      },
+    });
+
+    expect(component.isVoidShipmentDisabled).toBe(true);
+  });
+
+  it('should allow an AdvShip customer admin to void a label-created shipment', () => {
+    component.additionalService.userRole =
+      component.USER_ROLES.ADVSHIP_CUSTOMER_ADMIN;
+
+    component.agInit({
+      data: {
+        status: component.SHIPMENT_DETAILS_CONSTANTS
+          .LABEL_CREATED_STATUS[0],
+        userEmail: 'other@example.com',
+        carrier: 'fedex',
+      },
+    });
+
+    expect(component.isVoidShipmentDisabled).toBe(false);
+  });
+
+  it('should disable void shipment for a viewer role', () => {
+    component.additionalService.userRole =
+      component.USER_ROLES.VIEWER;
+
+    component.agInit({
+      data: {
+        status: component.SHIPMENT_DETAILS_CONSTANTS
+          .LABEL_CREATED_STATUS[0],
+        userEmail: 'user@example.com',
+        carrier: 'fedex',
+      },
+    });
+
+    expect(component.isVoidShipmentDisabled).toBe(true);
+  });
+
+  it('should disable void shipment when the status is missing', () => {
+    component.agInit({
+      data: {
+        userEmail: 'user@example.com',
+        carrier: 'fedex',
+      },
+    });
+
+    expect(component.isVoidShipmentDisabled).toBe(true);
+  });
+});
 ```
 
-However, verify the affected shipment's API data. As currently written, non-Navigator shipments are considered eligible even when SMS notifications are disabled. If that conflicts with the story, the availability rule needs a separate, carefully validated change.
+These tests assume the first entry in `LABEL_CREATED_STATUS` is a valid label-created status. If that constant contains a different status format, use the actual value defined in your constants file.
 
-### Step 7: Test the story
+### 5\. Add tests for `onMenuAction` missing data
 
-* Eligible, subscribed shipment shows `notifications_active`.
+```typescript
+describe('onMenuAction additional cases', () => {
+  it('should not open a courier URL when carrier is missing', () => {
+    component.params = {
+      data: {
+        trackingNumber: '123',
+      },
+    };
 
-* Eligible, unsubscribed shipment shows `notifications_none`.
+    component.onMenuAction('TRACK_SHIPMENT');
 
-* Ineligible shipment shows `notifications_off`.
+    expect(additionalServiceMock.setCourierURL).not.toHaveBeenCalled();
+  });
 
-* Hovering over the unavailable bell shows `Alerts are not available for this shipment.`
+  it('should not open a courier URL when tracking number is missing', () => {
+    component.params = {
+      data: {
+        carrier: 'fedex',
+      },
+    };
 
-* Clicking the unavailable bell does not open the modal.
+    component.onMenuAction('TRACK_SHIPMENT');
 
-* Eligible shipments can still open and save alerts.
+    expect(additionalServiceMock.setCourierURL).not.toHaveBeenCalled();
+  });
+});
+```
 
-* Shipment Protection Claim, More Actions, POD, shipping labels, and Void Shipment continue working.
+### 6\. Add tests for `bellIcon` and unavailable alerts
 
-Summary: Only add the tooltip constant and `bellIcon` getter, replace the `bellTooltip` getter, update the bell HTML block, and add the CSS class. No other methods or newly pulled functionality need to change.
+```typescript
+describe('bellIcon additional cases', () => {
+  it('should return notifications_off when alerts are unavailable', () => {
+    component.params = {
+      data: {
+        shipmentSource: 'Navigator',
+        premiumFeatureResponse: {
+          beaconPlus: false,
+          smsNotificationsEnabled: true,
+        },
+      },
+    };
+
+    expect(component.bellIcon).toBe('notifications_off');
+  });
+
+  it('should return notifications_active when alerts are enabled and subscribed', () => {
+    component.params = {
+      data: {
+        shipmentSource: 'Other',
+      },
+    };
+    component.icontoggle = true;
+
+    expect(component.bellIcon).toBe('notifications_active');
+  });
+
+  it('should return notifications_none when alerts are enabled but not subscribed', () => {
+    component.params = {
+      data: {
+        shipmentSource: 'Other',
+      },
+    };
+    component.icontoggle = false;
+
+    expect(component.bellIcon).toBe('notifications_none');
+  });
+
+  it('should return unavailable tooltip when alerts are not enabled', () => {
+    component.params = {
+      data: {
+        shipmentSource: 'Navigator',
+        premiumFeatureResponse: {
+          beaconPlus: false,
+          smsNotificationsEnabled: false,
+        },
+      },
+    };
+
+    expect(component.bellTooltip).toBe(
+      'Alerts are not available for this shipment.',
+    );
+  });
+});
+```
+
+### 7\. Add tests for `openVoidShipmentDialog`
+
+Your existing tests focus on OptiFreight. Also cover the regular carrier's confirmation path and cancellation.
+
+```typescript
+describe('openVoidShipmentDialog additional cases', () => {
+  it('should show the regular void shipment dialog for a non-OptiFreight carrier', () => {
+    const dialogRefMock = {
+      componentInstance: {
+        data: {
+          buttons: [{}, { hideButton: false }],
+        },
+        actionButtonClicked: {
+          subscribe: jest.fn(),
+        },
+      },
+      close: jest.fn(),
+    };
+
+    const dialogSpy = jest
+      .spyOn(component.dialog, 'open')
+      .mockReturnValue(dialogRefMock as any);
+
+    component.isVoidShipmentDisabled = false;
+    component.params = {
+      data: {
+        carrier: 'fedex',
+      },
+    };
+
+    component.openVoidShipmentDialog('123');
+
+    expect(dialogSpy).toHaveBeenCalled();
+
+    const config = dialogSpy.mock.calls[0][1];
+
+    expect(config.data.confirmation).toBe(
+      SHIPPING_LABEL_CONSTANTS.VOIDSHIPMENT_DIALOGUE_CONSTANTS.CONFIRMATION,
+    );
+
+    expect(config.data.messageLink).toBeUndefined();
+  });
+
+  it('should not open a dialog when shipment voiding is disabled', () => {
+    const dialogSpy = jest.spyOn(component.dialog, 'open');
+
+    component.isVoidShipmentDisabled = true;
+    component.openVoidShipmentDialog('123');
+
+    expect(dialogSpy).not.toHaveBeenCalled();
+  });
+});
+```
+
+### 8\. Re-run coverage for the component
+
+Run the same Jest command you used previously, with coverage enabled for this component. For example, if your project supports the standard Jest flags:
+
+```bash
+npx jest src/app/components/actions-sidebar-cell-renderer/actions-sidebar-cell-renderer.component.spec.ts --coverage --collectCoverageFrom="src/app/components/actions-sidebar-cell-renderer/actions-sidebar-cell-renderer.component.ts"
+```
+
+Check the output for the component's statement, branch, function, and line percentages.
+
+Important: These additions target several missing paths, but I can't guarantee 100% coverage without rerunning the tests against your exact project and inspecting the updated uncovered-line report. Your original report also identifies lines `236–240`, `247`, and `380–386`, which may require additional tests for the specific branches in those sections. Aim for 100% in all four columns, not just statements or lines.
