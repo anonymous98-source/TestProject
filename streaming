@@ -1,342 +1,145 @@
-Your test suite is already passing, and `actions-sidebar-cell-renderer.component.ts` currently has 92.52% statement coverage, 79.22% branch coverage, and 94.44% function coverage.
+You can use the existing `cmsRecordUtil.saveRecord()` method inside your `shipmentBook()` controller to persist both success and failure logs for the `/generatelabel` endpoint.
 
-To reach 100%, the main task is to add tests for the uncovered lines and exercise both outcomes of every conditional branch. In particular, `viewShippingLabelTooltip` needs tests for both the enabled and disabled states of `isViewShippingLabelDisabled`.
+The implementation will work as follows:
 
-The uncovered lines in your report are `113–114`, `119`, `136–143`, `149`, `236–240`, `247`, and `380–386`. Below are the additional tests to add to your existing spec file. They focus on the missing paths without duplicating your existing tests.
+* Success: When `bookShipmentGenerateLabel()` completes successfully, save the request and response with HTTP status `200`.
 
-### 1\. Add tests for `viewShippingLabelTooltip`
+* Failure: If `bookShipmentGenerateLabel()` throws an exception, catch it, save the request and error details with the appropriate HTTP status, and rethrow the exception.
 
-Add these inside your existing `describe('getPodMenuTooltip'...)` area or near your existing shipping-label tests.
+* Existing behavior: Keep the current SLF4J logging and API response handling unchanged.
 
-```typescript
-describe('viewShippingLabelTooltip', () => {
-  it('should return tooltip text when viewing a ZPL shipping label is disabled', () => {
-    component.params = {
-      data: {
-        labelType: SHIPPING_LABEL_CONSTANTS.ZPL_LABEL_TYPE,
-      },
-    };
+* Database: Use the existing `cmsRecordUtil.saveRecord()` method without introducing another persistence method.
 
-    expect(component.isViewShippingLabelDisabled).toBe(true);
-    expect(component.viewShippingLabelTooltip).toBe(
-      component.SHIPMENT_TRACKING_CONSTANTS.VIEW_LABEL_TOOLTIP,
-    );
-  });
+### Updated `shipmentBook()` controller method
 
-  it('should return an empty string when viewing a PDF shipping label is enabled', () => {
-    component.params = {
-      data: {
-        labelType: 'PDF',
-      },
-    };
+```java
 
-    expect(component.isViewShippingLabelDisabled).toBe(false);
-    expect(component.viewShippingLabelTooltip).toBe('');
-  });
+@PostMapping("/generatelabel")
+public ResponseEntity<ShipmentBookResponse> shipmentBook(
+        @RequestHeader HttpHeaders httpHeaders,
+        @RequestBody @Valid ShipmentBookRequest shipmentBookRequest) {
 
-  it('should return an empty string when labelType is missing', () => {
-    component.params = {
-      data: {},
-    };
+    var requestId = MDC.get(ShipmentBookConstant.CORRELATION_ID);
+    long startTime = System.currentTimeMillis();
 
-    expect(component.viewShippingLabelTooltip).toBe('');
-  });
-});
+    String urlPath = "/v1/api/cms/shipment/generatelabel";
+    String source = shipmentBookRequest.getSource();
+
+    log.atInfo()
+            .addKeyValue(REQUEST_ID, requestId)
+            .setMessage("Request to book shipment came for source : " + source)
+            .log();
+
+    try {
+        ShipmentBookResponse shipmentBookResponse =
+                shipmentBookService.bookShipmentGenerateLabel(
+                        shipmentBookRequest, requestId, httpHeaders);
+
+        log.atInfo()
+                .addKeyValue(REQUEST_ID, requestId)
+                .setMessage("Response for book shipment request for source : " + source)
+                .log();
+
+        // Persist successful generateLabel API response
+        cmsRecordUtil.saveRecord(
+                urlPath,
+                HttpStatus.OK.value(),
+                source,
+                objectMapper.writeValueAsString(shipmentBookRequest),
+                objectMapper.writeValueAsString(shipmentBookResponse),
+                requestId,
+                shipmentBookRequest.getFacilityId(),
+                System.currentTimeMillis() - startTime
+        );
+
+        return new ResponseEntity<>(shipmentBookResponse, HttpStatus.OK);
+
+    } catch (Exception ex) {
+
+        log.atError()
+                .addKeyValue(REQUEST_ID, requestId)
+                .setCause(ex)
+                .log("Failed to book shipment for source : {}", source);
+
+        // Persist failed generateLabel API response
+        try {
+            cmsRecordUtil.saveRecord(
+                    urlPath,
+                    HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                    source,
+                    objectMapper.writeValueAsString(shipmentBookRequest),
+                    ex.getMessage(),
+                    requestId,
+                    shipmentBookRequest.getFacilityId(),
+                    System.currentTimeMillis() - startTime
+            );
+        } catch (Exception loggingException) {
+            log.error("Failed to persist generateLabel failure record",
+                    loggingException);
+        }
+
+        throw new RuntimeException(ex);
+    }
+}
 ```
 
-This covers both outcomes of the tooltip getter and the missing-label case.
+### Required changes
 
-### 2\. Add tests for `getVoidTooltip`
+Inject `ObjectMapper` into your controller:
 
-Your current tests cover only `totalPackages <= 1`. Add the missing branch:
-
-```typescript
-it('should return multipiece tooltip when totalPackages is greater than 1', () => {
-  component.totalPackages = 2;
-
-  expect(component.getVoidTooltip()).toBe(
-    component.SHIPMENT_DETAILS_CONSTANTS.MULTIPIECE_VOID_TOOLTIP,
-  );
-});
+```java
+private final ObjectMapper objectMapper;
 ```
 
-### 3\. Add tests for `isNonCourier`
+Add the import:
 
-Add case-insensitive and partial carrier-name coverage:
-
-```typescript
-describe('isNonCourier additional cases', () => {
-  it('should support uppercase carrier names', () => {
-    component.params = {
-      data: {
-        carrier: 'FEDEX',
-      },
-    };
-
-    expect(component.isNonCourier).toBe(true);
-  });
-
-  it('should support carrier names containing a supported carrier', () => {
-    component.params = {
-      data: {
-        carrier: 'FedEx Express',
-      },
-    };
-
-    expect(component.isNonCourier).toBe(true);
-  });
-
-  it('should return false for an empty carrier name', () => {
-    component.params = {
-      data: {
-        carrier: '',
-      },
-    };
-
-    expect(component.isNonCourier).toBe(false);
-  });
-});
+```java
+import com.fasterxml.jackson.databind.ObjectMapper;
 ```
 
-### 4\. Add tests for `checkVoidShipment` through `agInit`
+Since you're already using `@RequiredArgsConstructor`, constructor injection will be handled by Lombok.
 
-The private method is best tested through the public initialization method.
+### Important improvements
 
-```typescript
-describe('checkVoidShipment additional cases', () => {
-  beforeEach(() => {
-    component.appUtilityService = {
-      getUserEmail: jest.fn().mockReturnValue('user@example.com'),
-    } as any;
+There are three things I recommend adjusting before using this in production.
 
-    component.additionalService.userRole = '';
-  });
+1\. Avoid duplicate records when persistence fails
 
-  it('should enable void shipment when the current user owns a label-created shipment', () => {
-    component.agInit({
-      data: {
-        status: component.SHIPMENT_DETAILS_CONSTANTS
-          .LABEL_CREATED_STATUS[0],
-        userEmail: 'user@example.com',
-        carrier: 'fedex',
-        shipmentTransactionId: 'txid',
-        total_packages: 1,
-      },
-    });
+In the implementation above, if `saveRecord()` fails after a successful shipment booking, the outer `catch` will execute and attempt to save a failure record. That would incorrectly classify a successful shipment as failed.
 
-    expect(component.isVoidShipmentDisabled).toBe(false);
-  });
+To avoid this, isolate persistence from the shipment-processing `try-catch`, or use a separate helper method that catches persistence exceptions without changing the original API result.
 
-  it('should disable void shipment when another user owns the shipment', () => {
-    component.agInit({
-      data: {
-        status: component.SHIPMENT_DETAILS_CONSTANTS
-          .LABEL_CREATED_STATUS[0],
-        userEmail: 'other@example.com',
-        carrier: 'fedex',
-      },
-    });
+2\. Preserve the original exception
 
-    expect(component.isVoidShipmentDisabled).toBe(true);
-  });
+Instead of:
 
-  it('should allow an AdvShip customer admin to void a label-created shipment', () => {
-    component.additionalService.userRole =
-      component.USER_ROLES.ADVSHIP_CUSTOMER_ADMIN;
-
-    component.agInit({
-      data: {
-        status: component.SHIPMENT_DETAILS_CONSTANTS
-          .LABEL_CREATED_STATUS[0],
-        userEmail: 'other@example.com',
-        carrier: 'fedex',
-      },
-    });
-
-    expect(component.isVoidShipmentDisabled).toBe(false);
-  });
-
-  it('should disable void shipment for a viewer role', () => {
-    component.additionalService.userRole =
-      component.USER_ROLES.VIEWER;
-
-    component.agInit({
-      data: {
-        status: component.SHIPMENT_DETAILS_CONSTANTS
-          .LABEL_CREATED_STATUS[0],
-        userEmail: 'user@example.com',
-        carrier: 'fedex',
-      },
-    });
-
-    expect(component.isVoidShipmentDisabled).toBe(true);
-  });
-
-  it('should disable void shipment when the status is missing', () => {
-    component.agInit({
-      data: {
-        userEmail: 'user@example.com',
-        carrier: 'fedex',
-      },
-    });
-
-    expect(component.isVoidShipmentDisabled).toBe(true);
-  });
-});
+```java
+throw new RuntimeException(ex);
 ```
 
-These tests assume the first entry in `LABEL_CREATED_STATUS` is a valid label-created status. If that constant contains a different status format, use the actual value defined in your constants file.
+Prefer rethrowing the original runtime exception:
 
-### 5\. Add tests for `onMenuAction` missing data
-
-```typescript
-describe('onMenuAction additional cases', () => {
-  it('should not open a courier URL when carrier is missing', () => {
-    component.params = {
-      data: {
-        trackingNumber: '123',
-      },
-    };
-
-    component.onMenuAction('TRACK_SHIPMENT');
-
-    expect(additionalServiceMock.setCourierURL).not.toHaveBeenCalled();
-  });
-
-  it('should not open a courier URL when tracking number is missing', () => {
-    component.params = {
-      data: {
-        carrier: 'fedex',
-      },
-    };
-
-    component.onMenuAction('TRACK_SHIPMENT');
-
-    expect(additionalServiceMock.setCourierURL).not.toHaveBeenCalled();
-  });
-});
+```java
+throw ex;
 ```
 
-### 6\. Add tests for `bellIcon` and unavailable alerts
+This preserves the exception type for your existing global exception handler. The controller should also use the actual mapped HTTP status rather than always recording `500`, particularly for validation or downstream errors.
 
-```typescript
-describe('bellIcon additional cases', () => {
-  it('should return notifications_off when alerts are unavailable', () => {
-    component.params = {
-      data: {
-        shipmentSource: 'Navigator',
-        premiumFeatureResponse: {
-          beaconPlus: false,
-          smsNotificationsEnabled: true,
-        },
-      },
-    };
+3\. Confirm the DTO fields and method types
 
-    expect(component.bellIcon).toBe('notifications_off');
-  });
+The sample assumes `ShipmentBookRequest` has `getFacilityId()`, `saveRecord()` accepts numeric status and response time values, and `ObjectMapper` is available. These need to match your actual classes.
 
-  it('should return notifications_active when alerts are enabled and subscribed', () => {
-    component.params = {
-      data: {
-        shipmentSource: 'Other',
-      },
-    };
-    component.icontoggle = true;
+### Expected database records
 
-    expect(component.bellIcon).toBe('notifications_active');
-  });
+| Scenario                     | URL path       | Status  | Response stored             |
+| ---------------------------- | -------------- | ------- | --------------------------- |
+| Shipment booked successfully | /generatelabel | 200     | ShipmentBookResponse JSON   |
+| Shipment booking fails       | /generatelabel | 500*    | Exception details           |
+| CMS child API succeeds       | Child API path | 200     | Existing child API response |
+| CMS child API fails          | Child API path | 4xx/5xx | Existing child API failure  |
 
-  it('should return notifications_none when alerts are enabled but not subscribed', () => {
-    component.params = {
-      data: {
-        shipmentSource: 'Other',
-      },
-    };
-    component.icontoggle = false;
+\*500 is illustrative; use the actual HTTP status returned to the client.
 
-    expect(component.bellIcon).toBe('notifications_none');
-  });
+One important point: This implementation is intended to persist the overall `/generatelabel` request outcome separately from the existing CMS child API records. It does not require modifying the existing child API persistence logic.
 
-  it('should return unavailable tooltip when alerts are not enabled', () => {
-    component.params = {
-      data: {
-        shipmentSource: 'Navigator',
-        premiumFeatureResponse: {
-          beaconPlus: false,
-          smsNotificationsEnabled: false,
-        },
-      },
-    };
-
-    expect(component.bellTooltip).toBe(
-      'Alerts are not available for this shipment.',
-    );
-  });
-});
-```
-
-### 7\. Add tests for `openVoidShipmentDialog`
-
-Your existing tests focus on OptiFreight. Also cover the regular carrier's confirmation path and cancellation.
-
-```typescript
-describe('openVoidShipmentDialog additional cases', () => {
-  it('should show the regular void shipment dialog for a non-OptiFreight carrier', () => {
-    const dialogRefMock = {
-      componentInstance: {
-        data: {
-          buttons: [{}, { hideButton: false }],
-        },
-        actionButtonClicked: {
-          subscribe: jest.fn(),
-        },
-      },
-      close: jest.fn(),
-    };
-
-    const dialogSpy = jest
-      .spyOn(component.dialog, 'open')
-      .mockReturnValue(dialogRefMock as any);
-
-    component.isVoidShipmentDisabled = false;
-    component.params = {
-      data: {
-        carrier: 'fedex',
-      },
-    };
-
-    component.openVoidShipmentDialog('123');
-
-    expect(dialogSpy).toHaveBeenCalled();
-
-    const config = dialogSpy.mock.calls[0][1];
-
-    expect(config.data.confirmation).toBe(
-      SHIPPING_LABEL_CONSTANTS.VOIDSHIPMENT_DIALOGUE_CONSTANTS.CONFIRMATION,
-    );
-
-    expect(config.data.messageLink).toBeUndefined();
-  });
-
-  it('should not open a dialog when shipment voiding is disabled', () => {
-    const dialogSpy = jest.spyOn(component.dialog, 'open');
-
-    component.isVoidShipmentDisabled = true;
-    component.openVoidShipmentDialog('123');
-
-    expect(dialogSpy).not.toHaveBeenCalled();
-  });
-});
-```
-
-### 8\. Re-run coverage for the component
-
-Run the same Jest command you used previously, with coverage enabled for this component. For example, if your project supports the standard Jest flags:
-
-```bash
-npx jest src/app/components/actions-sidebar-cell-renderer/actions-sidebar-cell-renderer.component.spec.ts --coverage --collectCoverageFrom="src/app/components/actions-sidebar-cell-renderer/actions-sidebar-cell-renderer.component.ts"
-```
-
-Check the output for the component's statement, branch, function, and line percentages.
-
-Important: These additions target several missing paths, but I can't guarantee 100% coverage without rerunning the tests against your exact project and inspecting the updated uncovered-line report. Your original report also identifies lines `236–240`, `247`, and `380–386`, which may require additional tests for the specific branches in those sections. Aim for 100% in all four columns, not just statements or lines.
+If you share the `CMSRecordUtil.saveRecord()` method signature and `ShipmentBookRequest` DTO, I can give you the exact production-ready controller implementation with proper exception handling, JSON serialization, and no duplicate records.
