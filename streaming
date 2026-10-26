@@ -1,18 +1,3 @@
-You can use the existing `cmsRecordUtil.saveRecord()` method inside your `shipmentBook()` controller to persist both success and failure logs for the `/generatelabel` endpoint.
-
-The implementation will work as follows:
-
-* Success: When `bookShipmentGenerateLabel()` completes successfully, save the request and response with HTTP status `200`.
-
-* Failure: If `bookShipmentGenerateLabel()` throws an exception, catch it, save the request and error details with the appropriate HTTP status, and rethrow the exception.
-
-* Existing behavior: Keep the current SLF4J logging and API response handling unchanged.
-
-* Database: Use the existing `cmsRecordUtil.saveRecord()` method without introducing another persistence method.
-
-### Updated `shipmentBook()` controller method
-
-```java
 
 @PostMapping("/generatelabel")
 public ResponseEntity<ShipmentBookResponse> shipmentBook(
@@ -40,19 +25,19 @@ public ResponseEntity<ShipmentBookResponse> shipmentBook(
                 .setMessage("Response for book shipment request for source : " + source)
                 .log();
 
-        // Persist successful generateLabel API response
-        cmsRecordUtil.saveRecord(
+        // Persist successful API execution
+        saveGenerateLabelRecord(
                 urlPath,
                 HttpStatus.OK.value(),
                 source,
-                objectMapper.writeValueAsString(shipmentBookRequest),
-                objectMapper.writeValueAsString(shipmentBookResponse),
+                null,
+                null,
                 requestId,
                 shipmentBookRequest.getFacilityId(),
                 System.currentTimeMillis() - startTime
         );
 
-        return new ResponseEntity<>(shipmentBookResponse, HttpStatus.OK);
+        return ResponseEntity.ok(shipmentBookResponse);
 
     } catch (Exception ex) {
 
@@ -61,85 +46,45 @@ public ResponseEntity<ShipmentBookResponse> shipmentBook(
                 .setCause(ex)
                 .log("Failed to book shipment for source : {}", source);
 
-        // Persist failed generateLabel API response
-        try {
-            cmsRecordUtil.saveRecord(
-                    urlPath,
-                    HttpStatus.INTERNAL_SERVER_ERROR.value(),
-                    source,
-                    objectMapper.writeValueAsString(shipmentBookRequest),
-                    ex.getMessage(),
-                    requestId,
-                    shipmentBookRequest.getFacilityId(),
-                    System.currentTimeMillis() - startTime
-            );
-        } catch (Exception loggingException) {
-            log.error("Failed to persist generateLabel failure record",
-                    loggingException);
-        }
+        // Persist failed API execution
+        saveGenerateLabelRecord(
+                urlPath,
+                HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                source,
+                null,
+                ex.getMessage(),
+                requestId,
+                shipmentBookRequest.getFacilityId(),
+                System.currentTimeMillis() - startTime
+        );
 
-        throw new RuntimeException(ex);
+        throw ex;
     }
 }
-```
 
-### Required changes
+private void saveGenerateLabelRecord(
+        String urlPath,
+        int statusCode,
+        String source,
+        String requestJson,
+        String responseJson,
+        String requestId,
+        String facilityId,
+        long responseTime) {
 
-Inject `ObjectMapper` into your controller:
-
-```java
-private final ObjectMapper objectMapper;
-```
-
-Add the import:
-
-```java
-import com.fasterxml.jackson.databind.ObjectMapper;
-```
-
-Since you're already using `@RequiredArgsConstructor`, constructor injection will be handled by Lombok.
-
-### Important improvements
-
-There are three things I recommend adjusting before using this in production.
-
-1\. Avoid duplicate records when persistence fails
-
-In the implementation above, if `saveRecord()` fails after a successful shipment booking, the outer `catch` will execute and attempt to save a failure record. That would incorrectly classify a successful shipment as failed.
-
-To avoid this, isolate persistence from the shipment-processing `try-catch`, or use a separate helper method that catches persistence exceptions without changing the original API result.
-
-2\. Preserve the original exception
-
-Instead of:
-
-```java
-throw new RuntimeException(ex);
-```
-
-Prefer rethrowing the original runtime exception:
-
-```java
-throw ex;
-```
-
-This preserves the exception type for your existing global exception handler. The controller should also use the actual mapped HTTP status rather than always recording `500`, particularly for validation or downstream errors.
-
-3\. Confirm the DTO fields and method types
-
-The sample assumes `ShipmentBookRequest` has `getFacilityId()`, `saveRecord()` accepts numeric status and response time values, and `ObjectMapper` is available. These need to match your actual classes.
-
-### Expected database records
-
-| Scenario                     | URL path       | Status  | Response stored             |
-| ---------------------------- | -------------- | ------- | --------------------------- |
-| Shipment booked successfully | /generatelabel | 200     | ShipmentBookResponse JSON   |
-| Shipment booking fails       | /generatelabel | 500*    | Exception details           |
-| CMS child API succeeds       | Child API path | 200     | Existing child API response |
-| CMS child API fails          | Child API path | 4xx/5xx | Existing child API failure  |
-
-\*500 is illustrative; use the actual HTTP status returned to the client.
-
-One important point: This implementation is intended to persist the overall `/generatelabel` request outcome separately from the existing CMS child API records. It does not require modifying the existing child API persistence logic.
-
-If you share the `CMSRecordUtil.saveRecord()` method signature and `ShipmentBookRequest` DTO, I can give you the exact production-ready controller implementation with proper exception handling, JSON serialization, and no duplicate records.
+    try {
+        cmsRecordUtil.saveRecord(
+                urlPath,
+                statusCode,
+                source,
+                requestJson,
+                responseJson,
+                requestId,
+                facilityId,
+                responseTime
+        );
+    } catch (Exception loggingException) {
+        log.error("Failed to persist generateLabel API record. Request ID: {}",
+                requestId, loggingException);
+    }
+}
