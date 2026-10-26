@@ -16,28 +16,27 @@ public ResponseEntity<ShipmentBookResponse> shipmentBook(
             .log();
 
     try {
-        ShipmentBookResponse shipmentBookResponse =
+        ShipmentBookResponse response =
                 shipmentBookService.bookShipmentGenerateLabel(
                         shipmentBookRequest, requestId, httpHeaders);
+
+        saveGenerateLabelRecord(
+                urlPath,
+                "200",
+                source,
+                NullNode.getInstance(),
+                NullNode.getInstance(),
+                requestId,
+                shipmentBookRequest.getFacilityId(),
+                System.currentTimeMillis() - startTime
+        );
 
         log.atInfo()
                 .addKeyValue(REQUEST_ID, requestId)
                 .setMessage("Response for book shipment request for source : " + source)
                 .log();
 
-        // Persist successful API execution
-        saveGenerateLabelRecord(
-                urlPath,
-                HttpStatus.OK.value(),
-                source,
-                null,
-                null,
-                requestId,
-                shipmentBookRequest.getFacilityId(),
-                System.currentTimeMillis() - startTime
-        );
-
-        return ResponseEntity.ok(shipmentBookResponse);
+        return ResponseEntity.ok(response);
 
     } catch (Exception ex) {
 
@@ -46,13 +45,12 @@ public ResponseEntity<ShipmentBookResponse> shipmentBook(
                 .setCause(ex)
                 .log("Failed to book shipment for source : {}", source);
 
-        // Persist failed API execution
         saveGenerateLabelRecord(
                 urlPath,
-                HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                "500",
                 source,
-                null,
-                ex.getMessage(),
+                NullNode.getInstance(),
+                createErrorResponse(ex),
                 requestId,
                 shipmentBookRequest.getFacilityId(),
                 System.currentTimeMillis() - startTime
@@ -62,15 +60,23 @@ public ResponseEntity<ShipmentBookResponse> shipmentBook(
     }
 }
 
+private JsonNode createErrorResponse(Exception ex) {
+    return com.fasterxml.jackson.databind.node.JsonNodeFactory.instance
+            .objectNode()
+            .put("error", ex.getMessage() != null
+                    ? ex.getMessage()
+                    : "Shipment booking failed");
+}
+
 private void saveGenerateLabelRecord(
         String urlPath,
-        int statusCode,
+        String statusCode,
         String source,
-        String requestJson,
-        String responseJson,
+        JsonNode requestJson,
+        JsonNode responseJson,
         String requestId,
         String facilityId,
-        long responseTime) {
+        Long responseTimeMs) {
 
     try {
         cmsRecordUtil.saveRecord(
@@ -81,10 +87,12 @@ private void saveGenerateLabelRecord(
                 responseJson,
                 requestId,
                 facilityId,
-                responseTime
+                responseTimeMs
         );
     } catch (Exception loggingException) {
-        log.error("Failed to persist generateLabel API record. Request ID: {}",
-                requestId, loggingException);
+        log.error(
+                "Failed to persist generateLabel API log. Request ID: {}",
+                requestId,
+                loggingException);
     }
 }
